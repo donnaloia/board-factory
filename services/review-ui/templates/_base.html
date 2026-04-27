@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}Board Factory{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <a class="brand" href="/">Board Factory</a>
+    <nav>
+      <a href="/" {% if request.url.path == "/" %}class="current"{% endif %}>Overview</a>
+      <a href="/spaces" {% if request.url.path == "/spaces" %}class="current"{% endif %}>Board spaces</a>
+      <a href="/centerpiece" {% if request.url.path == "/centerpiece" %}class="current"{% endif %}>Centerpiece</a>
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer>
+    <span class="muted">Board Factory review UI · http://localhost:8473</span>
+  </footer>
+</body>
+</html>

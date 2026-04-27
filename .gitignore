@@ -1,0 +1,13 @@
+workspace/style/*
+workspace/candidates/*
+workspace/cleaned/*
+workspace/approved/*
+workspace/refinements/*
+workspace/preview/*
+workspace/logs/*
+!workspace/**/.gitkeep
+board_assets/*
+!board_assets/.gitkeep
+__pycache__/
+*.pyc
+.DS_Store

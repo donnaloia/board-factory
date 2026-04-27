@@ -1,0 +1,150 @@
+# Example catalog — copy this to catalog/board.yml and edit for your board.
+#
+# Coordinates are in source-mockup pixels (top-left = 0,0).
+# target_size is in true output pixels (what your engine receives).
+
+project: damnation-board
+
+style:
+  reference_image: mockup/board.png
+  palette_size: 24
+  prompt: >-
+    dark macabre pixel art, gothic horror theme, deep red and gold accents on
+    aged wood and stone, occult symbols, hand-painted shading
+
+board_size: [2048, 1126]
+
+centerpiece:
+  bbox: [760, 280, 1290, 880]
+  target_size: [256, 280]
+  prompt: >-
+    horned demon figure with glowing eyes, surrounded by stacks of gold coins
+    and a roulette wheel, swirling smoke, ominous and theatrical
+  needs_active: true
+  active_kind: pulse
+
+board_spaces:
+  size: [48, 48]
+  layout:
+    bottom_row:
+      count: 11
+      start: [0, 1078]
+      spacing: 184
+      axis: x
+    top_row:
+      count: 11
+      start: [0, 0]
+      spacing: 184
+      axis: x
+    left_col:
+      count: 9
+      start: [0, 96]
+      spacing: 110
+      axis: y
+    right_col:
+      count: 9
+      start: [2000, 96]
+      spacing: 110
+      axis: y
+  designs:
+    - id: corner_jail
+      prompt: "JAIL board space, prison bars, skull motif, red corner"
+      positions: [bottom_row.0]
+    - id: corner_fail
+      prompt: "FAIL board space, broken sword, red corner"
+      positions: [bottom_row.10]
+    - id: corner_blank_a
+      prompt: "decorative corner space, dark wood, gold trim"
+      positions: [top_row.0]
+    - id: corner_blank_b
+      prompt: "decorative corner space, dark wood, gold trim, mirrored"
+      positions: [top_row.10]
+    - id: go_damnation
+      prompt: "GO DAMNATION arrow, red banner, ornate gold lettering"
+      positions: [bottom_row.5]
+    - id: damnation_label
+      prompt: "DAMNATION header label, red banner, gothic typeface"
+      positions: [top_row.5]
+    - id: fate_label
+      prompt: "FATE header label, parchment scroll, demonic sigil"
+      positions: [top_row.7]
+    - id: community_chest
+      prompt: "COMMUNITY CHEST corner, ornate wooden chest with gold lock"
+      positions: [bottom_row.8]
+    - id: blank_property_a
+      prompt: "small board property tile, dark stone, faint occult sigil"
+      positions:
+        [bottom_row.1, bottom_row.2, bottom_row.3, bottom_row.4]
+    - id: blank_property_b
+      prompt: "small board property tile, weathered wood, brass fittings"
+      positions:
+        [bottom_row.6, bottom_row.7, bottom_row.9]
+    - id: blank_property_c
+      prompt: "small board property tile, red stone, gilded frame"
+      positions:
+        [top_row.1, top_row.2, top_row.3, top_row.4, top_row.6, top_row.8, top_row.9]
+    - id: blank_side
+      prompt: "side-aligned property tile, dark wood with gold rivets"
+      positions:
+        [
+          left_col.0, left_col.1, left_col.2, left_col.3, left_col.4,
+          left_col.5, left_col.6, left_col.7, left_col.8,
+          right_col.0, right_col.1, right_col.2, right_col.3, right_col.4,
+          right_col.5, right_col.6, right_col.7, right_col.8,
+        ]
+
+feature_panels:
+  panels:
+    - id: skeleton_poker
+      bbox: [120, 100, 410, 380]
+      target_size: [128, 128]
+      prompt: "two skeletons playing poker at a green felt table, dim candlelight"
+      needs_active: true
+      active_kind: glow
+    - id: flaming_dice
+      bbox: [430, 100, 720, 380]
+      target_size: [128, 128]
+      prompt: "burning dice atop a wooden plinth, flames curling around them"
+      needs_active: true
+      active_kind: pulse
+    - id: dice_trio
+      bbox: [1300, 100, 1620, 380]
+      target_size: [128, 128]
+      prompt: "three white dice tumbling, dramatic shadow"
+      needs_active: true
+      active_kind: pulse
+    - id: brazier_demon
+      bbox: [1640, 100, 1930, 380]
+      target_size: [128, 128]
+      prompt: "small flaming brazier with a horned demon emerging from the fire"
+      needs_active: true
+      active_kind: flicker
+    - id: caged_fire
+      bbox: [120, 600, 410, 880]
+      target_size: [128, 128]
+      prompt: "iron cage filled with red fire, smoke leaking out"
+      needs_active: true
+      active_kind: flicker
+    - id: free_to_abyss
+      bbox: [1300, 380, 1620, 600]
+      target_size: [128, 128]
+      prompt: "FREE TO THE ABYSS arcade-style sign, red glow, occult symbol"
+      needs_active: false
+    - id: roulette_panel
+      bbox: [1310, 600, 1620, 880]
+      target_size: [128, 128]
+      prompt: "ornate roulette wheel viewed from above, gold trim"
+      needs_active: true
+      active_kind: pulse
+    - id: eye_pair
+      bbox: [620, 620, 920, 800]
+      target_size: [128, 96]
+      prompt: "pair of disembodied bloodshot eyeballs, glistening, gold trinkets"
+      needs_active: true
+      active_kind: pulse
+    - id: slot_doom
+      bbox: [1640, 600, 1930, 880]
+      target_size: [128, 128]
+      prompt: "vintage slot machine with the word DOOM on its display"
+      needs_active: true
+      active_kind: flicker

@@ -1,0 +1,24 @@
+[project]
+name = "boardfactory"
+version = "0.1.0"
+description = "Pixel-art board game asset pipeline"
+requires-python = ">=3.12"
+dependencies = [
+  "click>=8.1,<9.0",
+  "pydantic>=2.7,<3.0",
+  "pyyaml>=6.0,<7.0",
+  "pillow>=10.4,<12.0",
+  "httpx>=0.27,<1.0",
+  "rich>=13.7,<15.0",
+]
+
+[project.scripts]
+boardfactory = "boardfactory.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["boardfactory*"]

@@ -1,0 +1,49 @@
+{% extends "_base.html" %}
+{% block title %}{{ project }} · Board Factory{% endblock %}
+
+{% block content %}
+<h1>{{ project }}</h1>
+<p class="muted">Approve assets in each section. When everything is approved, run <code>make states &amp;&amp; make preview &amp;&amp; make export</code>.</p>
+
+<section class="overview">
+  <a class="card {{ 'done' if centerpiece.approved else 'pending' }}" href="/centerpiece">
+    <div class="card-label">Centerpiece</div>
+    <div class="card-status">
+      {% if centerpiece.approved %}
+        <span class="badge ok">approved</span>
+      {% else %}
+        <span class="badge warn">{{ centerpiece.candidates }} candidates</span>
+      {% endif %}
+    </div>
+    <div class="card-meta">{{ centerpiece.refinements }} refinements</div>
+  </a>
+
+  <a class="card" href="/spaces">
+    <div class="card-label">Board spaces</div>
+    <div class="card-status">
+      <span class="badge {{ 'ok' if spaces|selectattr('approved')|list|length == spaces|length else 'warn' }}">
+        {{ spaces|selectattr('approved')|list|length }} / {{ spaces|length }} designs
+      </span>
+    </div>
+    <div class="card-meta">
+      {{ spaces|sum(attribute='uses') }} board positions total
+    </div>
+  </a>
+</section>
+
+<h2>Feature panels</h2>
+<section class="panel-grid">
+  {% for p in panels %}
+    <a class="card panel-card {{ 'done' if p.approved else 'pending' }}" href="/panels/{{ p.id }}">
+      <div class="card-label">{{ p.id }}</div>
+      <div class="card-status">
+        {% if p.approved %}
+          <span class="badge ok">approved</span>
+        {% else %}
+          <span class="badge warn">{{ p.candidates }} candidates</span>
+        {% endif %}
+      </div>
+    </a>
+  {% endfor %}
+</section>
+{% endblock %}
