@@ -1,3 +1,4 @@
+# Legacy flat layout (migrated boards live under boards/)
 workspace/style/*
 workspace/candidates/*
 workspace/cleaned/*
@@ -8,6 +9,23 @@ workspace/logs/*
 !workspace/**/.gitkeep
 board_assets/*
 !board_assets/.gitkeep
+
+# Per-board workspace artifacts
+boards/*/workspace/style/*
+boards/*/workspace/candidates/*
+boards/*/workspace/cleaned/*
+boards/*/workspace/approved/*
+boards/*/workspace/refinements/*
+boards/*/workspace/preview/*
+boards/*/workspace/logs/*
+boards/*/workspace/history/*
+boards/*/workspace/live/*
+boards/*/workspace/frames/*
+boards/*/workspace/.costs.jsonl
+boards/*/board_assets/*
+!boards/*/board_assets/.gitkeep
+!boards/*/workspace/**/.gitkeep
+
 __pycache__/
 *.pyc
 .DS_Store

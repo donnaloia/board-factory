@@ -1,0 +1,92 @@
+{% extends "_base.html" %}
+{% block title %}Boards · Board Factory{% endblock %}
+
+{% block content %}
+<section class="boards-stage">
+  <header class="boards-head">
+    <span class="eyebrow">Issue Selection</span>
+    <h1 class="display-xl">Boards</h1>
+    <p class="body-lead">
+      Each board is a self-contained project &mdash; its own catalog, mockup, and assets.
+      Open one to keep working, or start a new one.
+    </p>
+  </header>
+
+  {% if boards %}
+  <ul class="boards-grid" role="list">
+    {% for b in boards %}
+    <li class="board-card">
+      <a class="board-card-link" href="/b/{{ b.id }}/">
+        <div class="board-card-thumb"
+             {% if b.has_mockup %}style="background-image:url('/b/{{ b.id }}/mockup/board.png')"{% endif %}>
+          {% if not b.has_mockup %}<span class="thumb-empty">no mockup</span>{% endif %}
+        </div>
+        <div class="board-card-meta">
+          <h2 class="board-card-title">{{ b.project }}</h2>
+          <p class="board-card-id">boards/{{ b.id }}/</p>
+        </div>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="body-lead muted">No boards yet. Create the first one below.</p>
+  {% endif %}
+
+  <div class="boards-new">
+    <span class="eyebrow">Begin</span>
+    <h2 class="display">New board</h2>
+    <form id="new-board-form" class="new-board-form">
+      <label class="field">
+        <span class="field-label">Display name</span>
+        <input type="text" name="project_name" id="new-board-name"
+               placeholder="My Next Board" autocomplete="off" required>
+      </label>
+      <label class="field">
+        <span class="field-label">URL slug</span>
+        <input type="text" name="board_id" id="new-board-id"
+               placeholder="my-next-board"
+               pattern="[a-z0-9][a-z0-9_-]*"
+               autocomplete="off" required>
+        <span class="field-hint">lowercase letters, digits, dashes</span>
+      </label>
+      <button type="submit" class="editorial-action primary">
+        <span class="arrow">→</span>
+        <span>Create board</span>
+      </button>
+    </form>
+  </div>
+</section>
+
+<script>
+(function () {
+  const form = document.getElementById('new-board-form');
+  const nameInput = document.getElementById('new-board-name');
+  const idInput = document.getElementById('new-board-id');
+
+  // Auto-suggest slug from display name as the user types.
+  let userTouchedId = false;
+  idInput.addEventListener('input', () => { userTouchedId = true; });
+  nameInput.addEventListener('input', () => {
+    if (userTouchedId) return;
+    idInput.value = nameInput.value.toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 64);
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    const res = await fetch('/api/boards', { method: 'POST', body: fd });
+    if (!res.ok) {
+      const t = await res.text();
+      alert('Could not create board: ' + t);
+      return;
+    }
+    const data = await res.json();
+    window.location.href = data.url;
+  });
+})();
+</script>
+{% endblock %}

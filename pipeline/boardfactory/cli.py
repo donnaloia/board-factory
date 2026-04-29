@@ -8,11 +8,13 @@ requires human review and is invoked separately (states, preview, export).
 
 from __future__ import annotations
 
+import os
 import sys
 
 import click
 
-from . import __version__, config
+from . import __version__, boards, config
+from .geometry import MockupAspectMismatch, validate_mockup_dimensions
 from .progress import (
     RunStats,
     append_run_log,
@@ -35,11 +37,31 @@ from .steps.states import do_states
 from .steps.style_lock import do_style_lock
 
 
+def _resolve_board() -> str:
+    """Pick the active board id. Order: --board flag (handled by Click) →
+    BOARDFACTORY_BOARD env → only existing board → migrate legacy → error."""
+    env_board = (os.environ.get("BOARDFACTORY_BOARD") or "").strip()
+    if env_board:
+        return env_board
+    only = boards.default_board_id()
+    if only:
+        return only
+    # First-run migration of the classic flat layout.
+    migrated = boards.migrate_legacy_flat_layout()
+    if migrated:
+        console.print(f"[yellow]→[/yellow] Migrated legacy layout to boards/{migrated.id}/")
+        return migrated.id
+    raise click.UsageError(
+        "No board found. Create one with `boardfactory new <board-id>` or set "
+        "BOARDFACTORY_BOARD."
+    )
+
+
 def _load_catalog() -> Catalog:
     if not config.CATALOG_PATH.exists():
         raise click.UsageError(
-            f"Catalog not found at {config.CATALOG_PATH.relative_to(config.REPO_ROOT)}. "
-            f"Copy catalog/example.yml to catalog/board.yml and edit it."
+            f"Catalog not found at {config.CATALOG_PATH}. "
+            f"This board has no catalog.yml yet."
         )
     return Catalog.load(config.CATALOG_PATH)
 
@@ -58,10 +80,73 @@ def _print_header(label: str, catalog: Catalog) -> None:
     )
 
 
+def _validate_mockup(catalog: Catalog) -> None:
+    """Check the mockup file against the catalog before running any step that uses it.
+
+    Aspect ratio drift > 5% raises a hard error (img2img references would be
+    visibly stretched). Dimension differences within tolerance just print a
+    note since the pipeline scales bboxes from canvas to mockup space at crop
+    time and that's fine for any roughly-correct aspect ratio.
+    """
+    mockup_path = config.BOARD_ROOT / catalog.style.reference_image
+    try:
+        mockup_size, warnings = validate_mockup_dimensions(
+            mockup_path,
+            canvas_size=catalog.board_size,
+            strict=True,
+        )
+    except FileNotFoundError as e:
+        raise click.UsageError(str(e)) from None
+    except MockupAspectMismatch as e:
+        raise click.UsageError(
+            f"Mockup aspect ratio is incompatible with the catalog's canvas.\n\n{e}"
+        ) from None
+
+    for w in warnings:
+        console.print(f"[yellow]![/yellow] {w}")
+
+
 @click.group(help="Board Factory — pixel-art board game asset pipeline.")
 @click.version_option(__version__)
-def cli() -> None:
-    config.ensure_dirs()
+@click.option(
+    "--board", "board_id",
+    default=None,
+    help="Board id to operate on (overrides BOARDFACTORY_BOARD).",
+)
+@click.pass_context
+def cli(ctx: click.Context, board_id: str | None) -> None:
+    if board_id:
+        config.set_board(board_id)
+    else:
+        # Defer to env / discovery, but allow board-list / new commands to skip.
+        if ctx.invoked_subcommand not in ("list", "new"):
+            config.set_board(_resolve_board())
+            config.ensure_dirs()
+
+
+@cli.command(name="list", help="List boards under boards/.")
+def list_cmd() -> None:
+    found = boards.list_boards()
+    if not found:
+        # Try a migration on first list-call.
+        migrated = boards.migrate_legacy_flat_layout()
+        if migrated:
+            console.print(f"[yellow]→[/yellow] Migrated legacy layout to boards/{migrated.id}/")
+            found = boards.list_boards()
+    if not found:
+        console.print("[dim]no boards yet — create one with `boardfactory new <id>`[/dim]")
+        return
+    for b in found:
+        flag = "✓" if b.has_catalog else "·"
+        console.print(f"  {flag} [bold]{b.id}[/bold]  [dim]{b.project}[/dim]")
+
+
+@cli.command(help="Create a new empty board.")
+@click.argument("board_id")
+@click.option("--name", "project_name", default=None, help="Display name (default: board id).")
+def new(board_id: str, project_name: str | None) -> None:
+    info = boards.create_board(board_id, project_name=project_name)
+    console.print(f"[green]✓[/green] Created board [bold]{info.id}[/bold] at boards/{info.id}/")
 
 
 @cli.command(help="Validate the catalog YAML against the schema.")
@@ -80,6 +165,7 @@ def style() -> None:
     cat = _load_catalog()
     run = RunStats(label="style")
     _print_header("Style Lock", cat)
+    _validate_mockup(cat)
     do_style_lock(run, cat)
     print_run_footer(run)
     append_run_log(run, config.LOGS_DIR / "run.log")
@@ -91,6 +177,7 @@ def generate() -> None:
     provider = get_provider()
     run = RunStats(label="generate")
     _print_header("Generate", cat)
+    _validate_mockup(cat)
     spent = 0.0
     spent += do_generate_spaces(run, cat, provider)
     spent += do_generate_panels(run, cat, provider)
@@ -129,6 +216,7 @@ def preview() -> None:
     cat = _load_catalog()
     run = RunStats(label="preview")
     _print_header("Composite Preview", cat)
+    _validate_mockup(cat)
     do_preview(run, cat)
     print_run_footer(run, "[bold]Next:[/bold] [cyan]make export[/cyan]")
     append_run_log(run, config.LOGS_DIR / "run.log")
@@ -150,6 +238,7 @@ def run() -> None:
     provider = get_provider()
     rs = RunStats(label="run")
     _print_header("Full Run", cat)
+    _validate_mockup(cat)
 
     do_style_lock(rs, cat)
     spent = 0.0

@@ -1,0 +1,32 @@
+{% extends "_base.html" %}
+{% block title %}Setup · {{ project }}{% endblock %}
+
+{% block content %}
+<section class="setup-stage" data-reload-on="style">
+  <span class="eyebrow">First run</span>
+  <h1 class="display-xl">{{ project }}</h1>
+  <p class="body-lead">
+    Before generating anything, we need to extract the shared palette from your mockup.
+    Every tile generated after this point will share that palette &mdash; that's what gives the board its visual coherence.
+  </p>
+
+  {% if mockup_present %}
+    <div class="mockup-preview">
+      <img src="/b/{{ board_id }}/mockup/{{ mockup_rel.split('/')[-1] }}" alt="reference mockup">
+    </div>
+    <p class="caption">{{ mockup_rel }}</p>
+    <form method="post" action="/b/{{ board_id }}/actions/style" data-action>
+      <button type="submit" class="editorial-action primary">
+        <span class="arrow">→</span>
+        <span>Extract style from mockup</span>
+        <span class="est">free · ~5s</span>
+      </button>
+    </form>
+  {% else %}
+    <p class="body-lead" style="color: var(--ember-bright)">
+      No mockup found at <code>{{ mockup_rel }}</code> inside this board.
+      Drop a 16:9 PNG into <code>boards/{{ board_id }}/mockup/</code> and refresh.
+    </p>
+  {% endif %}
+</section>
+{% endblock %}

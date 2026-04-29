@@ -1,8 +1,8 @@
 # All Board Factory configuration lives in this file.
 #
-# Fill in your PIXELLAB_API_KEY below before your first `make up`.
-# To use the mock provider (no API key needed) for testing the pipeline
-# structure, leave the key blank and set BOARDFACTORY_PROVIDER: mock.
+# Fill in your PIXELLAB_API_KEY below before your first `make up` if you
+# want real generations. Without a key (or with BOARDFACTORY_PROVIDER: mock)
+# the pipeline uses a free local mock provider for testing the structure.
 #
 # To keep your keys out of git after editing, run once:
 #   make protect-keys
@@ -23,7 +23,7 @@ services:
       PIXELLAB_API_KEY: ""
 
       # ─── Pipeline knobs ─────────────────────────────────────────────────────
-      BOARDFACTORY_PROVIDER: pixellab        # pixellab | mock
+      BOARDFACTORY_PROVIDER: mock              # pixellab | mock
       BOARDFACTORY_PALETTE_SIZE: "24"
       BOARDFACTORY_SPACE_CANDIDATES: "3"
       BOARDFACTORY_PANEL_CANDIDATES: "6"
@@ -35,8 +35,8 @@ services:
 
   review-ui:
     build:
-      context: ./services/review-ui
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/review-ui/Dockerfile
     ports:
       - "8473:8473"
     volumes:
@@ -44,5 +44,12 @@ services:
     environment:
       # Inpainting needs the same API key as the pipeline.
       PIXELLAB_API_KEY: ""
-      BOARDFACTORY_PROVIDER: pixellab
+
+      # The web app runs the pipeline in-process — same knobs as the CLI service.
+      BOARDFACTORY_PROVIDER: mock              # pixellab | mock
+      BOARDFACTORY_PALETTE_SIZE: "24"
+      BOARDFACTORY_SPACE_CANDIDATES: "3"
+      BOARDFACTORY_PANEL_CANDIDATES: "6"
+      BOARDFACTORY_CENTERPIECE_CANDIDATES: "12"
+
       BOARDFACTORY_REPO: /repo

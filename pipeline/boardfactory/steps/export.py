@@ -11,9 +11,15 @@ from __future__ import annotations
 import json
 import shutil
 
-from .. import config
+from .. import assets, config
 from ..progress import RunStats, progress_bar, step
 from ..schemas import Catalog
+
+
+def _resolve_asset(category: str, asset_id: str, legacy):
+    """Prefer live/<asset_id>.png over approved/<asset_id>.png."""
+    p = assets.live_path(category, asset_id)
+    return p if p.exists() else legacy
 
 
 def do_export(run: RunStats, catalog: Catalog) -> None:
@@ -29,7 +35,8 @@ def do_export(run: RunStats, catalog: Catalog) -> None:
         files_to_copy: list[tuple] = []  # (src, dst, manifest_action)
 
         # Centerpiece
-        cp_src = config.APPROVED_DIR / "centerpiece.png"
+        cp_src = _resolve_asset("centerpiece", "centerpiece",
+                                config.APPROVED_DIR / "centerpiece.png")
         if cp_src.exists():
             cp_dst = config.EXPORT_DIR / "centerpiece" / "centerpiece.png"
             files_to_copy.append((cp_src, cp_dst, None))
@@ -49,7 +56,8 @@ def do_export(run: RunStats, catalog: Catalog) -> None:
 
         # Feature panels
         for panel in catalog.all_panels():
-            src = config.APPROVED_DIR / "panels" / f"{panel.id}.png"
+            src = _resolve_asset("panels", panel.id,
+                                 config.APPROVED_DIR / "panels" / f"{panel.id}.png")
             if not src.exists():
                 s.failures.append(f"panel:{panel.id} not approved")
                 continue
@@ -71,19 +79,20 @@ def do_export(run: RunStats, catalog: Catalog) -> None:
 
         # Board spaces — record every position that uses each design
         for design in catalog.all_space_designs():
-            src = config.APPROVED_DIR / "spaces" / f"{design.id}.png"
+            src = _resolve_asset("spaces", design.id,
+                                 config.APPROVED_DIR / "spaces" / f"{design.id}.png")
             if not src.exists():
                 s.failures.append(f"space:{design.id} not approved")
                 continue
             dst = config.EXPORT_DIR / "spaces" / f"{design.id}.png"
             files_to_copy.append((src, dst, None))
             for ref in design.positions:
-                pos = catalog.board_spaces.resolve_position(ref)
+                x, y, w, h = catalog.board_spaces.resolve_position(ref)
                 manifest["board_spaces"].append({
                     "design_id": design.id,
                     "file": f"spaces/{design.id}.png",
-                    "position": list(pos),
-                    "size": list(catalog.board_spaces.size),
+                    "position": [x, y],
+                    "size": [w, h],
                     "layout_ref": ref,
                 })
 

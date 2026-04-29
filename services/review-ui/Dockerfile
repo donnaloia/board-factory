@@ -7,12 +7,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY requirements.txt /app/
+COPY services/review-ui/requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY server.py /app/
-COPY templates /app/templates
-COPY static /app/static
+# Install the boardfactory pipeline as an editable package so the web app
+# can call its steps directly (style, generate, cleanup, etc.) via the
+# pipeline_adapters module.
+COPY pipeline/requirements.txt /tmp/pipeline-requirements.txt
+RUN pip install --no-cache-dir -r /tmp/pipeline-requirements.txt
+COPY pipeline/pyproject.toml  /tmp/pipeline/pyproject.toml
+COPY pipeline/boardfactory    /tmp/pipeline/boardfactory
+RUN pip install --no-cache-dir -e /tmp/pipeline
+
+# Application code
+COPY services/review-ui/server.py             /app/
+COPY services/review-ui/board_svg.py          /app/
+COPY services/review-ui/spec_data.py          /app/
+COPY services/review-ui/jobs.py               /app/
+COPY services/review-ui/cost_ledger.py        /app/
+COPY services/review-ui/pipeline_adapters.py  /app/
+COPY services/review-ui/templates             /app/templates
+COPY services/review-ui/static                /app/static
 
 EXPOSE 8473
 CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8473"]

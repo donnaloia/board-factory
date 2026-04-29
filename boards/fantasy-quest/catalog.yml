@@ -1,0 +1,26 @@
+project: Fantasy Quest
+version: 1
+board_size:
+- 1920
+- 1080
+style:
+  reference_image: mockup/board.png
+  palette_size: 24
+  prompt: ''
+board_spaces:
+  layout: {}
+  designs: []
+feature_panels:
+  panels: []
+centerpiece:
+  bbox:
+  - 780
+  - 280
+  - 1140
+  - 800
+  target_size:
+  - 360
+  - 520
+  prompt: ''
+  needs_active: false
+  active_kind: none

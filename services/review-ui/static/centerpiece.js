@@ -1,61 +1,83 @@
-/* Centerpiece mask-and-refine canvas tool.
+/* Centerpiece mask-and-refine canvas.
  *
- * Draws the current approved centerpiece on a canvas and lets the user mark
- * regions to regenerate. Two tools:
- *   - Rectangle: click and drag to mark a rectangular region
- *   - Brush: click and drag (or shift+drag) to paint freeform
+ * Lets the user draw a rectangle (default) or paint freeform on the centerpiece
+ * to mark regions for inpainting. The refine action submits the mask to the
+ * /actions/refine endpoint as a Job; jobs.js handles UI updates.
  *
- * Mask is sent to the server as a base64 PNG with white = regenerate, black = preserve.
+ * Tool toggles in the editorial UI are <button data-tool="rect|brush|clear">.
+ * The form is <form id="cp-refine-form">; we populate the hidden mask_b64
+ * input on submit.
  */
 
 (function () {
   const canvas = document.getElementById("cp-canvas");
+  const source = document.getElementById("cp-source");
+  if (!canvas || !source) return;
+
   const ctx = canvas.getContext("2d");
-  const status = document.getElementById("cp-status");
-  const toolRect = document.getElementById("tool-rect");
-  const toolBrush = document.getElementById("tool-brush");
-  const toolClear = document.getElementById("tool-clear");
-  const refineBtn = document.getElementById("refine-btn");
-  const promptHint = document.getElementById("prompt-hint");
+  const form = document.getElementById("cp-refine-form");
+  const maskInput = document.getElementById("cp-mask-input");
+  const toolButtons = document.querySelectorAll(".tool-toggle[data-tool]");
 
-  if (!canvas) return;
-
-  const cfg = window.bfCenterpiece || {};
-  const sourceUrl = cfg.sourceUrl;
-
-  // Off-screen mask layer (matches canvas pixel dims).
+  // Off-screen mask layer mirrors source pixel dimensions.
   const mask = document.createElement("canvas");
-  mask.width = canvas.width;
-  mask.height = canvas.height;
   const maskCtx = mask.getContext("2d");
 
-  let baseImage = null;
+  let baseLoaded = false;
   let tool = "rect";
   let drawing = false;
   let startPt = null;
   let pendingRect = null;
 
   function setTool(t) {
+    if (t === "clear") {
+      maskCtx.clearRect(0, 0, mask.width, mask.height);
+      compose();
+      return;
+    }
     tool = t;
-    toolRect.classList.toggle("active", t === "rect");
-    toolBrush.classList.toggle("active", t === "brush");
+    toolButtons.forEach(b => b.classList.toggle("is-active", b.dataset.tool === t));
     canvas.style.cursor = t === "brush" ? "cell" : "crosshair";
   }
 
+  toolButtons.forEach(b => b.addEventListener("click", () => setTool(b.dataset.tool)));
+
+  function fitToSource() {
+    canvas.width = source.naturalWidth;
+    canvas.height = source.naturalHeight;
+    mask.width = source.naturalWidth;
+    mask.height = source.naturalHeight;
+
+    // Display the canvas at a comfortable viewport-bound size while keeping
+    // its drawing buffer at native pixel size for the mask to be exact.
+    const maxW = Math.min(720, window.innerWidth - 320);
+    const ratio = source.naturalHeight / source.naturalWidth;
+    canvas.style.width = `${maxW}px`;
+    canvas.style.height = `${Math.round(maxW * ratio)}px`;
+    baseLoaded = true;
+    compose();
+  }
+
+  if (source.complete && source.naturalWidth) {
+    fitToSource();
+  } else {
+    source.addEventListener("load", fitToSource);
+  }
+  window.addEventListener("resize", () => { if (baseLoaded) fitToSource(); });
+
   function compose() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (baseImage) {
+    if (baseLoaded) {
       ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(baseImage, 0, 0, canvas.width, canvas.height);
+      ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
     }
-    // Tinted mask overlay, semitransparent.
-    ctx.globalAlpha = 0.45;
+    // Mask overlay — brass tint at low alpha so the underlying art reads through.
+    ctx.globalAlpha = 0.40;
     ctx.drawImage(mask, 0, 0);
     ctx.globalAlpha = 1.0;
 
-    // Live drag rectangle preview.
     if (pendingRect) {
-      ctx.strokeStyle = "rgba(234, 88, 12, 0.95)";
+      ctx.strokeStyle = "rgba(224, 181, 110, 0.95)";
       ctx.lineWidth = 2;
       ctx.setLineDash([6, 4]);
       ctx.strokeRect(pendingRect.x, pendingRect.y, pendingRect.w, pendingRect.h);
@@ -72,18 +94,18 @@
   }
 
   function paintBrush(p) {
-    maskCtx.fillStyle = "rgba(234, 88, 12, 1)";
+    maskCtx.fillStyle = "rgba(224, 181, 110, 1)";
     maskCtx.beginPath();
     maskCtx.arc(p.x, p.y, 18, 0, Math.PI * 2);
     maskCtx.fill();
   }
 
   function commitRect(r) {
-    maskCtx.fillStyle = "rgba(234, 88, 12, 1)";
+    maskCtx.fillStyle = "rgba(224, 181, 110, 1)";
     maskCtx.fillRect(r.x, r.y, r.w, r.h);
   }
 
-  canvas.addEventListener("mousedown", (e) => {
+  canvas.addEventListener("mousedown", e => {
     drawing = true;
     startPt = pt(e);
     if (tool === "rect" || (tool === "brush" && e.shiftKey)) {
@@ -94,7 +116,7 @@
     compose();
   });
 
-  canvas.addEventListener("mousemove", (e) => {
+  canvas.addEventListener("mousemove", e => {
     if (!drawing) return;
     const p = pt(e);
     if (pendingRect) {
@@ -124,14 +146,7 @@
   canvas.addEventListener("mouseup", endDraw);
   canvas.addEventListener("mouseleave", endDraw);
 
-  toolRect.addEventListener("click", () => setTool("rect"));
-  toolBrush.addEventListener("click", () => setTool("brush"));
-  toolClear.addEventListener("click", () => {
-    maskCtx.clearRect(0, 0, mask.width, mask.height);
-    compose();
-  });
-
-  // Convert the mask layer to a black-and-white PNG (white = regenerate).
+  // Convert mask to b/w PNG (white = regenerate, black = preserve).
   function maskToBwPng() {
     const out = document.createElement("canvas");
     out.width = mask.width; out.height = mask.height;
@@ -152,45 +167,21 @@
     return out.toDataURL("image/png");
   }
 
-  refineBtn.addEventListener("click", async () => {
-    const data = maskCtx.getImageData(0, 0, mask.width, mask.height).data;
-    let any = false;
-    for (let i = 3; i < data.length; i += 4) {
-      if (data[i] > 0) { any = true; break; }
-    }
-    if (!any) {
-      status.textContent = "Mark a region first.";
-      return;
-    }
-    refineBtn.disabled = true;
-    status.textContent = "Refining...";
-    const fd = new FormData();
-    fd.append("mask_b64", maskToBwPng());
-    fd.append("prompt_hint", promptHint.value || "");
-    try {
-      const r = await fetch("/centerpiece/refine", { method: "POST", body: fd });
-      const json = await r.json();
-      if (!r.ok) {
-        status.textContent = "Error: " + (json.error || r.status);
-        return;
+  // Bridge between the canvas and the form: populate mask_b64 just before submit.
+  if (form) {
+    form.addEventListener("submit", () => {
+      const data = maskCtx.getImageData(0, 0, mask.width, mask.height).data;
+      let any = false;
+      for (let i = 3; i < data.length; i += 4) {
+        if (data[i] > 0) { any = true; break; }
       }
-      status.textContent = "Saved " + json.refinement + ". Reload to see history.";
-      // Auto-reload after a beat so the new refinement appears in the side list.
-      setTimeout(() => window.location.reload(), 600);
-    } catch (e) {
-      status.textContent = "Network error: " + e;
-    } finally {
-      refineBtn.disabled = false;
-    }
-  });
-
-  // Load source.
-  baseImage = new Image();
-  baseImage.onload = () => compose();
-  baseImage.onerror = () => {
-    status.textContent = "Could not load centerpiece — pick a candidate first.";
-  };
-  baseImage.src = sourceUrl;
+      if (!any) {
+        // Allow submit without a mask only as a safety net — server will refuse
+        // gracefully. For UX, we let the action through and surface server error.
+      }
+      maskInput.value = maskToBwPng();
+    });
+  }
 
   setTool("rect");
 })();

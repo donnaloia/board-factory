@@ -1,0 +1,127 @@
+{% extends "_base.html" %}
+{% block title %}{{ project }} · Board Factory{% endblock %}
+
+{% block breadcrumb %}
+<nav class="section-path" aria-label="breadcrumb">
+  <span class="here">Board</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+<section class="board-stage">
+
+  <header class="board-head">
+    <div class="head-left">
+      <span class="eyebrow">Issue No. 01</span>
+      <h1
+        class="display"
+        id="board-title"
+        data-board-id="{{ board_id }}"
+        data-original="{{ project }}"
+        title="Click to rename"
+      >{{ project }}</h1>
+      <p class="body-lead">
+        Click any cell on the board to open it. Each cell has its own history of
+        generations &mdash; pick whichever version you like, or regenerate to make
+        more.
+      </p>
+    </div>
+
+    <dl class="head-meta">
+      <div class="stat-row">
+        <span class="label">Centerpiece</span>
+        <span class="value">{% if stats.centerpiece_done %}live{% else %}empty{% endif %}</span>
+      </div>
+      <div class="stat-row">
+        <span class="label">Functional</span>
+        <span class="value">{{ stats.panels_done }} / {{ stats.panels_total }}</span>
+      </div>
+      <div class="stat-row">
+        <span class="label">Spaces</span>
+        <span class="value">{{ stats.designs_done }} / {{ stats.designs_total }}</span>
+      </div>
+      <div class="stat-row">
+        <span class="label">Native</span>
+        <span class="value">{{ board_size[0] }} × {{ board_size[1] }}</span>
+      </div>
+    </dl>
+  </header>
+
+  {# ───── Board command strip ─────
+     Sits between the hero and the board itself. Five actions of equal visual
+     weight; the last two are inert placeholders for features in progress.
+  #}
+  <nav class="board-actions" aria-label="Board actions">
+    {% if not has_palette %}
+    <form method="post" action="/b/{{ board_id }}/actions/style" data-action class="board-action-form">
+      <button type="submit" class="board-action is-primary">
+        <span class="board-action-eyebrow">Setup</span>
+        <span class="board-action-label">Extract style from mockup</span>
+        <span class="board-action-est">free &middot; ~5s</span>
+      </button>
+    </form>
+    {% endif %}
+
+    <form method="post" action="/b/{{ board_id }}/actions/generate/spaces" data-action class="board-action-form">
+      <button type="submit" class="board-action">
+        <span class="board-action-eyebrow">Generate</span>
+        <span class="board-action-label">All space designs</span>
+        <span class="board-action-est">~${{ "%.2f"|format(estimates.spaces) }} &middot; ~120s</span>
+      </button>
+    </form>
+
+    <form method="post" action="/b/{{ board_id }}/actions/generate/panels" data-action class="board-action-form">
+      <button type="submit" class="board-action">
+        <span class="board-action-eyebrow">Generate</span>
+        <span class="board-action-label">All functional panels</span>
+        <span class="board-action-est">~${{ "%.2f"|format(estimates.panels) }} &middot; ~180s</span>
+      </button>
+    </form>
+
+    <form method="post" action="/b/{{ board_id }}/actions/preview" data-action class="board-action-form">
+      <button type="submit" class="board-action">
+        <span class="board-action-eyebrow">Composite</span>
+        <span class="board-action-label">Assemble board preview</span>
+        <span class="board-action-est">free &middot; ~5s</span>
+      </button>
+    </form>
+
+    {# Ghosted / inert: planned but not implemented. #}
+    <span class="board-action is-ghosted" aria-disabled="true">
+      <span class="board-action-eyebrow">Preview</span>
+      <span class="board-action-label">In console browsers</span>
+      <span class="board-action-est">soon</span>
+    </span>
+
+    <span class="board-action is-ghosted" aria-disabled="true">
+      <span class="board-action-eyebrow">Hand off</span>
+      <span class="board-action-label">Generate Godot code</span>
+      <span class="board-action-est">soon</span>
+    </span>
+  </nav>
+
+  <div
+    class="board-with-panel is-panel-closed"
+    id="board-with-panel"
+    data-board-id="{{ board_id }}"
+    data-reload-on="style,cleanup"
+  >
+    <div class="board-plate" id="board-plate">
+      {{ svg_markup | safe }}
+    </div>
+
+    {# Side panel — populated by side-panel.js after a cell is clicked. #}
+    <aside class="cell-panel" id="cell-panel" aria-hidden="true"></aside>
+  </div>
+
+  <footer class="board-foot">
+    <p class="caption" style="margin: 0;">
+      16:9 native &middot; pixel-perfect &middot; see <a href="/b/{{ board_id }}/spec">tech spec</a> for geometry
+    </p>
+  </footer>
+
+</section>
+
+<script src="/static/side-panel.js"></script>
+<script src="/static/board-title.js"></script>
+{% endblock %}

@@ -41,7 +41,9 @@ def do_generate_spaces(run: RunStats, catalog: Catalog, provider: PixelArtProvid
     designs = catalog.all_space_designs()
     n = config.SPACE_CANDIDATES
     total_calls = len(designs) * n
-    estimated = sum(provider.cost_estimate(catalog.board_spaces.size, n) for _ in designs)
+    # Per-design size: each design's positions are validated by the schema to share a size.
+    design_sizes = {d.id: catalog.board_spaces.design_size(d) for d in designs}
+    estimated = sum(provider.cost_estimate(design_sizes[d.id], n) for d in designs)
     spent = 0.0
 
     with step(run, "generate-spaces") as s:
@@ -53,20 +55,24 @@ def do_generate_spaces(run: RunStats, catalog: Catalog, provider: PixelArtProvid
             total=total_calls,
         ) as bar:
             for design in designs:
-                bar.set_current(f"{design.id} [dim]({len(design.positions)} positions)")
+                size = design_sizes[design.id]
+                bar.set_current(
+                    f"{design.id} [dim]({size[0]}×{size[1]}, "
+                    f"{len(design.positions)} positions)"
+                )
                 out_dir = out_root / design.id
                 out_dir.mkdir(parents=True, exist_ok=True)
                 try:
                     images = provider.generate(
                         prompt=style_prefix + design.prompt,
-                        size=catalog.board_spaces.size,
+                        size=size,
                         n=n,
                         style_reference=style_ref,
                         palette=palette,
                     )
                     for i, png in enumerate(images, start=1):
                         (out_dir / f"v{i:02d}.png").write_bytes(png)
-                    spent += provider.cost_estimate(catalog.board_spaces.size, n)
+                    spent += provider.cost_estimate(size, n)
                     s.items += 1
                     bar.advance(n)
                 except Exception as e:
@@ -86,7 +92,7 @@ def do_generate_panels(run: RunStats, catalog: Catalog, provider: PixelArtProvid
     estimated = sum(provider.cost_estimate(p.target_size, n) for p in panels)
     spent = 0.0
 
-    mockup_path = config.REPO_ROOT / catalog.style.reference_image
+    mockup_path = config.BOARD_ROOT / catalog.style.reference_image
 
     with step(run, "generate-panels") as s:
         s.extras["provider"] = provider.name
@@ -101,7 +107,12 @@ def do_generate_panels(run: RunStats, catalog: Catalog, provider: PixelArtProvid
                 out_dir = out_root / panel.id
                 out_dir.mkdir(parents=True, exist_ok=True)
                 try:
-                    ref_img = crop_region(mockup_path, panel.bbox, panel.target_size)
+                    ref_img = crop_region(
+                        mockup_path,
+                        panel.bbox,
+                        panel.target_size,
+                        canvas_size=catalog.board_size,
+                    )
                     ref_bytes = png_bytes(ref_img)
                     (out_dir / "_reference.png").write_bytes(ref_bytes)
 
@@ -134,7 +145,7 @@ def do_generate_centerpiece(run: RunStats, catalog: Catalog, provider: PixelArtP
     estimated = provider.cost_estimate(cp.target_size, n)
     spent = 0.0
 
-    mockup_path = config.REPO_ROOT / catalog.style.reference_image
+    mockup_path = config.BOARD_ROOT / catalog.style.reference_image
 
     with step(run, "generate-centerpiece") as s:
         s.extras["provider"] = provider.name
@@ -146,7 +157,12 @@ def do_generate_centerpiece(run: RunStats, catalog: Catalog, provider: PixelArtP
             total=n,
         ) as bar:
             try:
-                ref_img = crop_region(mockup_path, cp.bbox, cp.target_size)
+                ref_img = crop_region(
+                    mockup_path,
+                    cp.bbox,
+                    cp.target_size,
+                    canvas_size=catalog.board_size,
+                )
                 ref_bytes = png_bytes(ref_img)
                 (out_dir / "_reference.png").write_bytes(ref_bytes)
 

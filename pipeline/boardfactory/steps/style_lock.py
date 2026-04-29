@@ -22,7 +22,7 @@ from ..schemas import Catalog
 
 def do_style_lock(run: RunStats, catalog: Catalog) -> None:
     with step(run, "style-lock") as s:
-        ref_path = config.REPO_ROOT / catalog.style.reference_image
+        ref_path = config.BOARD_ROOT / catalog.style.reference_image
         if not ref_path.exists():
             raise FileNotFoundError(f"Style reference image not found: {ref_path}")
 

@@ -1,31 +1,39 @@
-"""Workspace paths and configuration constants.
+"""Workspace paths and configuration constants — multi-board scoped.
 
-Every path is computed once at import time from BOARDFACTORY_REPO so the rest
-of the pipeline can use plain `from boardfactory.config import WORKSPACE` etc.
+Each Board Factory project ("board") owns a self-contained directory tree:
+
+    boards/<board-id>/
+        catalog.yml
+        workspace/
+            style/  candidates/  cleaned/  approved/  refinements/
+            preview/  logs/  history/  live/
+        mockup/
+        board_assets/
+
+The active board id is held as module-level mutable state so every existing
+`config.WORKSPACE`-style access keeps working without threading a board id
+through every call site. The web app calls `set_board()` per request; the CLI
+calls it once at startup based on `--board` / `BOARDFACTORY_BOARD`.
+
+Threading note: this is process-global state. The web app holds a lock around
+each request to serialize board-scoped work. That's acceptable because all
+expensive operations are already in-process job queues, not the request
+handler.
 """
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
+from threading import RLock
 
 REPO_ROOT = Path(os.environ.get("BOARDFACTORY_REPO", "/repo"))
+BOARDS_DIR = REPO_ROOT / "boards"
 
-CATALOG_PATH = REPO_ROOT / "catalog" / "board.yml"
-MOCKUP_DIR = REPO_ROOT / "mockup"
 
-WORKSPACE = REPO_ROOT / "workspace"
-STYLE_DIR = WORKSPACE / "style"
-CANDIDATES_DIR = WORKSPACE / "candidates"
-CLEANED_DIR = WORKSPACE / "cleaned"
-APPROVED_DIR = WORKSPACE / "approved"
-REFINEMENTS_DIR = WORKSPACE / "refinements"
-PREVIEW_DIR = WORKSPACE / "preview"
-LOGS_DIR = WORKSPACE / "logs"
+# ────────────────────────── pipeline knobs (board-independent) ──────────────────────────
 
-EXPORT_DIR = REPO_ROOT / "board_assets"
 
-# Pipeline knobs (overridable via env)
 PALETTE_SIZE = int(os.environ.get("BOARDFACTORY_PALETTE_SIZE", "24"))
 SPACE_CANDIDATES = int(os.environ.get("BOARDFACTORY_SPACE_CANDIDATES", "3"))
 PANEL_CANDIDATES = int(os.environ.get("BOARDFACTORY_PANEL_CANDIDATES", "6"))
@@ -35,9 +43,112 @@ PROJECT_NAME = os.environ.get("BOARDFACTORY_PROJECT_NAME", "my-board")
 PROVIDER_NAME = os.environ.get("BOARDFACTORY_PROVIDER", "pixellab").lower()
 
 
+# ────────────────────────── board scope ──────────────────────────
+
+
+_lock = RLock()
+_active_board: str | None = None
+
+
+def set_board(board_id: str | None) -> None:
+    """Set the active board id. Pass None to clear (rare)."""
+    global _active_board
+    with _lock:
+        _active_board = board_id
+
+
+def active_board() -> str | None:
+    return _active_board
+
+
+def board_root(board_id: str | None = None) -> Path:
+    """Return the root dir for a board. Defaults to the active board."""
+    bid = board_id or _active_board
+    if not bid:
+        raise RuntimeError(
+            "No active board set. Call config.set_board(board_id) first, "
+            "or pass board_id explicitly."
+        )
+    return BOARDS_DIR / bid
+
+
+# ────────────────────────── path properties (compat layer) ──────────────────────────
+#
+# Existing code does `config.WORKSPACE`, `config.STYLE_DIR`, etc. These were
+# module attributes before; now they're computed properties via __getattr__
+# so they always reflect the currently-active board.
+
+
+def _path_for(name: str) -> Path:
+    """Resolve a board-scoped path by symbolic name."""
+    root = board_root()
+    return {
+        "BOARD_ROOT":     root,
+        "CATALOG_PATH":   root / "catalog.yml",
+        "MOCKUP_DIR":     root / "mockup",
+        "WORKSPACE":      root / "workspace",
+        "STYLE_DIR":      root / "workspace" / "style",
+        "CANDIDATES_DIR": root / "workspace" / "candidates",
+        "CLEANED_DIR":    root / "workspace" / "cleaned",
+        "APPROVED_DIR":   root / "workspace" / "approved",
+        "REFINEMENTS_DIR":root / "workspace" / "refinements",
+        "PREVIEW_DIR":    root / "workspace" / "preview",
+        "LOGS_DIR":       root / "workspace" / "logs",
+        "HISTORY_DIR":    root / "workspace" / "history",
+        "LIVE_DIR":       root / "workspace" / "live",
+        "EXPORT_DIR":     root / "board_assets",
+    }[name]
+
+
+_PATH_NAMES = {
+    "BOARD_ROOT", "CATALOG_PATH", "MOCKUP_DIR", "WORKSPACE", "STYLE_DIR",
+    "CANDIDATES_DIR", "CLEANED_DIR", "APPROVED_DIR", "REFINEMENTS_DIR",
+    "PREVIEW_DIR", "LOGS_DIR", "HISTORY_DIR", "LIVE_DIR", "EXPORT_DIR",
+}
+
+
+def __getattr__(name: str) -> Path:
+    """Resolve path attributes lazily so they always reflect the active board.
+
+    This is only called for attributes not found in the module's normal
+    namespace, so the constants above (PALETTE_SIZE etc.) are unaffected.
+    """
+    if name in _PATH_NAMES:
+        return _path_for(name)
+    raise AttributeError(f"module 'boardfactory.config' has no attribute {name!r}")
+
+
+# ────────────────────────── filesystem bootstrap ──────────────────────────
+
+
 def ensure_dirs() -> None:
-    for d in [
-        STYLE_DIR, CANDIDATES_DIR, CLEANED_DIR, APPROVED_DIR,
-        REFINEMENTS_DIR, PREVIEW_DIR, LOGS_DIR, EXPORT_DIR,
-    ]:
-        d.mkdir(parents=True, exist_ok=True)
+    """Create every workspace subdir for the active board."""
+    for name in (
+        "STYLE_DIR", "CANDIDATES_DIR", "CLEANED_DIR", "APPROVED_DIR",
+        "REFINEMENTS_DIR", "PREVIEW_DIR", "LOGS_DIR", "HISTORY_DIR",
+        "LIVE_DIR", "EXPORT_DIR", "MOCKUP_DIR",
+    ):
+        _path_for(name).mkdir(parents=True, exist_ok=True)
+
+
+# ────────────────────────── per-request scope helper ──────────────────────────
+
+
+from contextlib import contextmanager
+
+
+@contextmanager
+def scope_board(board_id: str):
+    """Set the active board for the duration of a block, restore after.
+
+    Used by the web app to scope each request to one board. Holds the global
+    lock so concurrent requests for different boards don't trample each other.
+    Acceptable because actual work is offloaded to the JobRunner thread pool.
+    """
+    with _lock:
+        prev = _active_board
+        set_board(board_id)
+        try:
+            yield
+        finally:
+            set_board(prev)

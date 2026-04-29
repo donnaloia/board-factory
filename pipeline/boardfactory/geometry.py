@@ -1,4 +1,17 @@
-"""Board geometry helpers — crop regions, place tiles on the board."""
+"""Board geometry helpers — crop regions, place tiles on the board.
+
+Two coordinate systems are in play:
+
+- **Canvas coordinates**: the authoritative space the catalog and spec are
+  written in (e.g. 1920 × 1080). Every bbox in `catalog/board.yml` lives here.
+- **Mockup coordinates**: the actual pixel space of the user's mockup file,
+  which may not match canvas dimensions (AI-generated mockups rarely hit exact
+  target sizes). The pipeline scales canvas-space bboxes into mockup-space at
+  crop time so the same catalog works with any mockup size.
+
+The helpers below do that translation. `crop_region` is the only place outside
+this module that needs to know the conversion exists.
+"""
 
 from __future__ import annotations
 
@@ -7,15 +20,137 @@ from pathlib import Path
 from PIL import Image
 
 
+# ────────────────────────── coordinate translation ──────────────────────────
+
+
+def canvas_to_mockup(
+    bbox: tuple[int, int, int, int],
+    canvas_size: tuple[int, int],
+    mockup_size: tuple[int, int],
+) -> tuple[int, int, int, int]:
+    """Translate a canvas-space bbox to mockup-space.
+
+    Each axis scales independently, so this works correctly even when the
+    mockup has a slightly different aspect ratio from the canvas (the warning
+    in `validate_mockup_dimensions` will fire if the drift is meaningful).
+    """
+    sx = mockup_size[0] / canvas_size[0]
+    sy = mockup_size[1] / canvas_size[1]
+    x1, y1, x2, y2 = bbox
+    # Round to ints at the boundary; clamp inside mockup to handle subpixel drift.
+    mx1 = max(0, min(mockup_size[0], int(round(x1 * sx))))
+    my1 = max(0, min(mockup_size[1], int(round(y1 * sy))))
+    mx2 = max(0, min(mockup_size[0], int(round(x2 * sx))))
+    my2 = max(0, min(mockup_size[1], int(round(y2 * sy))))
+    return (mx1, my1, mx2, my2)
+
+
+def mockup_to_canvas(
+    bbox: tuple[int, int, int, int],
+    mockup_size: tuple[int, int],
+    canvas_size: tuple[int, int],
+) -> tuple[int, int, int, int]:
+    """Inverse of `canvas_to_mockup`. Useful when authoring catalog from a mockup.
+
+    Not currently called by the pipeline (catalog stays canvas-authoritative)
+    but is provided for tools and one-off scripts that want to convert
+    mockup-pixel coordinates back to canvas coordinates.
+    """
+    sx = canvas_size[0] / mockup_size[0]
+    sy = canvas_size[1] / mockup_size[1]
+    x1, y1, x2, y2 = bbox
+    return (
+        int(round(x1 * sx)),
+        int(round(y1 * sy)),
+        int(round(x2 * sx)),
+        int(round(y2 * sy)),
+    )
+
+
+# ────────────────────────── mockup validation ──────────────────────────
+
+
+# Fail loudly if mockup aspect ratio drifts from canvas by more than this fraction.
+ASPECT_TOLERANCE = 0.05
+
+
+class MockupAspectMismatch(ValueError):
+    """Raised when a mockup's aspect ratio differs from the canvas by > tolerance."""
+
+
+def validate_mockup_dimensions(
+    mockup_path: Path,
+    canvas_size: tuple[int, int],
+    *,
+    strict: bool = False,
+) -> tuple[tuple[int, int], list[str]]:
+    """Read mockup dimensions and check them against the catalog's canvas size.
+
+    Returns `(mockup_size, warnings)`. If `strict=True`, raises
+    `MockupAspectMismatch` instead of returning a warning when the aspect ratio
+    drifts beyond `ASPECT_TOLERANCE`.
+
+    Warnings are collected so the CLI can render them through `rich` instead of
+    using stdlib warnings (which would interrupt the progress UI).
+    """
+    if not mockup_path.exists():
+        raise FileNotFoundError(f"Mockup not found: {mockup_path}")
+
+    with Image.open(mockup_path) as img:
+        mockup_size = img.size
+
+    warnings: list[str] = []
+
+    canvas_ratio = canvas_size[0] / canvas_size[1]
+    mockup_ratio = mockup_size[0] / mockup_size[1]
+    drift = abs(mockup_ratio - canvas_ratio) / canvas_ratio
+
+    if drift > ASPECT_TOLERANCE:
+        msg = (
+            f"Mockup aspect ratio differs from canvas by {drift * 100:.1f}% "
+            f"(mockup is {mockup_size[0]}×{mockup_size[1]} = {mockup_ratio:.3f}, "
+            f"canvas is {canvas_size[0]}×{canvas_size[1]} = {canvas_ratio:.3f}). "
+            f"img2img reference crops will be stretched non-uniformly. "
+            f"Consider re-rendering the mockup at the canvas aspect ratio."
+        )
+        if strict:
+            raise MockupAspectMismatch(msg)
+        warnings.append(msg)
+
+    if mockup_size != canvas_size:
+        warnings.append(
+            f"Mockup is {mockup_size[0]}×{mockup_size[1]}, canvas is "
+            f"{canvas_size[0]}×{canvas_size[1]}. Pipeline will scale "
+            f"catalog bboxes from canvas to mockup coordinates at crop time."
+        )
+
+    return mockup_size, warnings
+
+
+# ────────────────────────── cropping ──────────────────────────
+
+
 def crop_region(
-    source_image: Path, bbox: tuple[int, int, int, int], target_size: tuple[int, int]
+    source_image: Path,
+    bbox: tuple[int, int, int, int],
+    target_size: tuple[int, int],
+    *,
+    canvas_size: tuple[int, int] | None = None,
 ) -> Image.Image:
     """Crop `bbox` from `source_image` and resize to `target_size`.
 
-    Used to extract reference regions from the mockup for img2img conditioning.
-    Uses LANCZOS for downscaling so the AI gets the cleanest possible reference.
+    `bbox` is interpreted as **canvas coordinates** when `canvas_size` is
+    provided. The function reads the source image's actual size and translates
+    the bbox into mockup pixel space before cropping. When `canvas_size` is
+    None (legacy/test callers), `bbox` is treated as raw mockup pixel coords.
+
+    Used by `steps/generate.py` to extract per-asset reference regions for
+    img2img conditioning. LANCZOS is used for the final resize so the AI gets
+    the cleanest possible reference.
     """
     img = Image.open(source_image).convert("RGBA")
+    if canvas_size is not None:
+        bbox = canvas_to_mockup(bbox, canvas_size, img.size)
     cropped = img.crop(bbox)
     if cropped.size != target_size:
         cropped = cropped.resize(target_size, Image.LANCZOS)

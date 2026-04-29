@@ -2,23 +2,83 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Board Factory{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='4' fill='%23c8995b'/></svg>">
 </head>
 <body>
-  <header>
-    <a class="brand" href="/">Board Factory</a>
-    <nav>
-      <a href="/" {% if request.url.path == "/" %}class="current"{% endif %}>Overview</a>
-      <a href="/spaces" {% if request.url.path == "/spaces" %}class="current"{% endif %}>Board spaces</a>
-      <a href="/centerpiece" {% if request.url.path == "/centerpiece" %}class="current"{% endif %}>Centerpiece</a>
+<div class="app-shell">
+
+  <div id="global-progress" class="global-progress"></div>
+
+  <header class="app-header">
+    <a href="/" class="brand-mark">Board Factory</a>
+
+    {% block breadcrumb %}
+    <nav class="section-path" aria-label="breadcrumb">
+      {% if board_id %}
+      <a href="/b/{{ board_id }}/" class="crumb">Board</a>
+      {% else %}
+      <span class="crumb">Boards</span>
+      {% endif %}
     </nav>
+    {% endblock %}
+
+    <div class="header-meta">
+      <div class="cost-meter" id="cost-meter">
+        <span class="cost-amt" id="cost-session">${{ "%.2f"|format(cost.session_usd or 0) }}</span>
+        <span class="cost-label">session</span>
+        <span class="cost-sep">·</span>
+        <span class="cost-amt" id="cost-lifetime">${{ "%.2f"|format(cost.lifetime_usd or 0) }}</span>
+        <span class="cost-label">total</span>
+
+        <div class="cost-detail" id="cost-detail">
+          {% if cost.by_operation %}
+            {% for row in cost.by_operation %}
+              <div class="row">
+                <span class="op">{{ row.op }}</span>
+                <span>${{ "%.4f"|format(row.usd) }} <span class="op">· {{ row.count }}</span></span>
+              </div>
+            {% endfor %}
+          {% else %}
+            <div class="row"><span class="op">No paid operations yet</span><span>—</span></div>
+          {% endif %}
+          <div class="row">
+            <span class="op">session total</span>
+            <span>${{ "%.4f"|format(cost.session_usd or 0) }}</span>
+          </div>
+        </div>
+      </div>
+
+      {% if board_id %}
+      <a class="header-link" href="/b/{{ board_id }}/frame">Frame</a>
+      <a class="header-link" href="/b/{{ board_id }}/preview">Preview</a>
+      <a class="header-link" href="/b/{{ board_id }}/spec" target="_blank" rel="noopener">Tech spec</a>
+      {% endif %}
+    </div>
   </header>
-  <main>
+
+  <main class="app-main">
     {% block content %}{% endblock %}
   </main>
-  <footer>
-    <span class="muted">Board Factory review UI · http://localhost:8473</span>
+
+  <footer class="app-footer">
+    {{ project }} · http://localhost:8473
   </footer>
+
+  {# ───── Live job tray ───── #}
+  <aside id="job-tray" class="job-tray is-empty" aria-live="polite">
+    <div class="job-tray-head">
+      <span class="label">In flight</span>
+      <span class="count"><span id="job-count">0</span></span>
+    </div>
+    <div class="job-tray-body" id="job-tray-body"></div>
+  </aside>
+
+</div>
+
+<script src="/static/jobs.js"></script>
+{% block scripts %}{% endblock %}
 </body>
 </html>
