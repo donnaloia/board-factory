@@ -41,6 +41,16 @@ services:
       - "8473:8473"
     volumes:
       - ./:/repo
+      # Live-mount the web app so `git pull` shows up without rebuilding the
+      # image. (The Dockerfile still COPYs these into /app for standalone runs.)
+      - ./services/review-ui/templates:/app/templates
+      - ./services/review-ui/static:/app/static
+      - ./services/review-ui/server.py:/app/server.py
+      - ./services/review-ui/board_svg.py:/app/board_svg.py
+      - ./services/review-ui/spec_data.py:/app/spec_data.py
+      - ./services/review-ui/jobs.py:/app/jobs.py
+      - ./services/review-ui/cost_ledger.py:/app/cost_ledger.py
+      - ./services/review-ui/pipeline_adapters.py:/app/pipeline_adapters.py
     environment:
       # Inpainting needs the same API key as the pipeline.
       PIXELLAB_API_KEY: ""
