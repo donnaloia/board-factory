@@ -10,6 +10,7 @@ All three share the same palette + style sheet from step 1.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from PIL import Image
@@ -35,10 +36,21 @@ def _read_style_assets() -> tuple[bytes | None, list[tuple[int, int, int]] | Non
     return style_ref, palette
 
 
-def do_generate_spaces(run: RunStats, catalog: Catalog, provider: PixelArtProvider) -> float:
+def do_generate_spaces(
+    run: RunStats,
+    catalog: Catalog,
+    provider: PixelArtProvider,
+    design_ids: Sequence[str] | None = None,
+) -> float:
     style_ref, palette = _read_style_assets()
     style_prefix = catalog.style.prompt + ". " if catalog.style.prompt else ""
     designs = catalog.all_space_designs()
+    if design_ids is not None:
+        requested = set(design_ids)
+        designs = [d for d in designs if d.id in requested]
+        missing = requested - {d.id for d in designs}
+        if missing:
+            raise RuntimeError(f"Unknown space design id(s): {', '.join(sorted(missing))}")
     n = config.SPACE_CANDIDATES
     total_calls = len(designs) * n
     # Per-design size: each design's positions are validated by the schema to share a size.

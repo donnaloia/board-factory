@@ -62,19 +62,17 @@
     </form>
     {% endif %}
 
-    <form method="post" action="/b/{{ board_id }}/actions/generate/spaces" data-action class="board-action-form">
+    <form method="post" action="/b/{{ board_id }}/actions/generate-missing/spaces" data-action class="board-action-form">
       <button type="submit" class="board-action">
-        <span class="board-action-eyebrow">Generate</span>
-        <span class="board-action-label">All space designs</span>
-        <span class="board-action-est">~${{ "%.2f"|format(estimates.spaces) }} &middot; ~120s</span>
-      </button>
-    </form>
-
-    <form method="post" action="/b/{{ board_id }}/actions/generate/panels" data-action class="board-action-form">
-      <button type="submit" class="board-action">
-        <span class="board-action-eyebrow">Generate</span>
-        <span class="board-action-label">All functional panels</span>
-        <span class="board-action-est">~${{ "%.2f"|format(estimates.panels) }} &middot; ~180s</span>
+        <span class="board-action-eyebrow">Spaces</span>
+        <span class="board-action-label">{{ space_generation.label }}</span>
+        <span class="board-action-est">
+          {% if space_generation.missing %}
+            {{ space_generation.missing }} missing &middot; ~${{ "%.2f"|format(space_generation.estimate) }}
+          {% else %}
+            all generated
+          {% endif %}
+        </span>
       </button>
     </form>
 
@@ -86,13 +84,13 @@
       </button>
     </form>
 
-    {# Ghosted / inert: planned but not implemented. #}
-    <span class="board-action is-ghosted" aria-disabled="true">
+    <a href="/b/{{ board_id }}/device-preview" class="board-action board-action-link">
       <span class="board-action-eyebrow">Preview</span>
-      <span class="board-action-label">In console browsers</span>
-      <span class="board-action-est">soon</span>
-    </span>
+      <span class="board-action-label">Device Preview</span>
+      <span class="board-action-est">free &middot; instant</span>
+    </a>
 
+    {# Ghosted / inert: planned but not implemented. #}
     <span class="board-action is-ghosted" aria-disabled="true">
       <span class="board-action-eyebrow">Hand off</span>
       <span class="board-action-label">Generate Godot code</span>
@@ -104,7 +102,7 @@
     class="board-with-panel is-panel-closed"
     id="board-with-panel"
     data-board-id="{{ board_id }}"
-    data-reload-on="style,cleanup"
+    data-reload-on="style,generate.spaces,cleanup"
   >
     <div class="board-plate" id="board-plate">
       {{ svg_markup | safe }}

@@ -12,8 +12,8 @@
     </p>
   </header>
 
-  {% if boards %}
   <ul class="boards-grid" role="list">
+    {% if boards %}
     {% for b in boards %}
     <li class="board-card">
       <a class="board-card-link" href="/b/{{ b.id }}/">
@@ -28,59 +28,46 @@
       </a>
     </li>
     {% endfor %}
-  </ul>
-  {% else %}
-  <p class="body-lead muted">No boards yet. Create the first one below.</p>
-  {% endif %}
+    {% endif %}
 
-  <div class="boards-new">
-    <span class="eyebrow">Begin</span>
-    <h2 class="display">New board</h2>
-    <form id="new-board-form" class="new-board-form">
-      <label class="field">
-        <span class="field-label">Display name</span>
-        <input type="text" name="project_name" id="new-board-name"
-               placeholder="My Next Board" autocomplete="off" required>
-      </label>
-      <label class="field">
-        <span class="field-label">URL slug</span>
-        <input type="text" name="board_id" id="new-board-id"
-               placeholder="my-next-board"
-               pattern="[a-z0-9][a-z0-9_-]*"
-               autocomplete="off" required>
-        <span class="field-hint">lowercase letters, digits, dashes</span>
-      </label>
-      <button type="submit" class="editorial-action primary">
-        <span class="arrow">→</span>
-        <span>Create board</span>
+    <li class="board-card board-card-new" id="new-board-card">
+      <button type="button" class="board-card-link board-card-new-trigger" id="new-board-trigger">
+        <div class="board-card-thumb board-card-new-thumb">
+          <span class="thumb-plus" aria-hidden="true">+</span>
+        </div>
+        <div class="board-card-meta">
+          <h2 class="board-card-title">New board</h2>
+          <p class="board-card-id" id="new-board-status">Create a new board</p>
+        </div>
       </button>
-    </form>
-  </div>
+    </li>
+  </ul>
 </section>
 
 <script>
 (function () {
-  const form = document.getElementById('new-board-form');
-  const nameInput = document.getElementById('new-board-name');
-  const idInput = document.getElementById('new-board-id');
+  const card = document.getElementById('new-board-card');
+  const trigger = document.getElementById('new-board-trigger');
+  const status = document.getElementById('new-board-status');
 
-  // Auto-suggest slug from display name as the user types.
-  let userTouchedId = false;
-  idInput.addEventListener('input', () => { userTouchedId = true; });
-  nameInput.addEventListener('input', () => {
-    if (userTouchedId) return;
-    idInput.value = nameInput.value.toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 64);
-  });
+  trigger.addEventListener('click', async () => {
+    if (trigger.disabled) return;
 
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const fd = new FormData(form);
+    trigger.disabled = true;
+    card.classList.add('is-creating');
+    trigger.setAttribute('aria-busy', 'true');
+    status.textContent = 'Creating...';
+
+    const fd = new FormData();
+    fd.set('project_name', 'Untitled Board');
+    fd.set('board_id', `untitled-board-${Date.now().toString(36)}`);
     const res = await fetch('/api/boards', { method: 'POST', body: fd });
     if (!res.ok) {
       const t = await res.text();
+      trigger.disabled = false;
+      card.classList.remove('is-creating');
+      trigger.removeAttribute('aria-busy');
+      status.textContent = 'Create a new board';
       alert('Could not create board: ' + t);
       return;
     }

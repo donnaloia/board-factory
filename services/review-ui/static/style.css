@@ -1860,7 +1860,7 @@ h3 { font-family: var(--sans);  font-weight: 500; font-size: 11px; margin: 0 0 1
 .boards-grid {
   list-style: none;
   padding: 0;
-  margin: 0 0 96px;
+  margin: 0;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 32px;
@@ -1874,6 +1874,16 @@ h3 { font-family: var(--sans);  font-weight: 500; font-size: 11px; margin: 0 0 1
   display: block;
   text-decoration: none;
   color: var(--ink);
+}
+
+.board-card-new-trigger {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .board-card-thumb {
@@ -1923,17 +1933,36 @@ h3 { font-family: var(--sans);  font-weight: 500; font-size: 11px; margin: 0 0 1
   text-transform: uppercase;
 }
 
-.boards-new {
-  border-top: 1px solid #2a2a30;
-  padding-top: 56px;
-  max-width: 560px;
+.board-card-new-thumb {
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.035), transparent 46%),
+    #1a1a1f;
 }
 
-.new-board-form {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  margin-top: 24px;
+.thumb-plus {
+  font-family: var(--serif);
+  font-size: clamp(56px, 8vw, 92px);
+  line-height: 1;
+  color: var(--ink-3);
+  transform: translateY(-4px);
+  transition: color .2s, transform .2s;
+}
+
+.board-card-new-trigger:hover .thumb-plus {
+  color: var(--brass-bright);
+  transform: translateY(-6px);
+}
+
+.board-card-new.is-creating .board-card-new-trigger {
+  cursor: wait;
+}
+
+.board-card-new.is-creating .board-card-new-trigger .board-card-thumb {
+  border-color: var(--brass-deep);
+}
+
+.board-card-new.is-creating .thumb-plus {
+  color: var(--brass-bright);
 }
 
 .field {
@@ -1970,5 +1999,604 @@ h3 { font-family: var(--sans);  font-weight: 500; font-size: 11px; margin: 0 0 1
   font-size: 11px;
   color: var(--ink-3);
   letter-spacing: var(--tracking-loose);
+}
+
+/* ─────────────────────────────────────────────
+   Device preview — board on physical screens
+   Each device is built from CSS so it scales with
+   the viewport. The screen <img> uses object-fit:
+   cover for 16:9 panels, contain for 16:10 (Steam
+   Deck) so the 16:9 board letterboxes correctly.
+   ───────────────────────────────────────────── */
+
+.board-action.board-action-link {
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.console-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-width: 1440px;
+  margin: 0 auto;
+}
+
+.console-head {
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 32px;
+  margin-bottom: 24px;
+}
+
+.state-toggle {
+  display: inline-flex;
+  margin-top: 24px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.state-btn {
+  background: transparent;
+  border: 0;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 8px 18px;
+  cursor: pointer;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  transition: color .15s, background .15s;
+}
+.state-btn + .state-btn { border-left: 1px solid var(--rule-strong); }
+.state-btn:hover { color: var(--ink-2); }
+.state-btn.is-active {
+  color: var(--paper);
+  background: var(--brass-bright);
+}
+
+.device-stage {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 56px;
+  padding: 56px 0;
+  border-bottom: 1px solid var(--rule);
+  align-items: center;
+}
+.device-stage:last-of-type { border-bottom: 0; }
+
+.device-info {
+  font-family: var(--sans);
+  position: sticky;
+  top: 32px;
+  align-self: start;
+}
+.device-eyebrow {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--brass);
+  display: block;
+  margin-bottom: 10px;
+}
+.device-title {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 30px;
+  letter-spacing: var(--tracking-tight);
+  color: var(--ink);
+  margin: 0 0 10px;
+  line-height: 1.05;
+}
+.device-spec {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  letter-spacing: 0.02em;
+  margin: 0 0 12px;
+}
+.device-note {
+  font-family: var(--serif);
+  font-size: 14px;
+  font-style: italic;
+  color: var(--ink-2);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.device-shell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(ellipse at 50% 60%, rgba(200,153,91,0.04) 0%, transparent 60%),
+    radial-gradient(ellipse at center, var(--paper-2) 0%, var(--paper) 80%);
+  padding: 48px 24px;
+  min-height: 360px;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+/* The screen container — every device exposes one of these. */
+.device {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.device-screen {
+  background: #000;
+  overflow: hidden;
+  position: relative;
+}
+.device-screen .board-img {
+  display: block;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  image-rendering: pixelated;
+}
+.device-screen .board-img[hidden] { display: none; }
+
+/* ─── 65" 4K TV ─── */
+
+.device-tv .tv-body {
+  position: relative;
+  background: #050507;
+  padding: 12px 12px 0;
+  border-radius: 6px;
+  box-shadow:
+    0 0 0 1px #1a1a1e,
+    inset 0 1px 0 rgba(255,255,255,0.04),
+    0 32px 64px rgba(0,0,0,0.65);
+}
+.device-tv .tv-bezel {
+  background: #000;
+  padding: 4px;
+  border-radius: 3px;
+}
+.device-tv .tv-screen {
+  width: 880px;
+  height: 495px;
+  border-radius: 1px;
+}
+.device-tv .tv-chin {
+  height: 18px;
+  background: linear-gradient(180deg, #050507 0%, #0c0c10 100%);
+  border-radius: 0 0 4px 4px;
+  display: flex; align-items: center; justify-content: center;
+  margin-top: 4px;
+}
+.device-tv .tv-led {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--brass-bright) 0%, var(--brass-deep) 100%);
+  box-shadow: 0 0 6px rgba(200,153,91,0.6);
+}
+.device-tv .tv-stand-neck {
+  width: 96px;
+  height: 30px;
+  background: linear-gradient(180deg, #1a1a1e 0%, #050507 100%);
+  clip-path: polygon(28% 0, 72% 0, 100% 100%, 0 100%);
+}
+.device-tv .tv-stand-base {
+  width: 360px;
+  height: 8px;
+  background: linear-gradient(180deg, #1c1c20, #08080a);
+  border-radius: 4px;
+  box-shadow: 0 8px 22px rgba(0,0,0,0.7);
+}
+
+/* ─── 27" Desktop monitor ─── */
+
+.device-monitor .monitor-bezel {
+  background: #18181c;
+  padding: 7px 7px 0;
+  border-radius: 6px;
+  position: relative;
+  box-shadow:
+    0 0 0 1px #2a2a2e,
+    inset 0 1px 0 rgba(255,255,255,0.04),
+    0 24px 48px rgba(0,0,0,0.55);
+}
+.device-monitor .monitor-screen {
+  width: 720px;
+  height: 405px;
+  border-radius: 1px;
+}
+.device-monitor .monitor-chin {
+  height: 28px;
+  background: linear-gradient(180deg, #18181c, #0e0e10);
+  border-radius: 0 0 5px 5px;
+  display: flex; align-items: center; justify-content: center;
+}
+.device-monitor .monitor-mark {
+  width: 36px; height: 4px;
+  background: #2a2a2e;
+  border-radius: 1px;
+}
+.device-monitor .monitor-stand-neck {
+  width: 18px;
+  height: 72px;
+  background: linear-gradient(180deg, #1a1a1e, #08080a);
+  margin-top: -1px;
+  clip-path: polygon(20% 0, 80% 0, 100% 100%, 0 100%);
+}
+.device-monitor .monitor-stand-base {
+  width: 280px;
+  height: 16px;
+  background: radial-gradient(ellipse at center, #1c1c20 0%, #08080a 80%);
+  border-radius: 50%;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.7);
+  margin-top: -2px;
+}
+
+/* ─── 15" Laptop ─── */
+
+.device-laptop .laptop-lid {
+  background: linear-gradient(180deg, #1a1a1e 0%, #131317 100%);
+  padding: 16px 16px 24px;
+  border-radius: 8px 8px 0 0;
+  position: relative;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.05),
+    0 -4px 14px rgba(0,0,0,0.4);
+}
+.device-laptop .laptop-cam {
+  position: absolute;
+  top: 6px; left: 50%; transform: translateX(-50%);
+  width: 5px; height: 5px;
+  background: #44464a;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.6);
+}
+.device-laptop .laptop-screen {
+  width: 640px;
+  height: 360px;
+  border-radius: 1px;
+}
+.device-laptop .laptop-hinge {
+  width: 720px;
+  height: 5px;
+  background: linear-gradient(180deg, #050507 0%, #2a2a2e 50%, #050507 100%);
+  position: relative;
+  z-index: 2;
+}
+.device-laptop .laptop-base {
+  width: 760px;
+  background: linear-gradient(180deg, #1e1e22 0%, #0d0d11 100%);
+  clip-path: polygon(2.5% 0, 97.5% 0, 100% 100%, 0 100%);
+  border-radius: 0 0 12px 12px;
+  box-shadow: 0 28px 60px rgba(0,0,0,0.7);
+  padding: 14px 80px 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.laptop-keyboard {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.laptop-key-row {
+  display: grid;
+  grid-template-columns: repeat(14, 1fr);
+  gap: 4px;
+}
+.laptop-key {
+  height: 9px;
+  background: linear-gradient(180deg, #2a2a2e 0%, #16161a 100%);
+  border-radius: 1px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.06),
+    inset 0 -1px 0 rgba(0,0,0,0.5);
+}
+.laptop-key-row-bottom {
+  grid-template-columns: 2fr 8fr 2fr;
+  gap: 6px;
+}
+.laptop-key.wide { background: linear-gradient(180deg, #2a2a2e, #14141a); }
+.laptop-key.space { background: linear-gradient(180deg, #2a2a2e, #14141a); }
+.laptop-trackpad {
+  width: 220px;
+  height: 28px;
+  background: #14141a;
+  border-radius: 3px;
+  box-shadow:
+    inset 0 0 0 1px #2a2a2e,
+    inset 0 2px 4px rgba(0,0,0,0.4);
+}
+
+/* ─── Nintendo Switch (handheld) ─── */
+
+.device-switch {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0;
+  filter: drop-shadow(0 24px 40px rgba(0,0,0,0.55));
+}
+.device-switch .joycon {
+  width: 76px;
+  position: relative;
+  display: flex; flex-direction: column;
+}
+.device-switch .joycon-left {
+  background: linear-gradient(180deg, #2bb7e0 0%, #1a8fb5 100%);
+  border-radius: 32px 4px 4px 32px;
+  box-shadow: inset 1px 0 0 rgba(255,255,255,0.18),
+              inset 0 0 0 1px rgba(0,0,0,0.15);
+}
+.device-switch .joycon-right {
+  background: linear-gradient(180deg, #e84a4a 0%, #b83030 100%);
+  border-radius: 4px 32px 32px 4px;
+  box-shadow: inset -1px 0 0 rgba(255,255,255,0.18),
+              inset 0 0 0 1px rgba(0,0,0,0.15);
+}
+.device-switch .switch-bezel {
+  background: #08080a;
+  padding: 14px 6px;
+  align-self: center;
+  box-shadow: inset 0 0 0 1px #1a1a1e;
+}
+.device-switch .switch-screen {
+  width: 480px;
+  height: 270px;
+}
+
+/* Joy-Con shared button styling */
+.device-switch .joy-stick {
+  position: absolute;
+  width: 22px; height: 22px;
+  background: radial-gradient(circle at 35% 30%, #4a4a4e 0%, #0a0a0c 80%);
+  border-radius: 50%;
+  box-shadow:
+    inset 0 0 0 1px rgba(0,0,0,0.4),
+    0 1px 2px rgba(0,0,0,0.4);
+  left: 50%; transform: translateX(-50%);
+}
+.device-switch .joycon-left .joy-stick { top: 22%; }
+.device-switch .joycon-right .joy-stick { bottom: 22%; }
+
+.device-switch .joy-dpad {
+  position: absolute;
+  width: 32px; height: 32px;
+  bottom: 22%; left: 50%; transform: translateX(-50%);
+  display: grid;
+  grid-template: repeat(3, 1fr) / repeat(3, 1fr);
+}
+.device-switch .joy-dpad span {
+  width: 8px; height: 8px;
+  background: rgba(0,0,0,0.45);
+  border-radius: 50%;
+  align-self: center; justify-self: center;
+}
+.device-switch .joy-dpad span:nth-child(1) { grid-column: 2; grid-row: 1; }
+.device-switch .joy-dpad span:nth-child(2) { grid-column: 1; grid-row: 2; }
+.device-switch .joy-dpad span:nth-child(3) { grid-column: 3; grid-row: 2; }
+.device-switch .joy-dpad span:nth-child(4) { grid-column: 2; grid-row: 3; }
+
+.device-switch .joy-abxy {
+  position: absolute;
+  top: 22%; left: 50%; transform: translateX(-50%);
+  width: 44px; height: 44px;
+  display: grid;
+  grid-template-areas: ". y ." "x . a" ". b .";
+}
+.device-switch .joy-abxy span {
+  width: 13px; height: 13px;
+  background: radial-gradient(circle at 35% 30%, rgba(255,255,255,0.25), rgba(0,0,0,0.55));
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono);
+  font-size: 7px;
+  color: rgba(255,255,255,0.7);
+  font-weight: 500;
+  align-self: center; justify-self: center;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.35);
+}
+.device-switch .joy-abxy .a { grid-area: a; }
+.device-switch .joy-abxy .b { grid-area: b; }
+.device-switch .joy-abxy .x { grid-area: x; }
+.device-switch .joy-abxy .y { grid-area: y; }
+
+.device-switch .btn {
+  position: absolute;
+  background: rgba(0,0,0,0.45);
+  border-radius: 50%;
+}
+.device-switch .joycon-left .minus {
+  top: 8%; right: 16%;
+  width: 12px; height: 2px;
+  border-radius: 1px;
+}
+.device-switch .joycon-right .plus {
+  top: 8%; left: 16%;
+  width: 12px; height: 12px;
+  background: transparent;
+}
+.device-switch .joycon-right .plus::before,
+.device-switch .joycon-right .plus::after {
+  content: "";
+  position: absolute;
+  background: rgba(0,0,0,0.5);
+}
+.device-switch .joycon-right .plus::before {
+  top: 5px; left: 0; width: 100%; height: 2px; border-radius: 1px;
+}
+.device-switch .joycon-right .plus::after {
+  left: 5px; top: 0; width: 2px; height: 100%; border-radius: 1px;
+}
+.device-switch .joycon-left .capture {
+  bottom: 12%; left: 50%; transform: translateX(-50%);
+  width: 8px; height: 8px;
+  border-radius: 1px;
+}
+.device-switch .joycon-right .home {
+  bottom: 12%; left: 50%; transform: translateX(-50%);
+  width: 9px; height: 9px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.6);
+}
+
+.device-switch .rail-pin {
+  position: absolute;
+  width: 4px; height: 14px;
+  background: rgba(0,0,0,0.25);
+  border-radius: 2px;
+}
+.device-switch .joycon-left .rail-pin { right: 0; }
+.device-switch .joycon-right .rail-pin { left: 0; }
+.device-switch .rail-top { top: 12px; }
+.device-switch .rail-bottom { bottom: 12px; }
+
+.device-switch .bumper {
+  position: absolute;
+  top: -3px;
+  width: 36px; height: 8px;
+  background: inherit;
+  border-radius: 6px 6px 0 0;
+  filter: brightness(0.85);
+}
+.device-switch .joycon-left .bumper-l { left: 14px; }
+.device-switch .joycon-right .bumper-r { right: 14px; }
+
+/* ─── Steam Deck ─── */
+
+.device-deck {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  filter: drop-shadow(0 24px 48px rgba(0,0,0,0.55));
+}
+.device-deck .deck-grip {
+  width: 150px;
+  background: linear-gradient(180deg, #2c2c30 0%, #14141a 100%);
+  position: relative;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+}
+.device-deck .deck-grip-left {
+  border-radius: 64px 8px 70px 64px;
+}
+.device-deck .deck-grip-right {
+  border-radius: 8px 64px 64px 70px;
+}
+.device-deck .deck-bezel {
+  background: #050507;
+  padding: 18px 12px;
+  align-self: center;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px #1a1a1e;
+}
+.device-deck .deck-screen {
+  width: 480px;
+  height: 300px;
+}
+/* Steam Deck panel is 16:10 — letterbox the 16:9 board */
+.device-deck .deck-screen .board-img {
+  object-fit: contain;
+  background: #000;
+}
+
+.device-deck .deck-stick {
+  position: absolute;
+  width: 32px; height: 32px;
+  background: radial-gradient(circle at 35% 30%, #50504a 0%, #08080a 90%);
+  border-radius: 50%;
+  box-shadow:
+    inset 0 0 0 1px rgba(0,0,0,0.5),
+    0 2px 4px rgba(0,0,0,0.5);
+}
+.device-deck .deck-grip-left .deck-stick { top: 14%; left: 18%; }
+.device-deck .deck-grip-right .deck-stick { top: 14%; right: 18%; }
+
+.device-deck .deck-trackpad {
+  position: absolute;
+  width: 56px; height: 56px;
+  background: radial-gradient(circle at center, #1c1c20 0%, #0a0a0c 90%);
+  border: 1px solid #2a2a2e;
+  border-radius: 50%;
+  box-shadow:
+    inset 0 0 6px rgba(0,0,0,0.6),
+    inset 0 0 0 4px rgba(0,0,0,0.2);
+}
+.device-deck .deck-grip-left .deck-trackpad { bottom: 18%; left: 12%; }
+.device-deck .deck-grip-right .deck-trackpad { bottom: 18%; right: 12%; }
+
+.device-deck .deck-dpad {
+  position: absolute;
+  top: 48%; left: 14%;
+  width: 38px; height: 38px;
+  display: grid;
+  grid-template: repeat(3, 1fr) / repeat(3, 1fr);
+}
+.device-deck .deck-dpad span {
+  background: linear-gradient(180deg, #2a2a2e, #0a0a0c);
+  border-radius: 2px;
+  align-self: stretch; justify-self: stretch;
+}
+.device-deck .deck-grip-left .deck-dpad span:nth-child(1) { grid-column: 2; grid-row: 1; }
+.device-deck .deck-grip-left .deck-dpad span:nth-child(2) { grid-column: 1; grid-row: 2; }
+.device-deck .deck-grip-left .deck-dpad span:nth-child(3) { grid-column: 3; grid-row: 2; }
+.device-deck .deck-grip-left .deck-dpad span:nth-child(4) { grid-column: 2; grid-row: 3; }
+
+.device-deck .deck-abxy {
+  position: absolute;
+  top: 46%; right: 14%;
+  width: 44px; height: 44px;
+  display: grid;
+  grid-template-areas: ". y ." "x . b" ". a .";
+}
+.device-deck .deck-abxy span {
+  width: 14px; height: 14px;
+  background: radial-gradient(circle at 35% 30%, rgba(255,255,255,0.25), #08080a);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono);
+  font-size: 7px;
+  color: rgba(255,255,255,0.7);
+  font-weight: 500;
+  align-self: center; justify-self: center;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.4);
+}
+.device-deck .deck-abxy .a { grid-area: a; }
+.device-deck .deck-abxy .b { grid-area: b; }
+.device-deck .deck-abxy .x { grid-area: x; }
+.device-deck .deck-abxy .y { grid-area: y; }
+
+.device-deck .deck-btn {
+  position: absolute;
+  width: 14px; height: 4px;
+  background: rgba(0,0,0,0.5);
+  border-radius: 1px;
+}
+.device-deck .deck-btn-view { top: 8%; left: 60%; }
+.device-deck .deck-btn-menu { top: 8%; right: 60%; }
+
+.device-deck .deck-bumper {
+  position: absolute;
+  top: -4px;
+  width: 60px; height: 10px;
+  background: inherit;
+  border-radius: 6px 6px 0 0;
+  filter: brightness(0.85);
+}
+.device-deck .deck-grip-left .deck-bumper-l { left: 22px; }
+.device-deck .deck-grip-right .deck-bumper-r { right: 22px; }
+
+/* Responsive: collapse the device-info column on narrow screens. */
+
+@media (max-width: 1100px) {
+  .device-stage {
+    grid-template-columns: 1fr;
+    gap: 28px;
+    padding: 36px 0;
+  }
+  .device-info { position: static; }
+}
+
+@media (max-width: 700px) {
+  .device-shell { padding: 24px 8px; }
 }
 

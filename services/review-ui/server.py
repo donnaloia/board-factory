@@ -108,6 +108,36 @@ def _candidates(board_id: str, category: str, asset_id: str | None = None) -> li
     return sorted(p for p in base.glob("*.png") if not p.name.startswith("_"))
 
 
+def _raw_candidates(board_id: str, category: str, asset_id: str | None = None) -> list[Path]:
+    base = _workspace(board_id) / "candidates" / category
+    if asset_id:
+        base = base / asset_id
+    if not base.exists():
+        return []
+    return sorted(p for p in base.glob("*.png") if not p.name.startswith("_"))
+
+
+def _has_generated_asset(board_id: str, category: str, asset_id: str) -> bool:
+    if _live_path(board_id, category, asset_id).exists():
+        return True
+    if _approved_path(board_id, category, asset_id).exists():
+        return True
+    if any(_history_dir(board_id, category, asset_id).glob("*.png")):
+        return True
+    return bool(
+        _candidates(board_id, category, asset_id)
+        or _raw_candidates(board_id, category, asset_id)
+    )
+
+
+def _missing_space_ids(board_id: str, catalog: dict) -> list[str]:
+    return [
+        d["id"]
+        for d in catalog.get("board_spaces", {}).get("designs", [])
+        if not _has_generated_asset(board_id, "spaces", d["id"])
+    ]
+
+
 def _safe_workspace_path(board_id: str, rel: str) -> Path:
     """Resolve a workspace-relative path safely (no traversal outside workspace)."""
     ws = _workspace(board_id)
@@ -350,6 +380,11 @@ def board_view(request: Request, board_id: str):
     n_panels = len(panel_status)
     designs_done = sum(1 for s in space_status.values() if s.approved)
     panels_done = sum(1 for s in panel_status.values() if s.approved)
+    missing_space_ids = _missing_space_ids(board_id, catalog)
+    generated_spaces = n_designs - len(missing_space_ids)
+    space_generate_estimate = (
+        pipeline_adapters.estimate_generate_one("spaces") * len(missing_space_ids)
+    )
 
     frame_overlay_url = None
     frame_block = catalog.get("frame", {}) or {}
@@ -373,6 +408,13 @@ def board_view(request: Request, board_id: str):
             "panels_total": n_panels,
             "panels_done": panels_done,
             "centerpiece_done": cp_status.approved,
+        },
+        "space_generation": {
+            "missing": len(missing_space_ids),
+            "generated": generated_spaces,
+            "label": "Generate All Spaces"
+                     if generated_spaces == 0 else "Generate Missing Spaces",
+            "estimate": space_generate_estimate,
         },
     })
     return templates.TemplateResponse(request, "board.html", ctx)
@@ -625,6 +667,40 @@ def preview_view(request: Request, board_id: str):
     return templates.TemplateResponse(request, "preview.html", ctx)
 
 
+@app.get("/b/{board_id}/device-preview", response_class=HTMLResponse)
+def device_preview_view(request: Request, board_id: str):
+    """Show the composited board inside renderings of physical screens.
+
+    Renders the same `workspace/preview/board_*.png` the compositor produces
+    inside CSS mockups of a TV, desktop monitor, laptop, Nintendo Switch
+    and Steam Deck — so the team can sanity-check how the board reads at
+    each form factor without leaving the browser.
+    """
+    _ensure_board_or_404(board_id)
+    preview_dir = _workspace(board_id) / "preview"
+    idle_path = preview_dir / "board_idle.png"
+    active_path = preview_dir / "board_active.png"
+
+    def _asset_url(name: str, p: Path) -> str:
+        return f"/b/{board_id}/asset/preview/{name}?t={int(p.stat().st_mtime)}"
+
+    idle_url = _asset_url("board_idle.png", idle_path) if idle_path.exists() else None
+    active_url = _asset_url("board_active.png", active_path) if active_path.exists() else None
+
+    catalog = _load_catalog(board_id)
+    bw, bh = catalog.get("board_size", [1920, 1080])
+
+    ctx = _base_context(board_id)
+    ctx.update({
+        "idle_url": idle_url,
+        "active_url": active_url,
+        "preview_present": bool(idle_url or active_url),
+        "board_w": bw,
+        "board_h": bh,
+    })
+    return templates.TemplateResponse(request, "device_preview.html", ctx)
+
+
 # Legacy routes — redirect to the per-board equivalent if there's a default board.
 
 @app.get("/spec")
@@ -689,6 +765,24 @@ async def action_generate(request: Request, board_id: str, category: str):
         operation=f"generate.{category}", target=board_id,
         cost_estimate=pipeline_adapters.estimate_generate(category),
         fn=_scoped_fn(board_id, pipeline_adapters.generate_adapter(category)),
+    )
+    return _action_response(request, job_id, redirect_to=f"/b/{board_id}/")
+
+
+@app.post("/b/{board_id}/actions/generate-missing/spaces")
+async def action_generate_missing_spaces(request: Request, board_id: str):
+    _ensure_board_or_404(board_id)
+    catalog = _load_catalog(board_id)
+    missing_space_ids = _missing_space_ids(board_id, catalog)
+    count = len(missing_space_ids)
+    job_id = _enqueue(
+        label=f"Generate {count} missing space{'s' if count != 1 else ''}",
+        operation="generate.spaces", target=board_id,
+        cost_estimate=pipeline_adapters.estimate_generate_one("spaces") * count,
+        fn=_scoped_fn(
+            board_id,
+            pipeline_adapters.generate_spaces_adapter(missing_space_ids),
+        ),
     )
     return _action_response(request, job_id, redirect_to=f"/b/{board_id}/")
 

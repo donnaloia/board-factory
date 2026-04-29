@@ -160,6 +160,35 @@ def generate_adapter(category: str) -> Callable[[Job, threading.Event], float]:
     return fn
 
 
+def generate_spaces_adapter(
+    design_ids: list[str],
+) -> Callable[[Job, threading.Event], float]:
+    """Adapter for generating a selected set of space designs."""
+
+    def fn(job: Job, cancel: threading.Event) -> float:
+        from boardfactory.progress import RunStats
+        from boardfactory.providers import get_provider
+        from boardfactory.steps.generate import do_generate_spaces
+
+        if not design_ids:
+            job.log.append("no missing spaces to generate")
+            return 0.0
+
+        catalog = _load_catalog()
+        _validate_mockup_or_die(catalog)
+        provider = get_provider()
+        check_cancel(cancel)
+
+        run = RunStats(label="generate-spaces")
+        with capture_console_for_job(job):
+            spent = do_generate_spaces(run, catalog, provider, design_ids=design_ids)
+        check_cancel(cancel)
+        cost_ledger.record("generate.spaces", None, len(design_ids), spent)
+        return spent
+
+    return fn
+
+
 def cleanup_adapter() -> Callable[[Job, threading.Event], float]:
     """Adapter for the Cleanup step (palette quantize + grid snap)."""
 
