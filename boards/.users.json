@@ -1,0 +1,16 @@
+{
+  "users": [
+    {
+      "id": "46c004b7a2a9482398aa262d103cf96e",
+      "email": "admin@admin.com",
+      "password_hash": "$2b$12$5RvQqb88gMckVkfFxuCMXetL8rZlqjA3v0dUsym9a4Ll6UTjQGJ2y",
+      "display_name": "ben",
+      "icon_glyph": "\u2727",
+      "icon_color": "#902de1",
+      "pixellab_api_key": "",
+      "openai_api_key": "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",
+      "created_ms": 1777514766934,
+      "last_login_ms": 1777518615515
+    }
+  ]
+}

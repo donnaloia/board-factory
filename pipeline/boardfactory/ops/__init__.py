@@ -18,6 +18,7 @@ The web app talks to this module exclusively when it needs to make art:
 """
 
 from .progress import ProgressSink, NoopSink
+from .analyze import analyze_mockup, COST_ESTIMATE_USD as ANALYZE_COST_USD
 from .draw_cell import (
     DrawMode,
     DrawSpec,
@@ -36,6 +37,8 @@ from .orchestrate import (
 __all__ = [
     "ProgressSink",
     "NoopSink",
+    "analyze_mockup",
+    "ANALYZE_COST_USD",
     "DrawMode",
     "DrawSpec",
     "DrawResult",

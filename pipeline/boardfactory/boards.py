@@ -128,8 +128,10 @@ def create_board(board_id: str, project_name: str | None = None) -> BoardInfo:
     (root / "workspace").mkdir()
     (root / "board_assets").mkdir()
 
-    # Seed an example catalog. Keeps the same structure as the existing
-    # damnation board but blank designs / panels — the user fills it in.
+    # Seed with the standard 1920×1080 board geometry. Every new board shares
+    # the same cell layout (12 top, 12 bottom, 5 left, 5 right, 12 interior
+    # panels around a central piece) — only the prompts are theme-specific.
+    # The user renames/rewrites each prompt to match their theme.
     catalog_skeleton = {
         "project": project_name,
         "version": 1,
@@ -139,17 +141,146 @@ def create_board(board_id: str, project_name: str | None = None) -> BoardInfo:
             "palette_size": 24,
             "prompt": "",
         },
-        "board_spaces": {
-            "layout": {},
-            "designs": [],
-        },
-        "feature_panels": {"panels": []},
         "centerpiece": {
-            "bbox": [780, 280, 1140, 800],
-            "target_size": [360, 520],
+            "bbox": [700, 180, 1220, 900],
+            "target_size": [520, 720],
             "prompt": "",
             "needs_active": False,
             "active_kind": "none",
+        },
+        "board_spaces": {
+            "layout": {
+                "top_row": {
+                    "count": 12, "start": [0, 0], "axis": "x", "size": [160, 180],
+                },
+                "bottom_row": {
+                    "count": 12, "start": [0, 900], "axis": "x", "size": [160, 180],
+                },
+                "left_col": {
+                    "count": 5, "start": [0, 180], "axis": "y", "size": [180, 144],
+                },
+                "right_col": {
+                    "count": 5, "start": [1740, 180], "axis": "y", "size": [180, 144],
+                },
+            },
+            "designs": [
+                # ── corners ──
+                {"id": "corner_tl", "prompt": "", "positions": ["top_row.0"]},
+                {"id": "corner_tr", "prompt": "", "positions": ["top_row.11"]},
+                {"id": "corner_bl", "prompt": "", "positions": ["bottom_row.0"]},
+                {"id": "corner_br", "prompt": "", "positions": ["bottom_row.11"]},
+                # ── top row spaces ──
+                {"id": "top_banner_a", "prompt": "", "positions": ["top_row.5"]},
+                {"id": "top_banner_b", "prompt": "", "positions": ["top_row.7"]},
+                {
+                    "id": "top_space_a", "prompt": "",
+                    "positions": ["top_row.1", "top_row.4", "top_row.8"],
+                },
+                {
+                    "id": "top_space_b", "prompt": "",
+                    "positions": ["top_row.2", "top_row.6", "top_row.9"],
+                },
+                {"id": "top_space_c", "prompt": "", "positions": ["top_row.3", "top_row.10"]},
+                # ── bottom row spaces ──
+                {"id": "bottom_banner_a", "prompt": "", "positions": ["bottom_row.5"]},
+                {"id": "bottom_banner_b", "prompt": "", "positions": ["bottom_row.6"]},
+                {
+                    "id": "bottom_space_a", "prompt": "",
+                    "positions": ["bottom_row.1", "bottom_row.4"],
+                },
+                {
+                    "id": "bottom_space_b", "prompt": "",
+                    "positions": ["bottom_row.2", "bottom_row.10"],
+                },
+                {
+                    "id": "bottom_space_c", "prompt": "",
+                    "positions": ["bottom_row.3", "bottom_row.8"],
+                },
+                {"id": "bottom_space_d", "prompt": "", "positions": ["bottom_row.9"]},
+                {"id": "bottom_battle", "prompt": "", "positions": ["bottom_row.7"]},
+                # ── side column spaces ──
+                {
+                    "id": "side_property", "prompt": "",
+                    "positions": [
+                        "left_col.0", "left_col.1", "left_col.3", "left_col.4",
+                        "right_col.1", "right_col.2", "right_col.3",
+                    ],
+                },
+                {
+                    "id": "side_battle", "prompt": "",
+                    "positions": ["left_col.2", "right_col.0", "right_col.4"],
+                },
+                # ── top row battle ──
+                {"id": "top_battle", "prompt": "", "positions": ["top_row.3"]},
+            ],
+        },
+        "feature_panels": {
+            "panels": [
+                # Left column of interior panels (3 rows × 1 col)
+                {
+                    "id": "panel_left_top",
+                    "bbox": [180, 180, 440, 420], "target_size": [260, 240],
+                    "prompt": "", "needs_active": False,
+                },
+                {
+                    "id": "panel_left_mid",
+                    "bbox": [180, 420, 440, 660], "target_size": [260, 240],
+                    "prompt": "", "needs_active": False,
+                },
+                {
+                    "id": "panel_left_bot",
+                    "bbox": [180, 660, 440, 900], "target_size": [260, 240],
+                    "prompt": "", "needs_active": False,
+                },
+                # Center-left interior panels
+                {
+                    "id": "panel_cleft_top",
+                    "bbox": [440, 180, 700, 420], "target_size": [260, 240],
+                    "prompt": "", "needs_active": False,
+                },
+                {
+                    "id": "panel_cleft_mid",
+                    "bbox": [440, 420, 700, 660], "target_size": [260, 240],
+                    "prompt": "", "needs_active": False,
+                },
+                {
+                    "id": "panel_cleft_bot",
+                    "bbox": [440, 660, 700, 900], "target_size": [260, 240],
+                    "prompt": "", "needs_active": False,
+                },
+                # Center-right interior panels
+                {
+                    "id": "panel_cright_top",
+                    "bbox": [1220, 180, 1480, 420], "target_size": [260, 240],
+                    "prompt": "", "needs_active": False,
+                },
+                {
+                    "id": "panel_cright_mid",
+                    "bbox": [1220, 420, 1480, 660], "target_size": [260, 240],
+                    "prompt": "", "needs_active": False,
+                },
+                {
+                    "id": "panel_cright_bot",
+                    "bbox": [1220, 660, 1480, 900], "target_size": [260, 240],
+                    "prompt": "", "needs_active": False,
+                },
+                # Right column of interior panels
+                {
+                    "id": "panel_right_top",
+                    "bbox": [1480, 180, 1740, 420], "target_size": [260, 240],
+                    "prompt": "", "needs_active": False,
+                },
+                {
+                    "id": "panel_right_mid",
+                    "bbox": [1480, 420, 1740, 660], "target_size": [260, 240],
+                    "prompt": "", "needs_active": False,
+                },
+                {
+                    "id": "panel_right_bot",
+                    "bbox": [1480, 660, 1740, 900], "target_size": [260, 240],
+                    "prompt": "", "needs_active": False,
+                },
+            ],
         },
     }
     (root / "catalog.yml").write_text(yaml.safe_dump(catalog_skeleton, sort_keys=False))

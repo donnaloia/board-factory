@@ -38,6 +38,7 @@
     if (!statusRunOnce) {
       statusRunOnce = true;
       runStatusChecks();
+      runOpenAiCheck();
     }
   }
 
@@ -64,7 +65,7 @@
         t.classList.toggle("is-active", t === tab));
       modal.querySelectorAll(".account-tab-panel").forEach((p) =>
         p.classList.toggle("is-active", p.dataset.tabPanel === target));
-      if (target === "apikey") runStatusChecks();
+      if (target === "apikey") { runStatusChecks(); runOpenAiCheck(); }
     });
   });
 
@@ -78,6 +79,7 @@
       renderGlyphGrid(profile.glyphs, profile.icon_glyph);
       pendingGlyph = profile.icon_glyph;
       pendingColor = profile.icon_color;
+      refreshOpenAiStatus(profile.openai_api_key_set);
     } catch (_) { /* surface nothing — modal still works for static fields */ }
   }
 
@@ -151,38 +153,28 @@
     }
   });
 
-  // ────────── Image-generation API keys ──────────
+  // ────────── Connection API keys ──────────
   //
-  // One save button covers both providers because the back-end route uses
-  // "absent field = no change" semantics. We only put a key on the wire if
-  // the artist actually typed into that input — empty inputs stay absent
-  // so unrelated keys aren't accidentally cleared.
+  // Each provider has its own save button. The back-end route uses
+  // "absent field = no change" semantics, so we only put the key for
+  // the provider the user actually edited on the wire.
 
-  document.getElementById("apikey-save").addEventListener("click", async () => {
-    const pixInput = document.getElementById("apikey-pixellab");
-    const aiInput = document.getElementById("apikey-openai");
-    const status = document.getElementById("apikey-status");
-
-    const pixValue = pixInput.value.trim();
-    const aiValue = aiInput.value.trim();
-
-    if (!pixValue && !aiValue) {
-      status.textContent = "Type a new key in either field to save";
+  async function saveApiKey(fieldId, bodyKey, statusId, inputPlaceholderKey, afterSave) {
+    const input = document.getElementById(fieldId);
+    const status = document.getElementById(statusId);
+    const value = input.value.trim();
+    if (!value) {
+      status.textContent = "Type a new key to save";
       status.className = "account-status is-error";
       return;
     }
-
-    const body = {};
-    if (pixValue) body.pixellab_api_key = pixValue;
-    if (aiValue) body.openai_api_key = aiValue;
-
     status.textContent = "Saving…";
     status.className = "account-status is-busy";
     try {
       const r = await fetch("/api/profile/api-key", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ [bodyKey]: value }),
       });
       if (!r.ok) {
         const err = await r.text();
@@ -194,35 +186,63 @@
       }
       const updated = await r.json();
       profile = { ...profile, ...updated };
-
-      if (pixValue) {
-        pixInput.value = "";
-        pixInput.placeholder = "•••••• " + (updated.pixellab_api_key_last4 || "");
-      }
-      if (aiValue) {
-        aiInput.value = "";
-        aiInput.placeholder = "•••••• " + (updated.openai_api_key_last4 || "");
-      }
-
-      // Tell the artist exactly what was saved — "Saved" alone hides whether
-      // both keys actually persisted vs. just the one they meant to update.
-      const savedLabels = [];
-      if (pixValue) savedLabels.push("PixelLab");
-      if (aiValue) savedLabels.push("OpenAI");
-      status.textContent = "Saved " + savedLabels.join(" + ");
+      input.value = "";
+      input.placeholder = "•••••• " + (updated[inputPlaceholderKey] || "");
+      status.textContent = "Saved";
       status.className = "account-status is-ok";
       setTimeout(() => { status.textContent = ""; status.className = "account-status"; }, 1800);
-
-      // Only re-check connectivity if PixelLab actually changed — re-pinging
-      // PixelLab when only the OpenAI slot moved is wasted work.
-      if (pixValue) runStatusChecks();
+      if (afterSave) afterSave(updated);
     } catch (e) {
       status.textContent = "Network error";
       status.className = "account-status is-error";
     }
+  }
+
+  document.getElementById("apikey-pixellab-save").addEventListener("click", () => {
+    saveApiKey(
+      "apikey-pixellab",
+      "pixellab_api_key",
+      "apikey-pixellab-status",
+      "pixellab_api_key_last4",
+      () => runStatusChecks(),
+    );
+  });
+
+  document.getElementById("apikey-openai-save").addEventListener("click", () => {
+    saveApiKey(
+      "apikey-openai",
+      "openai_api_key",
+      "apikey-openai-status",
+      "openai_api_key_last4",
+      (updated) => refreshOpenAiStatus(updated.openai_api_key_set),
+    );
   });
 
   document.getElementById("apikey-test").addEventListener("click", () => runStatusChecks());
+  document.getElementById("apikey-openai-test").addEventListener("click", () => runOpenAiCheck());
+
+  function refreshOpenAiStatus(keySet) {
+    const row = modal.querySelector('[data-check="openai-saved"]');
+    if (!row) return;
+    row.classList.remove("is-ok", "is-error", "is-busy");
+    row.classList.add(keySet ? "is-ok" : "is-error");
+    row.querySelector(".status-detail").textContent = keySet ? "saved" : "not set";
+  }
+
+  async function runOpenAiCheck() {
+    setRowBusy("openai-live");
+    try {
+      const r = await fetch("/api/profile/openai-status");
+      if (!r.ok) {
+        setRow("openai-live", false, "check failed (HTTP " + r.status + ")");
+        return;
+      }
+      const data = await r.json();
+      setRow("openai-live", data.ok, data.detail);
+    } catch (e) {
+      setRow("openai-live", false, "network error");
+    }
+  }
 
   // ────────── status checks ──────────
 

@@ -62,6 +62,27 @@
     </form>
     {% endif %}
 
+    {# ── AI analysis: sends the mockup to GPT-4o, fills all catalog prompts ──
+       Active only when an OpenAI key is saved. When no key is present the tile
+       is ghosted and shows where to add one.
+    #}
+    {% if has_openai_key %}
+    <form method="post" action="/b/{{ board_id }}/actions/analyze" data-action class="board-action-form">
+      <button type="submit" class="board-action is-primary">
+        <span class="board-action-eyebrow">AI · GPT-4o</span>
+        <span class="board-action-label">Analyze &amp; fill prompts</span>
+        <span class="board-action-est">~${{ "%.2f"|format(analyze_cost) }} &middot; ~15s</span>
+      </button>
+    </form>
+    {% else %}
+    <span class="board-action is-ghosted" aria-disabled="true"
+          title="Save an OpenAI API key in Account → Connections to enable this.">
+      <span class="board-action-eyebrow">AI · GPT-4o</span>
+      <span class="board-action-label">Analyze &amp; fill prompts</span>
+      <span class="board-action-est">needs OpenAI key</span>
+    </span>
+    {% endif %}
+
     {# Spaces: bulk-generate every empty space. The board shows N positions,
        but multiple positions can share one design id (e.g. seven copies of
        side_property). Cost is billed per design (one provider call fills all

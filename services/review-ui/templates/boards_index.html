@@ -36,8 +36,8 @@
           <span class="thumb-plus" aria-hidden="true">+</span>
         </div>
         <div class="board-card-meta">
-          <h2 class="board-card-title">New board</h2>
-          <p class="board-card-id" id="new-board-status">Create a new board</p>
+          <h2 class="board-card-title">New Board</h2>
+          <p class="board-card-id" id="new-board-status">boards/something-fun</p>
         </div>
       </button>
     </li>
@@ -56,7 +56,7 @@
     trigger.disabled = true;
     card.classList.add('is-creating');
     trigger.setAttribute('aria-busy', 'true');
-    status.textContent = 'Creating...';
+    status.textContent = 'Creating…';
 
     const fd = new FormData();
     fd.set('project_name', 'Untitled Board');
@@ -67,7 +67,7 @@
       trigger.disabled = false;
       card.classList.remove('is-creating');
       trigger.removeAttribute('aria-busy');
-      status.textContent = 'Create a new board';
+      status.textContent = 'boards/something-fun';
       alert('Could not create board: ' + t);
       return;
     }
