@@ -11,8 +11,8 @@ COPY services/review-ui/requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Install the boardfactory pipeline as an editable package so the web app
-# can call its steps directly (style, generate, cleanup, etc.) via the
-# pipeline_adapters module.
+# can call its ops directly (draw_cell, orchestrate, style, preview, etc.)
+# via the pipeline_adapters module.
 COPY pipeline/requirements.txt /tmp/pipeline-requirements.txt
 RUN pip install --no-cache-dir -r /tmp/pipeline-requirements.txt
 COPY pipeline/pyproject.toml  /tmp/pipeline/pyproject.toml
@@ -26,6 +26,10 @@ COPY services/review-ui/spec_data.py          /app/
 COPY services/review-ui/jobs.py               /app/
 COPY services/review-ui/cost_ledger.py        /app/
 COPY services/review-ui/pipeline_adapters.py  /app/
+COPY services/review-ui/auth.py               /app/
+COPY services/review-ui/sessions.py           /app/
+COPY services/review-ui/users.py              /app/
+COPY services/review-ui/pixellab_status.py    /app/
 COPY services/review-ui/templates             /app/templates
 COPY services/review-ui/static                /app/static
 

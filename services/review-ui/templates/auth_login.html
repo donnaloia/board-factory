@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · Board Factory</title>
+  <link rel="stylesheet" href="/static/style.css?v={{ asset_v('style.css') }}">
+  <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='4' fill='%23c8995b'/></svg>">
+</head>
+<body class="auth-body">
+<main class="auth-stage">
+  <div class="auth-card">
+    <div class="auth-brand">
+      <span class="auth-mark">◆</span>
+      <span class="auth-mark-label">Board Factory</span>
+    </div>
+
+    <h1 class="auth-title">Sign in</h1>
+    <p class="auth-sub">Welcome back.</p>
+
+    {% if error %}<div class="auth-banner is-error">{{ error }}</div>{% endif %}
+    {% if info %}<div class="auth-banner">{{ info }}</div>{% endif %}
+
+    <form class="auth-form" method="post" action="/login">
+      <input type="hidden" name="next" value="{{ next }}">
+      <label class="field">
+        <span class="field-label">Email</span>
+        <input type="email" name="email" required autofocus autocomplete="email">
+      </label>
+      <label class="field">
+        <span class="field-label">Password</span>
+        <input type="password" name="password" required autocomplete="current-password">
+      </label>
+      <button type="submit" class="auth-submit">
+        <span class="arrow">→</span>
+        <span>Sign in</span>
+      </button>
+    </form>
+
+    <div class="auth-foot">
+      <a href="/forgot-password" class="auth-link">Forgot password</a>
+    </div>
+  </div>
+</main>
+</body>
+</html>

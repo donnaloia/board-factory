@@ -5,20 +5,28 @@ Each Board Factory project ("board") owns a self-contained directory tree:
     boards/<board-id>/
         catalog.yml
         workspace/
-            style/  candidates/  cleaned/  approved/  refinements/
-            preview/  logs/  history/  live/
+            style/        # palette + style sheet (cheap, local)
+            history/      # every generated version, per cell, with sidecars
+            live/         # current promoted asset per cell
+            preview/      # composited board_idle / board_active
+            refinements/  # centerpiece masked-inpaint outputs
+            logs/
+            frames/       # 9-slice house frame for functional panels
         mockup/
-        board_assets/
+        board_assets/     # exported tiles + manifest for the engine
 
 The active board id is held as module-level mutable state so every existing
 `config.WORKSPACE`-style access keeps working without threading a board id
-through every call site. The web app calls `set_board()` per request; the CLI
-calls it once at startup based on `--board` / `BOARDFACTORY_BOARD`.
+through every call site. The web app calls `set_board()` per request via
+`scope_board()`.
+
+Legacy paths (`candidates/`, `cleaned/`, `approved/`) are still resolvable
+so the boot-time migration can read them, but `ensure_dirs()` no longer
+creates them — once migrated, they're deleted and never come back.
 
 Threading note: this is process-global state. The web app holds a lock around
-each request to serialize board-scoped work. That's acceptable because all
-expensive operations are already in-process job queues, not the request
-handler.
+each request to serialize board-scoped work. Acceptable because all expensive
+operations are offloaded to the JobRunner thread pool, not the request handler.
 """
 
 from __future__ import annotations
@@ -122,11 +130,16 @@ def __getattr__(name: str) -> Path:
 
 
 def ensure_dirs() -> None:
-    """Create every workspace subdir for the active board."""
+    """Create every workspace subdir the web pipeline writes to.
+
+    Note: the legacy CLI working dirs (`candidates/`, `cleaned/`, `approved/`)
+    are intentionally not pre-created. They are read by the boot-time
+    migration if they happen to exist (carrying old assets that need
+    seeding into live/ + history/) and otherwise never recreated.
+    """
     for name in (
-        "STYLE_DIR", "CANDIDATES_DIR", "CLEANED_DIR", "APPROVED_DIR",
-        "REFINEMENTS_DIR", "PREVIEW_DIR", "LOGS_DIR", "HISTORY_DIR",
-        "LIVE_DIR", "EXPORT_DIR", "MOCKUP_DIR",
+        "STYLE_DIR", "REFINEMENTS_DIR", "PREVIEW_DIR", "LOGS_DIR",
+        "HISTORY_DIR", "LIVE_DIR", "EXPORT_DIR", "MOCKUP_DIR",
     ):
         _path_for(name).mkdir(parents=True, exist_ok=True)
 

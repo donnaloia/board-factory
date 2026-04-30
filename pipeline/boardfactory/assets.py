@@ -217,3 +217,72 @@ def seed_from_legacy_approved(category: str, asset_id: str) -> Path | None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(legacy, dst)
     return dst
+
+
+# ────────────────────────── one-board legacy purge ──────────────────────────
+
+
+def purge_legacy_dirs() -> list[str]:
+    """Delete the active board's legacy `candidates/`, `cleaned/`, `approved/`
+    directories. Caller must guarantee everything worth keeping has already
+    been seeded into live/ + history/.
+
+    Returns a list of human-readable directory names that were removed. Safe
+    to call repeatedly — missing dirs are silently skipped.
+    """
+    removed: list[str] = []
+    workspace = config.WORKSPACE
+    for name in ("candidates", "cleaned", "approved"):
+        d = workspace / name
+        if d.exists():
+            shutil.rmtree(d, ignore_errors=True)
+            removed.append(name)
+    return removed
+
+
+# ────────────────────────── re-cleanup (free, no provider) ──────────────────────────
+
+
+# Imported lazily inside the function so this module stays cheap to import
+# (the steps modules pull in the rich-free pipeline; we want no cycles).
+
+
+def reclean_live(category: str, asset_id: str) -> str | None:
+    """Re-run pixel cleanup on the current live image, push the result to
+    history with operation=clean, and promote it as the new live.
+
+    Returns the basename of the new history entry on success. Raises if
+    there's no palette yet (style step hasn't been run) or no live image to
+    clean.
+
+    Free, fast, no provider call. Used by the "Cleanup image" side-panel
+    action — useful when the palette changed after the asset was generated
+    or when the asset is one quantize pass away from looking right.
+    """
+    from .palette import load_palette
+
+    pal_path = config.STYLE_DIR / "palette.json"
+    if not pal_path.exists():
+        raise RuntimeError(
+            "No palette found. Run the style step first so cleanup has a target palette."
+        )
+    palette = load_palette(pal_path)
+
+    live = live_path(category, asset_id)
+    if not live.exists():
+        raise RuntimeError(
+            f"No live image to clean for {category}/{asset_id}. Generate one first."
+        )
+
+    # Lazy import to avoid pulling the ops package eagerly.
+    from .ops.draw_cell import _cleanup_one
+    cleaned = _cleanup_one(live.read_bytes(), palette)
+
+    out = push_to_history(
+        category, asset_id, cleaned,
+        operation=OP_CLEAN,
+        prompt=None,
+        extras={"palette_size": len(palette)},
+    )
+    promote(category, asset_id, out.name)
+    return out.name

@@ -1,0 +1,15 @@
+{
+  "users": [
+    {
+      "id": "822b2f9a68d2460c970e077c6f306c20",
+      "email": "admin@admin.com",
+      "password_hash": "$2b$12$mrhgoGQ.takyqvPHWc55M.of5VYGybM7N6ndYA6zJb3EeR4s5fZB2",
+      "display_name": "Donnaloia",
+      "icon_glyph": "\u2663",
+      "icon_color": "#c8995b",
+      "pixellab_api_key": "",
+      "created_ms": 1777503733179,
+      "last_login_ms": 1777512963866
+    }
+  ]
+}

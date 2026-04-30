@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Set up your account · Board Factory</title>
+  <link rel="stylesheet" href="/static/style.css?v={{ asset_v('style.css') }}">
+  <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='4' fill='%23c8995b'/></svg>">
+</head>
+<body class="auth-body">
+<main class="auth-stage">
+  <div class="auth-card">
+    <div class="auth-brand">
+      <span class="auth-mark">◆</span>
+      <span class="auth-mark-label">Board Factory</span>
+    </div>
+
+    <h1 class="auth-title">Set up your account</h1>
+    <p class="auth-sub">First-run only. After this is created, registration is closed.</p>
+
+    {% if error %}<div class="auth-banner is-error">{{ error }}</div>{% endif %}
+
+    <form class="auth-form" method="post" action="/register">
+      <label class="field">
+        <span class="field-label">Display name</span>
+        <input type="text" name="display_name" placeholder="Don" autofocus>
+      </label>
+      <label class="field">
+        <span class="field-label">Email</span>
+        <input type="email" name="email" required autocomplete="email">
+      </label>
+      <label class="field">
+        <span class="field-label">Password</span>
+        <input type="password" name="password" required minlength="8" autocomplete="new-password">
+        <span class="field-hint">At least 8 characters. There is no admin reset — keep this safe.</span>
+      </label>
+      <button type="submit" class="auth-submit">
+        <span class="arrow">→</span>
+        <span>Create account</span>
+      </button>
+    </form>
+  </div>
+</main>
+</body>
+</html>

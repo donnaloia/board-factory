@@ -1,22 +1,26 @@
-"""Step 6: State generation for approved feature panels.
+"""Active-state generation for live tiles.
 
-For each approved panel that has `needs_active: true`, applies a procedural
-shader-style transform to produce the active variant. Procedural is chosen over
-AI generation because it preserves pixel discipline perfectly while AI breaks it.
+For each tile (panels + centerpiece) flagged with `needs_active=True`, apply
+a procedural shader-style transform to produce its active variant. We keep
+this procedural rather than asking the AI to generate variants because:
 
-Three active kinds are supported:
-- glow: brighten + add a subtle red overlay; for tiles that should look "lit"
-- pulse: bright outline + saturation boost; for tiles that should pulse rhythmically
-- flicker: warmer color shift + slight blur on the brightest pixels; for fire tiles
+- Procedural preserves the pixel grid perfectly. AI breaks it.
+- Procedural is deterministic and free.
+- The active-vs-idle delta is a stylistic uplift (glow / pulse / flicker),
+  not a structural redesign — exactly what filters are good at.
+
+Reads the live image for each tile, writes the active variant alongside as
+`<id>_active.png` in `live/<category>/`. The compositor + exporter pick it
+up automatically next time they run.
 """
 
 from __future__ import annotations
 
 from PIL import Image, ImageEnhance, ImageFilter
 
-from .. import config
+from .. import assets, config
+from ..ops.progress import ProgressSink
 from ..palette import load_palette, quantize_to_palette
-from ..progress import RunStats, progress_bar, step
 from ..schemas import Catalog
 
 
@@ -46,49 +50,58 @@ def _flicker(img: Image.Image) -> Image.Image:
 _TRANSFORMS = {"glow": _glow, "pulse": _pulse, "flicker": _flicker}
 
 
-def do_states(run: RunStats, catalog: Catalog) -> None:
+def _active_path(category: str, asset_id: str):
+    """Where the active variant for this tile lives on disk."""
+    if category == "centerpiece":
+        return config.LIVE_DIR / "centerpiece" / "centerpiece_active.png"
+    return config.LIVE_DIR / category / f"{asset_id}_active.png"
+
+
+def do_states(catalog: Catalog, sink: ProgressSink) -> None:
     pal_path = config.STYLE_DIR / "palette.json"
     palette = load_palette(pal_path) if pal_path.exists() else None
-    panels = [p for p in catalog.all_panels() if p.needs_active and p.active_kind != "none"]
 
-    centerpiece = catalog.centerpiece
-    cp_needs = centerpiece.needs_active and centerpiece.active_kind != "none"
-    work = list(panels) + ([("__centerpiece__", centerpiece)] if cp_needs else [])
+    panels = [p for p in catalog.all_panels()
+              if p.needs_active and p.active_kind != "none"]
+    cp = catalog.centerpiece
+    cp_needs = cp.needs_active and cp.active_kind != "none"
 
-    with step(run, "states") as s:
-        s.extras["panels"] = str(len(panels))
-        s.extras["centerpiece"] = "yes" if cp_needs else "no"
-        if not work:
-            s.extras["note"] = "no active states needed"
-            return
-        with progress_bar("Building active variants", total=len(work)) as bar:
-            for entry in work:
-                if isinstance(entry, tuple):
-                    asset_id, spec = entry
-                    base_path = config.APPROVED_DIR / "centerpiece.png"
-                    out_path = config.APPROVED_DIR / "centerpiece_active.png"
-                else:
-                    spec = entry
-                    asset_id = spec.id
-                    base_path = config.APPROVED_DIR / "panels" / f"{asset_id}.png"
-                    out_path = config.APPROVED_DIR / "panels" / f"{asset_id}_active.png"
-                bar.set_current(f"{asset_id} [dim]→ {spec.active_kind}")
+    work: list[tuple[str, str, str]] = []  # (category, asset_id, active_kind)
+    for p in panels:
+        work.append(("panels", p.id, p.active_kind))
+    if cp_needs:
+        work.append(("centerpiece", "centerpiece", cp.active_kind))
 
-                if not base_path.exists():
-                    s.failures.append(f"{asset_id}: base not approved at {base_path.name}")
-                    bar.write(f"[red]✗[/red] {asset_id}: no approved base")
-                    bar.advance()
-                    continue
-                try:
-                    fn = _TRANSFORMS[spec.active_kind]
-                    img = Image.open(base_path).convert("RGBA")
-                    transformed = fn(img)
-                    if palette:
-                        transformed = quantize_to_palette(transformed, palette)
-                    out_path.parent.mkdir(parents=True, exist_ok=True)
-                    transformed.save(out_path)
-                    s.items += 1
-                except Exception as e:
-                    s.failures.append(f"{asset_id}: {e}")
-                    bar.write(f"[red]✗[/red] {asset_id}: {e}")
-                bar.advance()
+    if not work:
+        sink.log("no active states needed")
+        return
+
+    sink.start("build active states", total=len(work))
+    failures: list[str] = []
+    for category, asset_id, kind in work:
+        base_path = assets.live_path(category, asset_id)
+        out_path = _active_path(category, asset_id)
+        label = f"{asset_id} -> {kind}"
+
+        if not base_path.exists():
+            failures.append(f"{asset_id}: no live image to derive active from")
+            sink.log(f"FAIL {label}: no live image at {base_path.name}")
+            sink.step(asset_id)
+            continue
+
+        try:
+            fn = _TRANSFORMS[kind]
+            img = Image.open(base_path).convert("RGBA")
+            transformed = fn(img)
+            if palette:
+                transformed = quantize_to_palette(transformed, palette)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            transformed.save(out_path)
+            sink.step(label)
+        except Exception as e:
+            failures.append(f"{asset_id}: {e}")
+            sink.log(f"FAIL {label}: {e}")
+            sink.step(asset_id)
+
+    if failures:
+        sink.log(f"states completed with {len(failures)} failure(s)")

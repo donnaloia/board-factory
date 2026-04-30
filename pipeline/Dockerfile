@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 
-# System libraries needed by Pillow
+# System libraries needed by Pillow.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libjpeg62-turbo \
     libpng16-16 \
@@ -16,6 +16,7 @@ COPY pyproject.toml /app/
 COPY boardfactory /app/boardfactory
 RUN pip install --no-cache-dir -e .
 
+# This image is a library used by services/review-ui — there is no CLI
+# entrypoint anymore. The web app installs this package editable and calls
+# `boardfactory.ops.draw_cell` directly.
 WORKDIR /repo
-ENTRYPOINT []
-CMD ["boardfactory", "--help"]

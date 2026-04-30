@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Forgot password · Board Factory</title>
+  <link rel="stylesheet" href="/static/style.css?v={{ asset_v('style.css') }}">
+  <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='4' fill='%23c8995b'/></svg>">
+</head>
+<body class="auth-body">
+<main class="auth-stage">
+  <div class="auth-card">
+    <div class="auth-brand">
+      <span class="auth-mark">◆</span>
+      <span class="auth-mark-label">Board Factory</span>
+    </div>
+
+    <h1 class="auth-title">Forgot password</h1>
+
+    {% if sent %}
+      <p class="auth-sub">If that email is on file, we'll send a reset link shortly.</p>
+      <div class="auth-banner">
+        <strong>Heads up.</strong> This screen is a placeholder.
+        Email sending isn't wired up on this build, so no actual mail will arrive.
+        To reset, delete <code>boards/.users.json</code> on the server and the next
+        visitor can register again.
+      </div>
+    {% else %}
+      <p class="auth-sub">Tell us the email on the account.</p>
+      <form class="auth-form" method="post" action="/forgot-password">
+        <label class="field">
+          <span class="field-label">Email</span>
+          <input type="email" name="email" required autofocus autocomplete="email">
+        </label>
+        <button type="submit" class="auth-submit">
+          <span class="arrow">→</span>
+          <span>Send reset link</span>
+        </button>
+      </form>
+    {% endif %}
+
+    <div class="auth-foot">
+      <a href="/login" class="auth-link">Back to sign in</a>
+    </div>
+  </div>
+</main>
+</body>
+</html>

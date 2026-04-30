@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Board Factory{% endblock %}</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v={{ asset_v('style.css') }}">
   <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='4' fill='%23c8995b'/></svg>">
 </head>
 <body>
@@ -52,9 +52,17 @@
       </div>
 
       {% if board_id %}
-      <a class="header-link" href="/b/{{ board_id }}/frame">Frame</a>
       <a class="header-link" href="/b/{{ board_id }}/preview">Preview</a>
       <a class="header-link" href="/b/{{ board_id }}/spec" target="_blank" rel="noopener">Tech spec</a>
+      {% endif %}
+
+      {% if user %}
+      <button type="button" class="user-avatar" id="user-avatar"
+              aria-label="Account ({{ user.display_name }})"
+              title="{{ user.display_name }}"
+              style="--avatar-color: {{ user.icon_color }}">
+        <span class="user-avatar-glyph">{{ user.icon_glyph }}</span>
+      </button>
       {% endif %}
     </div>
   </header>
@@ -78,7 +86,175 @@
 
 </div>
 
+{% if user %}
+{# ───── Account modal (hidden by default; opened by #user-avatar click) ───── #}
+<div id="account-modal" class="account-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="account-modal-title">
+  <div class="account-modal-scrim" data-close-modal></div>
+  <div class="account-modal-card">
+    <header class="account-modal-head">
+      <h2 id="account-modal-title">Account</h2>
+      <button type="button" class="account-modal-x" data-close-modal aria-label="Close">×</button>
+    </header>
+
+    <nav class="account-tabs">
+      <button type="button" class="account-tab is-active" data-tab="profile">Profile</button>
+      <button type="button" class="account-tab" data-tab="apikey">API key</button>
+      <button type="button" class="account-tab" data-tab="security">Security</button>
+    </nav>
+
+    <section class="account-tab-panel is-active" data-tab-panel="profile">
+      <div class="account-profile-row">
+        <div class="account-icon-preview" id="profile-icon-preview" style="--avatar-color: {{ user.icon_color }}">
+          <span id="profile-icon-glyph">{{ user.icon_glyph }}</span>
+        </div>
+        <div class="account-profile-fields">
+          <label class="field">
+            <span class="field-label">Display name</span>
+            <input type="text" id="profile-display-name" value="{{ user.display_name }}" maxlength="80">
+          </label>
+          <label class="field">
+            <span class="field-label">Email</span>
+            <input type="email" id="profile-email" value="{{ user.email }}">
+          </label>
+        </div>
+      </div>
+
+      <div class="account-icon-picker">
+        <span class="field-label">Icon</span>
+        <div class="glyph-grid" id="glyph-grid"></div>
+        <div class="color-row">
+          <label class="field-label">Color</label>
+          <input type="color" id="profile-icon-color" value="{{ user.icon_color }}">
+        </div>
+      </div>
+
+      <div class="account-actions">
+        <button type="button" class="account-save" id="profile-save">
+          <span class="arrow">→</span>
+          <span>Save profile</span>
+        </button>
+        <span class="account-status" id="profile-status"></span>
+      </div>
+    </section>
+
+    <section class="account-tab-panel" data-tab-panel="apikey">
+      <h3 class="account-h3">Image generation</h3>
+      <p class="account-blurb">
+        Keys for the providers that draw your board art. Stored on this server
+        only — never sent back to the browser once saved. Per-user keys
+        override the Compose-level env vars for any pipeline action you trigger.
+      </p>
+
+      {# ───── Provider 1: PixelLab ─────
+         The active image-gen provider today. Status checks below ping this one. #}
+      <div class="apikey-block">
+        <div class="apikey-block-head">
+          <span class="apikey-provider">PixelLab</span>
+          <span class="apikey-tag is-active">Active</span>
+        </div>
+        <p class="apikey-block-desc">
+          Pixel-art txt2img / img2img / inpaint. Used by every space, panel,
+          and centerpiece generation today.
+        </p>
+        <label class="field">
+          <span class="field-label">PixelLab API key</span>
+          <input type="password" id="apikey-pixellab"
+                 placeholder="{% if user.pixellab_api_key_set %}•••••• {{ user.pixellab_api_key_last4 }}{% else %}sk-...{% endif %}"
+                 autocomplete="off">
+          <span class="field-hint">Leave blank to keep the current key.</span>
+        </label>
+      </div>
+
+      {# ───── Provider 2: OpenAI / ChatGPT ─────
+         Slot for OpenAI image-gen. No pipeline op reads this yet — the key is
+         saved per-user so the field is ready when we add a gpt-image-based op. #}
+      <div class="apikey-block">
+        <div class="apikey-block-head">
+          <span class="apikey-provider">OpenAI / ChatGPT</span>
+          <span class="apikey-tag">Not used yet</span>
+        </div>
+        <p class="apikey-block-desc">
+          Reserved for future GPT-image generation (e.g. AI-drawn frames or
+          alternate-style assets). Saving a key here has no effect today.
+        </p>
+        <label class="field">
+          <span class="field-label">OpenAI API key</span>
+          <input type="password" id="apikey-openai"
+                 placeholder="{% if user.openai_api_key_set %}•••••• {{ user.openai_api_key_last4 }}{% else %}sk-...{% endif %}"
+                 autocomplete="off">
+          <span class="field-hint">Leave blank to keep the current key.</span>
+        </label>
+      </div>
+
+      <div class="account-actions">
+        <button type="button" class="account-save" id="apikey-save">
+          <span class="arrow">→</span>
+          <span>Save image-gen keys</span>
+        </button>
+        <button type="button" class="account-secondary" id="apikey-test">Test PixelLab</button>
+        <span class="account-status" id="apikey-status"></span>
+      </div>
+
+      <hr class="account-rule">
+
+      <h3 class="account-h3">PixelLab connection</h3>
+      <p class="account-blurb">
+        Live checks against the PixelLab API. The OpenAI key has no
+        connectivity check yet — it's saved but not exercised.
+      </p>
+      <div class="status-checks" id="status-checks">
+        <div class="status-row" data-check="reachable">
+          <span class="status-dot"></span>
+          <span class="status-label">PixelLab API reachable</span>
+          <span class="status-detail"></span>
+        </div>
+        <div class="status-row" data-check="authenticated">
+          <span class="status-dot"></span>
+          <span class="status-label">API key valid</span>
+          <span class="status-detail"></span>
+        </div>
+        <div class="status-row" data-check="quota">
+          <span class="status-dot"></span>
+          <span class="status-label">Credits remaining</span>
+          <span class="status-detail"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="account-tab-panel" data-tab-panel="security">
+      <h3 class="account-h3">Change password</h3>
+      <label class="field">
+        <span class="field-label">Current password</span>
+        <input type="password" id="pw-current" autocomplete="current-password">
+      </label>
+      <label class="field">
+        <span class="field-label">New password</span>
+        <input type="password" id="pw-new" minlength="8" autocomplete="new-password">
+        <span class="field-hint">At least 8 characters.</span>
+      </label>
+      <div class="account-actions">
+        <button type="button" class="account-save" id="pw-save">
+          <span class="arrow">→</span>
+          <span>Update password</span>
+        </button>
+        <a href="/forgot-password" class="account-secondary" target="_blank" rel="noopener">Forgot password</a>
+        <span class="account-status" id="pw-status"></span>
+      </div>
+
+      <hr class="account-rule">
+
+      <h3 class="account-h3">Session</h3>
+      <p class="account-blurb">Signed in as <strong>{{ user.email }}</strong>.</p>
+      <form method="post" action="/logout" class="account-actions">
+        <button type="submit" class="account-secondary danger">Sign out</button>
+      </form>
+    </section>
+  </div>
+</div>
+{% endif %}
+
 <script src="/static/jobs.js"></script>
+{% if user %}<script src="/static/account-modal.js"></script>{% endif %}
 {% block scripts %}{% endblock %}
 </body>
 </html>

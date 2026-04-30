@@ -4,35 +4,15 @@
 # want real generations. Without a key (or with BOARDFACTORY_PROVIDER: mock)
 # the pipeline uses a free local mock provider for testing the structure.
 #
+# Per-user API keys set via the account modal in the UI override this on a
+# per-job basis.
+#
 # To keep your keys out of git after editing, run once:
 #   make protect-keys
 #
 # (To resume tracking changes later: `make unprotect-keys`.)
 
 services:
-  boardfactory-cli:
-    build:
-      context: ./pipeline
-      dockerfile: Dockerfile
-    working_dir: /repo
-    volumes:
-      - ./:/repo
-    environment:
-      # ─── Required (or set BOARDFACTORY_PROVIDER: mock to skip) ──────────────
-      # Sign up at https://www.pixellab.ai
-      PIXELLAB_API_KEY: ""
-
-      # ─── Pipeline knobs ─────────────────────────────────────────────────────
-      BOARDFACTORY_PROVIDER: mock              # pixellab | mock
-      BOARDFACTORY_PALETTE_SIZE: "24"
-      BOARDFACTORY_SPACE_CANDIDATES: "3"
-      BOARDFACTORY_PANEL_CANDIDATES: "6"
-      BOARDFACTORY_CENTERPIECE_CANDIDATES: "12"
-      BOARDFACTORY_PROJECT_NAME: my-board
-
-      # ─── Internal ───────────────────────────────────────────────────────────
-      BOARDFACTORY_REPO: /repo
-
   review-ui:
     build:
       context: .
@@ -51,11 +31,19 @@ services:
       - ./services/review-ui/jobs.py:/app/jobs.py
       - ./services/review-ui/cost_ledger.py:/app/cost_ledger.py
       - ./services/review-ui/pipeline_adapters.py:/app/pipeline_adapters.py
+      - ./services/review-ui/auth.py:/app/auth.py
+      - ./services/review-ui/sessions.py:/app/sessions.py
+      - ./services/review-ui/users.py:/app/users.py
+      - ./services/review-ui/pixellab_status.py:/app/pixellab_status.py
     environment:
-      # Inpainting needs the same API key as the pipeline.
+      # Inpainting needs the same API key as the pipeline. Per-user keys
+      # set via the account modal override this on a per-job basis.
       PIXELLAB_API_KEY: ""
 
-      # The web app runs the pipeline in-process — same knobs as the CLI service.
+      # Cookie-signing secret. Override in production-style deploys.
+      BOARDFACTORY_SECRET: "dev-only-secret-change-me"
+
+      # Pipeline knobs read by the boardfactory library at runtime.
       BOARDFACTORY_PROVIDER: mock              # pixellab | mock
       BOARDFACTORY_PALETTE_SIZE: "24"
       BOARDFACTORY_SPACE_CANDIDATES: "3"

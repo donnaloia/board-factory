@@ -1,36 +1,34 @@
 """In-process async job runner for pipeline operations.
 
-The web app needs to invoke pipeline steps (generate, cleanup, etc.) without
-blocking the HTTP request, surface live progress to the browser, allow cancel,
-and track cost. This module is the small piece that does that.
+The web app needs to invoke pipeline ops without blocking the HTTP request,
+surface live progress to the browser, allow cancel, and track cost. This
+module is the small piece that does that.
 
 Design choices:
 - In-memory only. Single-user local app; restart loses queued jobs and any
-  job-specific log buffers. Approved assets / candidates persist on disk.
+  job-specific log buffers. Live + history assets persist on disk.
 - One asyncio task per running job, dispatched via run_in_executor since the
   underlying pipeline functions are blocking (PIL, httpx sync client, etc.).
-- Per-job log buffers capture rich.Console output by giving each job its own
-  Console pointing at a StringIO. CLI behavior is unchanged because the CLI
-  imports its own console singleton.
+- Per-job progress is reported through a structured `JobProgressSink` that
+  maps `start/step/log` events onto job.progress + job.log. The pipeline
+  doesn't know about FastAPI — it only sees the `ProgressSink` protocol.
 - Simple in-memory pub/sub for SSE: each subscriber gets an asyncio.Queue
   fed every status change. Subscribers can drop without affecting others.
 
-This module should stay UI-framework-agnostic: no FastAPI imports, no
-templating. The web layer is the caller.
+This module stays UI-framework-agnostic: no FastAPI imports, no templating.
+The web layer is the caller.
 """
 
 from __future__ import annotations
 
 import asyncio
-import io
 import threading
 import time
 import traceback
 import uuid
 from collections import deque
-from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterator
+from typing import Any, Callable
 
 
 # ────────────────────────── data model ──────────────────────────
@@ -236,53 +234,52 @@ def check_cancel(cancel: threading.Event) -> None:
         raise JobCancelled()
 
 
-@contextmanager
-def capture_console_for_job(job: Job) -> Iterator[Any]:
-    """Temporarily replace boardfactory.progress.console with a buffered Console
-    so step output streams into job.log instead of stderr.
+class JobProgressSink:
+    """Adapter that maps `ProgressSink` events onto a `Job`.
 
-    This is monkey-patch-y but it's the cheapest way to capture a third-party
-    library's pre-bound singleton. Restored on exit even on exception.
+    The pipeline ops call `start/step/log` on whatever sink they're given;
+    here we translate those into:
+
+      - `job.progress` (0.0 -> 1.0) so the front-end can draw a real bar
+      - `job.log`      (a deque of strings) so the job tray shows live notes
+      - re-publish on every event so SSE subscribers see updates immediately
+
+    `start` resets the progress numerator/denominator. Nested orchestrators
+    (a "generate all panels" loop calling `draw_cell` per panel) wrap their
+    inner calls in `_InnerSink` from boardfactory.ops.orchestrate so the
+    inner `start()` doesn't reset the outer bar.
     """
-    from rich.console import Console
 
-    from boardfactory import progress as bf_progress
+    def __init__(self, job: Job, runner: "JobRunner | None" = None):
+        self._job = job
+        self._runner = runner
+        self._total = 0
+        self._done = 0
 
-    buf = io.StringIO()
-    job_console = Console(file=buf, force_terminal=False, width=120, color_system=None)
+    def start(self, label: str, total: int) -> None:
+        self._total = max(int(total), 0)
+        self._done = 0
+        self._job.progress = 0.0 if self._total else 1.0
+        self._job.log.append(f"{label}  (0/{self._total})")
+        self._publish()
 
-    original = bf_progress.console
-    bf_progress.console = job_console
+    def step(self, label: str, advance: int = 1) -> None:
+        self._done += int(advance)
+        if self._total:
+            self._job.progress = min(1.0, self._done / self._total)
+        else:
+            # Unknown-total mode — still log so the user sees motion.
+            self._job.progress = min(1.0, self._job.progress + 0.05)
+        self._job.log.append(f"  {label}  ({self._done}/{self._total or '?'})")
+        self._publish()
 
-    last_drain = [0]
+    def log(self, msg: str) -> None:
+        self._job.log.append(str(msg))
+        self._publish()
 
-    def drain() -> None:
-        text = buf.getvalue()
-        if not text:
-            return
-        for line in text.splitlines():
-            job.log.append(line.rstrip())
-        buf.seek(0)
-        buf.truncate(0)
-        last_drain[0] = time.time()
-
-    # Periodic drain so the live log updates while the step is running.
-    drain_stop = threading.Event()
-
-    def drain_loop() -> None:
-        while not drain_stop.is_set():
-            drain()
-            time.sleep(0.5)
-
-    t = threading.Thread(target=drain_loop, daemon=True)
-    t.start()
-    try:
-        yield job_console
-    finally:
-        drain_stop.set()
-        t.join(timeout=1.0)
-        drain()
-        bf_progress.console = original
+    def _publish(self) -> None:
+        if self._runner is not None:
+            self._runner._publish(self._job)
 
 
 # ────────────────────────── singleton ──────────────────────────
