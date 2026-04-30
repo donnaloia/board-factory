@@ -12,9 +12,13 @@ def get_provider(name: str | None = None) -> PixelArtProvider:
     if name == "pixellab":
         from .pixel.pixellab import PixelLabProvider
         return PixelLabProvider()
+    if name == "openai":
+        from .openai_img import OpenAIImageProvider
+        return OpenAIImageProvider()
     if name == "mock":
         from .pixel.mock import MockProvider
         return MockProvider()
     raise ValueError(
-        f"Unknown provider {name!r}. Set BOARDFACTORY_PROVIDER to 'pixellab' or 'mock'."
+        f"Unknown provider {name!r}. "
+        f"Set BOARDFACTORY_PROVIDER to 'pixellab', 'openai', or 'mock'."
     )

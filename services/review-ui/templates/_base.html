@@ -98,7 +98,7 @@
 
     <nav class="account-tabs">
       <button type="button" class="account-tab is-active" data-tab="profile">Profile</button>
-      <button type="button" class="account-tab" data-tab="apikey">API key</button>
+      <button type="button" class="account-tab" data-tab="apikey">Connections</button>
       <button type="button" class="account-tab" data-tab="security">Security</button>
     </nav>
 
@@ -138,85 +138,84 @@
     </section>
 
     <section class="account-tab-panel" data-tab-panel="apikey">
-      <h3 class="account-h3">Image generation</h3>
       <p class="account-blurb">
-        Keys for the providers that draw your board art. Stored on this server
-        only — never sent back to the browser once saved. Per-user keys
-        override the Compose-level env vars for any pipeline action you trigger.
+        Keys are stored on this server only &mdash; never sent back to the browser
+        once saved. Per-user keys override the Compose-level env vars for any
+        pipeline action you trigger.
       </p>
 
-      {# ───── Provider 1: PixelLab ─────
-         The active image-gen provider today. Status checks below ping this one. #}
-      <div class="apikey-block">
-        <div class="apikey-block-head">
-          <span class="apikey-provider">PixelLab</span>
+      {# ───── PixelLab connection ───── #}
+      <div class="conn-block">
+        <div class="conn-block-head">
+          <span class="conn-provider">PixelLab</span>
           <span class="apikey-tag is-active">Active</span>
         </div>
-        <p class="apikey-block-desc">
-          Pixel-art txt2img / img2img / inpaint. Used by every space, panel,
-          and centerpiece generation today.
-        </p>
         <label class="field">
-          <span class="field-label">PixelLab API key</span>
+          <span class="field-label">API key</span>
           <input type="password" id="apikey-pixellab"
                  placeholder="{% if user.pixellab_api_key_set %}•••••• {{ user.pixellab_api_key_last4 }}{% else %}sk-...{% endif %}"
                  autocomplete="off">
           <span class="field-hint">Leave blank to keep the current key.</span>
         </label>
+        <div class="conn-actions">
+          <button type="button" class="account-save" id="apikey-pixellab-save">
+            <span class="arrow">→</span>
+            <span>Save</span>
+          </button>
+          <button type="button" class="account-secondary" id="apikey-test">Test</button>
+          <span class="account-status" id="apikey-pixellab-status"></span>
+        </div>
+        <div class="status-checks">
+          <div class="status-row" data-check="reachable">
+            <span class="status-dot"></span>
+            <span class="status-label">API reachable</span>
+            <span class="status-detail"></span>
+          </div>
+          <div class="status-row" data-check="authenticated">
+            <span class="status-dot"></span>
+            <span class="status-label">Key valid</span>
+            <span class="status-detail"></span>
+          </div>
+          <div class="status-row" data-check="quota">
+            <span class="status-dot"></span>
+            <span class="status-label">Credits remaining</span>
+            <span class="status-detail"></span>
+          </div>
+        </div>
       </div>
 
-      {# ───── Provider 2: OpenAI / ChatGPT ─────
-         Slot for OpenAI image-gen. No pipeline op reads this yet — the key is
-         saved per-user so the field is ready when we add a gpt-image-based op. #}
-      <div class="apikey-block">
-        <div class="apikey-block-head">
-          <span class="apikey-provider">OpenAI / ChatGPT</span>
-          <span class="apikey-tag">Not used yet</span>
+      {# ───── OpenAI / ChatGPT connection ───── #}
+      <div class="conn-block">
+        <div class="conn-block-head">
+          <span class="conn-provider">OpenAI / ChatGPT</span>
+          <span class="apikey-tag">Coming soon</span>
         </div>
-        <p class="apikey-block-desc">
-          Reserved for future GPT-image generation (e.g. AI-drawn frames or
-          alternate-style assets). Saving a key here has no effect today.
-        </p>
         <label class="field">
-          <span class="field-label">OpenAI API key</span>
+          <span class="field-label">API key</span>
           <input type="password" id="apikey-openai"
                  placeholder="{% if user.openai_api_key_set %}•••••• {{ user.openai_api_key_last4 }}{% else %}sk-...{% endif %}"
                  autocomplete="off">
           <span class="field-hint">Leave blank to keep the current key.</span>
         </label>
-      </div>
-
-      <div class="account-actions">
-        <button type="button" class="account-save" id="apikey-save">
-          <span class="arrow">→</span>
-          <span>Save image-gen keys</span>
-        </button>
-        <button type="button" class="account-secondary" id="apikey-test">Test PixelLab</button>
-        <span class="account-status" id="apikey-status"></span>
-      </div>
-
-      <hr class="account-rule">
-
-      <h3 class="account-h3">PixelLab connection</h3>
-      <p class="account-blurb">
-        Live checks against the PixelLab API. The OpenAI key has no
-        connectivity check yet — it's saved but not exercised.
-      </p>
-      <div class="status-checks" id="status-checks">
-        <div class="status-row" data-check="reachable">
-          <span class="status-dot"></span>
-          <span class="status-label">PixelLab API reachable</span>
-          <span class="status-detail"></span>
+        <div class="conn-actions">
+          <button type="button" class="account-save" id="apikey-openai-save">
+            <span class="arrow">→</span>
+            <span>Save</span>
+          </button>
+          <button type="button" class="account-secondary" id="apikey-openai-test">Test</button>
+          <span class="account-status" id="apikey-openai-status"></span>
         </div>
-        <div class="status-row" data-check="authenticated">
-          <span class="status-dot"></span>
-          <span class="status-label">API key valid</span>
-          <span class="status-detail"></span>
-        </div>
-        <div class="status-row" data-check="quota">
-          <span class="status-dot"></span>
-          <span class="status-label">Credits remaining</span>
-          <span class="status-detail"></span>
+        <div class="status-checks">
+          <div class="status-row" data-check="openai-saved">
+            <span class="status-dot"></span>
+            <span class="status-label">Key on file</span>
+            <span class="status-detail">{% if user.openai_api_key_set %}saved{% else %}not set{% endif %}</span>
+          </div>
+          <div class="status-row" data-check="openai-live">
+            <span class="status-dot"></span>
+            <span class="status-label">Live connection</span>
+            <span class="status-detail"></span>
+          </div>
         </div>
       </div>
     </section>
@@ -253,8 +252,8 @@
 </div>
 {% endif %}
 
-<script src="/static/jobs.js"></script>
-{% if user %}<script src="/static/account-modal.js"></script>{% endif %}
+<script src="/static/jobs.js?v={{ asset_v('jobs.js') }}"></script>
+{% if user %}<script src="/static/account-modal.js?v={{ asset_v('account-modal.js') }}"></script>{% endif %}
 {% block scripts %}{% endblock %}
 </body>
 </html>

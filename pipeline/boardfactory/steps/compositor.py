@@ -27,22 +27,7 @@ def do_preview(catalog: Catalog, sink: ProgressSink) -> None:
     idle_canvas = board_canvas(catalog.board_size)
     active_canvas = board_canvas(catalog.board_size)
 
-    # 1. Background: paste the mockup as a faded backdrop so missing tiles are obvious.
-    # Aspect-preserving fit (letterbox) — non-uniform stretching would distort the
-    # backdrop relative to the canvas grid and make alignment hard to eyeball.
-    mockup_path = config.BOARD_ROOT / catalog.style.reference_image
-    if mockup_path.exists():
-        mockup = Image.open(mockup_path).convert("RGBA")
-        mw, mh = mockup.size
-        cw, ch = catalog.board_size
-        scale = min(cw / mw, ch / mh)
-        scaled = mockup.resize(
-            (int(round(mw * scale)), int(round(mh * scale))), Image.LANCZOS,
-        )
-        faded = Image.eval(scaled, lambda v: v // 4)
-        offset = ((cw - faded.size[0]) // 2, (ch - faded.size[1]) // 2)
-        idle_canvas.paste(faded, offset)
-        active_canvas.paste(faded, offset)
+    # Background is already the solid board colour from board_canvas().
 
     total = (
         sum(len(d.positions) for d in catalog.all_space_designs())

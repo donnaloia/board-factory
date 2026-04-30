@@ -24,6 +24,10 @@ from typing import Callable
 import cost_ledger
 from jobs import Job, JobCancelled, JobProgressSink, check_cancel, get_runner
 
+# Exposed so server.py can show an estimate on the action tile without importing
+# the full pipeline package at import time.
+ANALYZE_COST_USD: float = 0.08
+
 
 # ────────────────────────── catalog & provider helpers ──────────────────────────
 
@@ -104,11 +108,130 @@ def estimate_generate_one(category: str, target: str | None = None) -> float:
 estimate_regen_one = estimate_generate_one
 
 
+def estimate_generate_all(
+    missing_space_count: int,
+    missing_panel_count: int,
+) -> float:
+    """Combined cost estimate for generate-all (spaces + panels)."""
+    return (
+        estimate_generate_one("spaces") * missing_space_count
+        + estimate_generate_one("panels") * missing_panel_count
+    )
+
+
 def estimate_refine() -> float:
     return 0.022  # one inpaint call
 
 
 # ────────────────────────── adapters: per-cell + style + cleanup ──────────────────────────
+
+
+def analyze_adapter(openai_key: str) -> Callable[[Job, threading.Event], float]:
+    """Adapter for the mockup-analysis step.
+
+    Sends the board mockup to GPT-4o vision, receives prompt suggestions for
+    every design / panel / centerpiece, and writes them back into catalog.yml.
+    The style prompt is also written into catalog.style.prompt.
+
+    The openai_key is passed in by the route handler (resolved from the
+    requesting user's profile so different artists can use their own keys).
+    """
+
+    def fn(job: Job, cancel: threading.Event) -> float:
+        from pathlib import Path
+
+        import yaml
+
+        from boardfactory import config
+        from boardfactory.ops import ANALYZE_COST_USD, analyze_mockup
+
+        catalog = _load_catalog()
+        check_cancel(cancel)
+
+        mockup_path = Path(config.BOARD_ROOT) / catalog.style.reference_image
+        if not mockup_path.exists():
+            raise RuntimeError(
+                f"Mockup not found at {mockup_path}. "
+                "Upload a reference image before running analysis."
+            )
+
+        result = analyze_mockup(catalog, mockup_path, openai_key, _sink(job))
+        check_cancel(cancel)
+
+        # ── patch catalog.yml on disk ──────────────────────────────────────────
+        cat_path = config.CATALOG_PATH
+        with cat_path.open() as f:
+            data = yaml.safe_load(f) or {}
+
+        # style prompt
+        if result["style_prompt"]:
+            data.setdefault("style", {})["prompt"] = result["style_prompt"]
+
+        # space design prompts
+        designs_by_id = {d["id"]: d for d in data.get("board_spaces", {}).get("designs", [])}
+        for did, prompt in result["designs"].items():
+            if prompt and did in designs_by_id:
+                designs_by_id[did]["prompt"] = prompt
+
+        # panel prompts
+        panels_by_id = {
+            p["id"]: p
+            for p in data.get("feature_panels", {}).get("panels", [])
+        }
+        for pid, prompt in result["panels"].items():
+            if prompt and pid in panels_by_id:
+                panels_by_id[pid]["prompt"] = prompt
+
+        # centerpiece prompt
+        if result["centerpiece"]:
+            data.setdefault("centerpiece", {})["prompt"] = result["centerpiece"]
+
+        cat_path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+        n_written = (
+            sum(1 for v in result["designs"].values() if v)
+            + sum(1 for v in result["panels"].values() if v)
+            + bool(result["centerpiece"])
+            + bool(result["style_prompt"])
+        )
+        job.log.append(
+            f"wrote {n_written} prompts to catalog.yml  "
+            f"(spent ~${ANALYZE_COST_USD:.2f} estimated)"
+        )
+        return ANALYZE_COST_USD
+
+    return fn
+
+
+def _resolve_provider(
+    pixellab_key: str | None = None,
+    openai_key: str | None = None,
+):
+    """Return the configured provider, injecting per-user keys as needed.
+
+    Temporarily overrides the relevant API key env var so the provider
+    constructor reads the user's saved key instead of the compose-level one.
+    Falls back to whatever the env var already holds when no key is supplied.
+    """
+    import os
+    from boardfactory.providers import get_provider
+
+    overrides: dict[str, str] = {}
+    if pixellab_key:
+        overrides["PIXELLAB_API_KEY"] = pixellab_key
+    if openai_key:
+        overrides["OPENAI_API_KEY"] = openai_key
+
+    if overrides:
+        old = {k: os.environ.get(k, "") for k in overrides}
+        for k, v in overrides.items():
+            os.environ[k] = v
+        try:
+            return get_provider()
+        finally:
+            for k, v in old.items():
+                os.environ[k] = v
+    return get_provider()
 
 
 def style_adapter() -> Callable[[Job, threading.Event], float]:
@@ -133,6 +256,8 @@ def generate_one_adapter(
     asset_id: str,
     *,
     prompt_override: str | None = None,
+    pixellab_key: str | None = None,
+    openai_key: str | None = None,
 ) -> Callable[[Job, threading.Event], float]:
     """Adapter for regenerating exactly one cell. Auto-promotes to live.
 
@@ -148,12 +273,11 @@ def generate_one_adapter(
             spec_for_panel,
             spec_for_space,
         )
-        from boardfactory.providers import get_provider
 
         catalog = _load_catalog()
         if category != "centerpiece":
             _validate_mockup_or_die(catalog)
-        provider = get_provider()
+        provider = _resolve_provider(pixellab_key, openai_key)
         check_cancel(cancel)
 
         if category == "spaces":
@@ -179,6 +303,9 @@ def generate_one_adapter(
 
 def generate_missing_adapter(
     category: str,
+    *,
+    pixellab_key: str | None = None,
+    openai_key: str | None = None,
 ) -> Callable[[Job, threading.Event], float]:
     """Adapter for "generate every cell of this category that has no live asset."
 
@@ -194,12 +321,11 @@ def generate_missing_adapter(
             generate_missing_panels,
             generate_missing_spaces,
         )
-        from boardfactory.providers import get_provider
 
         catalog = _load_catalog()
         if category != "centerpiece":
             _validate_mockup_or_die(catalog)
-        provider = get_provider()
+        provider = _resolve_provider(pixellab_key, openai_key)
         check_cancel(cancel)
 
         sink = _sink(job)
@@ -218,6 +344,43 @@ def generate_missing_adapter(
         job.log.append(
             f"generated {sum(1 for r in results if r.promoted_filename)} / "
             f"{len(results)} {category}  (spent ${spent:.2f})"
+        )
+        return spent
+
+    return fn
+
+
+def generate_all_adapter(
+    *,
+    pixellab_key: str | None = None,
+    openai_key: str | None = None,
+) -> Callable[[Job, threading.Event], float]:
+    """Adapter for "generate every empty space AND every empty UI panel."
+
+    Runs spaces first then panels, each as a sub-pass, so the job progress
+    reflects the combined total of missing assets.
+    """
+
+    def fn(job: Job, cancel: threading.Event) -> float:
+        from boardfactory.ops import generate_missing_panels, generate_missing_spaces
+
+        catalog = _load_catalog()
+        _validate_mockup_or_die(catalog)
+        provider = _resolve_provider(pixellab_key, openai_key)
+        check_cancel(cancel)
+
+        sink = _sink(job)
+        space_results = generate_missing_spaces(catalog, provider, sink)
+        check_cancel(cancel)
+        panel_results = generate_missing_panels(catalog, provider, sink)
+        check_cancel(cancel)
+
+        all_results = space_results + panel_results
+        spent = sum(r.spent_usd for r in all_results)
+        cost_ledger.record("generate.all", None, len(all_results), spent)
+        job.log.append(
+            f"generated {sum(1 for r in all_results if r.promoted_filename)} / "
+            f"{len(all_results)} assets  (spent ${spent:.2f})"
         )
         return spent
 

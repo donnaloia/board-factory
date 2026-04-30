@@ -19,6 +19,8 @@ semantics in `services/review-ui/server.py:_has_generated_asset`.
 
 from __future__ import annotations
 
+import time
+
 from .. import assets
 from ..providers import PixelArtProvider
 from ..schemas import Catalog
@@ -154,14 +156,26 @@ def _loop(
     """
     results: list[DrawResult] = []
     inner = _InnerSink(sink)
-    for aid in asset_ids:
+    for i, aid in enumerate(asset_ids):
         try:
             spec = spec_builder(catalog, aid)
         except Exception as e:
             sink.log(f"FAIL build spec for {aid}: {e}")
             continue
 
-        result = draw_cell(spec, provider, inner)
+        try:
+            result = draw_cell(spec, provider, inner)
+        except Exception as e:
+            sink.log(f"FAIL draw_cell for {aid}: {e}")
+            sink.step(aid)
+            continue
+
         results.append(result)
         sink.step(aid)
+
+        # Brief pause between requests to stay inside OpenAI rate limits.
+        # Skipped after the last item so the job doesn't stall at 100%.
+        if i < len(asset_ids) - 1:
+            time.sleep(1.5)
+
     return results

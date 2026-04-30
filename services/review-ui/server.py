@@ -21,7 +21,7 @@ from pathlib import Path
 
 import httpx
 import yaml
-from fastapi import Depends, FastAPI, HTTPException, Request, Form
+from fastapi import Depends, FastAPI, File, HTTPException, Request, Form, UploadFile
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -346,6 +346,33 @@ async def api_profile_status(request: Request):
     return JSONResponse(report.to_dict())
 
 
+@app.get("/api/profile/openai-status")
+async def api_openai_status(request: Request):
+    """Ping the OpenAI API with the user's key to verify it works.
+
+    Uses the cheapest possible call: list available models (no tokens spent).
+    Returns { ok, detail } so the client can update the live-connection dot.
+    """
+    user = auth.require_user(request)
+    key = user.openai_api_key or os.environ.get("OPENAI_API_KEY", "")
+    if not key:
+        return JSONResponse({"ok": False, "detail": "no key saved"})
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {key}"},
+            )
+        if r.status_code == 200:
+            return JSONResponse({"ok": True, "detail": "connected"})
+        if r.status_code == 401:
+            return JSONResponse({"ok": False, "detail": "invalid key"})
+        return JSONResponse({"ok": False, "detail": f"HTTP {r.status_code}"})
+    except Exception as e:
+        return JSONResponse({"ok": False, "detail": str(e)[:80]})
+
+
 # ────────────────────────── per-board path helpers ──────────────────────────
 
 
@@ -420,6 +447,14 @@ def _missing_space_ids(board_id: str, catalog: dict) -> list[str]:
         d["id"]
         for d in catalog.get("board_spaces", {}).get("designs", [])
         if not _has_generated_asset(board_id, "spaces", d["id"])
+    ]
+
+
+def _missing_panel_ids(board_id: str, catalog: dict) -> list[str]:
+    return [
+        p["id"]
+        for p in catalog.get("feature_panels", {}).get("panels", [])
+        if not _has_generated_asset(board_id, "panels", p["id"])
     ]
 
 
@@ -505,7 +540,7 @@ def _cell_status(board_id: str, category: str, asset_id: str) -> CellStatus:
     live_url = None
     if is_live:
         rel = live.relative_to(_workspace(board_id))
-        live_url = f"/b/{board_id}/asset/{rel.as_posix()}"
+        live_url = f"/b/{board_id}/asset/{rel.as_posix()}?t={int(live.stat().st_mtime)}"
 
     return CellStatus(
         asset_id=asset_id,
@@ -569,33 +604,24 @@ def _enqueue(*, label: str, operation: str, target: str | None,
     return job.id
 
 
-def _scoped_fn(board_id: str, fn, *, api_key: str | None = None):
-    """Wrap a job worker fn so it runs inside config.scope_board(board_id) AND
-    with the requesting user's PixelLab API key in the env.
-
-    The provider reads PIXELLAB_API_KEY from os.environ at construction time
-    (see providers/pixel/pixellab.py). We override it here per-job so two users
-    on the same instance use their own keys, and restore the original env on
-    return so the global state is unchanged across jobs.
-    """
+def _scoped_fn(board_id: str, fn):
+    """Wrap a job worker fn so it runs inside config.scope_board(board_id)."""
     def wrapped(job, cancel):
-        prev = os.environ.get("PIXELLAB_API_KEY")
-        try:
-            if api_key:
-                os.environ["PIXELLAB_API_KEY"] = api_key
-            with bf_config.scope_board(board_id):
-                return fn(job, cancel)
-        finally:
-            if prev is None:
-                os.environ.pop("PIXELLAB_API_KEY", None)
-            else:
-                os.environ["PIXELLAB_API_KEY"] = prev
+        with bf_config.scope_board(board_id):
+            return fn(job, cancel)
     return wrapped
 
 
-def _user_api_key(request: Request) -> str | None:
+def _user_keys(request: Request) -> dict[str, str]:
+    """Return non-empty API keys saved by the requesting user."""
     u = getattr(request.state, "user", None)
-    return u.pixellab_api_key if u and u.pixellab_api_key else None
+    keys: dict[str, str] = {}
+    if u:
+        if u.pixellab_api_key:
+            keys["pixellab_key"] = u.pixellab_api_key
+        if u.openai_api_key:
+            keys["openai_key"] = u.openai_api_key
+    return keys
 
 
 def _load_spec_prose() -> dict[str, str]:
@@ -689,7 +715,9 @@ def board_view(request: Request, board_id: str):
     designs_done = sum(1 for s in space_status.values() if s.approved)
     panels_done = sum(1 for s in panel_status.values() if s.approved)
     missing_space_ids = _missing_space_ids(board_id, catalog)
+    missing_panel_ids = _missing_panel_ids(board_id, catalog)
     n_missing_designs = len(missing_space_ids)
+    n_missing_panels = len(missing_panel_ids)
     generated_designs = n_designs - n_missing_designs
 
     # The board shows N positions; each design id can fill multiple positions
@@ -706,7 +734,12 @@ def board_view(request: Request, board_id: str):
     generated_positions = total_positions - missing_positions
 
     per_space_cost = pipeline_adapters.estimate_generate_one("spaces")
-    space_generate_estimate = per_space_cost * n_missing_designs
+    per_panel_cost = pipeline_adapters.estimate_generate_one("panels")
+    all_generate_estimate = pipeline_adapters.estimate_generate_all(
+        n_missing_designs, n_missing_panels
+    )
+    n_missing_all = n_missing_designs + n_missing_panels
+    n_generated_all = generated_designs + (n_panels - n_missing_panels)
 
     frame_overlay_url = None
     frame_block = catalog.get("frame", {}) or {}
@@ -720,10 +753,18 @@ def board_view(request: Request, board_id: str):
         frame_overlay_url=frame_overlay_url,
     )
 
+    user = getattr(request.state, "user", None)
+    has_openai_key = bool(
+        (user and user.openai_api_key)
+        or os.environ.get("OPENAI_API_KEY", "")
+    )
+
     ctx = _base_context(board_id, request)
     ctx.update({
         "board_size": catalog["board_size"],
         "svg_markup": svg_markup,
+        "has_openai_key": has_openai_key,
+        "analyze_cost": pipeline_adapters.ANALYZE_COST_USD,
         "stats": {
             "designs_total": n_designs,
             "designs_done": designs_done,
@@ -731,21 +772,17 @@ def board_view(request: Request, board_id: str):
             "panels_done": panels_done,
             "centerpiece_done": cp_status.approved,
         },
-        "space_generation": {
-            # Position-based counts (what the user sees on the board).
-            "missing": missing_positions,
-            "generated": generated_positions,
-            "total": total_positions,
-            # Design-based counts (what we'll actually pay for).
-            "missing_designs": n_missing_designs,
-            "generated_designs": generated_designs,
-            "total_designs": n_designs,
-            "per_design_cost": per_space_cost,
-            "estimate": space_generate_estimate,
+        "all_generation": {
+            "missing": n_missing_all,
+            "generated": n_generated_all,
+            "total": n_designs + n_panels,
+            "missing_spaces": n_missing_designs,
+            "missing_panels": n_missing_panels,
+            "estimate": all_generate_estimate,
             "label": (
-                "All spaces generated" if n_missing_designs == 0
-                else "Generate all spaces" if generated_designs == 0
-                else "Generate missing spaces"
+                "All assets generated" if n_missing_all == 0
+                else "Generate all spaces & UI" if n_generated_all == 0
+                else "Generate missing spaces & UI"
             ),
         },
     })
@@ -759,6 +796,54 @@ def setup_view(request: Request, board_id: str):
     ctx = _base_context(board_id, request)
     ctx.update({"mockup_present": mockup_present, "mockup_rel": mockup_rel})
     return templates.TemplateResponse(request, "setup.html", ctx)
+
+
+@app.post("/b/{board_id}/actions/upload-mockup")
+async def action_upload_mockup(
+    request: Request,
+    board_id: str,
+    file: UploadFile = File(...),
+):
+    """Accept a PNG/JPEG mockup upload and save it as boards/<id>/mockup/board.png.
+
+    Validates that the file is an image and checks the aspect ratio — a 16:9
+    image (within 5% tolerance) is ideal but we accept anything and warn
+    the user in the JSON response if it strays too far.
+    """
+    _ensure_board_or_404(board_id)
+
+    content_type = (file.content_type or "").lower()
+    if not content_type.startswith("image/"):
+        raise HTTPException(400, "File must be an image (PNG or JPEG).")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "Empty file received.")
+
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.verify()
+        img = Image.open(io.BytesIO(data))
+    except Exception:
+        raise HTTPException(400, "Could not read image — make sure it is a valid PNG or JPEG.")
+
+    w, h = img.size
+    ratio = w / h if h else 0
+    target = 16 / 9
+    warn = abs(ratio - target) / target > 0.05
+
+    mockup_dir = _board_root(board_id) / "mockup"
+    mockup_dir.mkdir(parents=True, exist_ok=True)
+    dest = mockup_dir / "board.png"
+
+    img.convert("RGB").save(dest, format="PNG")
+
+    return JSONResponse({
+        "ok": True,
+        "size": [w, h],
+        "warn_aspect": warn,
+        "redirect": f"/b/{board_id}/setup",
+    })
 
 
 @app.get("/b/{board_id}/spec", response_class=HTMLResponse)
@@ -1077,6 +1162,34 @@ def legacy_centerpiece():
 # ────────────────────────── routes: pipeline actions (board-scoped) ──────────────────────────
 
 
+@app.post("/b/{board_id}/actions/analyze")
+async def action_analyze(request: Request, board_id: str):
+    """Send the board mockup to GPT-4o vision and auto-fill every catalog prompt.
+
+    Key resolution (first found wins):
+      1. The requesting user's saved openai_api_key
+      2. OPENAI_API_KEY environment variable
+    If neither is set, returns 400 so the UI can surface a clear message.
+    """
+    _ensure_board_or_404(board_id)
+
+    user = auth.current_user(request)
+    openai_key = (user.openai_api_key if user else "") or os.environ.get("OPENAI_API_KEY", "")
+    if not openai_key:
+        raise HTTPException(
+            400,
+            "No OpenAI API key found. Save one in Account → Connections → OpenAI / ChatGPT."
+        )
+
+    job_id = _enqueue(
+        label="Analyze mockup with GPT-4o",
+        operation="analyze", target=board_id,
+        cost_estimate=pipeline_adapters.ANALYZE_COST_USD,
+        fn=_scoped_fn(board_id, pipeline_adapters.analyze_adapter(openai_key)),
+    )
+    return _action_response(request, job_id, redirect_to=f"/b/{board_id}/")
+
+
 @app.post("/b/{board_id}/actions/style")
 async def action_style(request: Request, board_id: str):
     _ensure_board_or_404(board_id)
@@ -1084,8 +1197,7 @@ async def action_style(request: Request, board_id: str):
         label="Extract style from mockup",
         operation="style", target=board_id,
         cost_estimate=pipeline_adapters.estimate_style(),
-        fn=_scoped_fn(board_id, pipeline_adapters.style_adapter(),
-                      api_key=_user_api_key(request)),
+        fn=_scoped_fn(board_id, pipeline_adapters.style_adapter()),
     )
     return _action_response(request, job_id, redirect_to=f"/b/{board_id}/")
 
@@ -1102,12 +1214,12 @@ async def action_generate(request: Request, board_id: str, category: str):
     _ensure_board_or_404(board_id)
     if category not in ("spaces", "panels", "centerpiece"):
         raise HTTPException(400, f"Unknown category {category}")
+    keys = _user_keys(request)
     job_id = _enqueue(
         label=f"Generate missing {category}",
         operation=f"generate.{category}", target=board_id,
         cost_estimate=pipeline_adapters.estimate_generate(category),
-        fn=_scoped_fn(board_id, pipeline_adapters.generate_missing_adapter(category),
-                      api_key=_user_api_key(request)),
+        fn=_scoped_fn(board_id, pipeline_adapters.generate_missing_adapter(category, **keys)),
     )
     return _action_response(request, job_id, redirect_to=f"/b/{board_id}/")
 
@@ -1123,15 +1235,32 @@ async def action_generate_missing_spaces(request: Request, board_id: str):
     catalog = _load_catalog(board_id)
     missing_space_ids = _missing_space_ids(board_id, catalog)
     count = len(missing_space_ids)
+    keys = _user_keys(request)
     job_id = _enqueue(
         label=f"Generate {count} missing space{'s' if count != 1 else ''}",
         operation="generate.spaces", target=board_id,
         cost_estimate=pipeline_adapters.estimate_generate_one("spaces") * count,
-        fn=_scoped_fn(
-            board_id,
-            pipeline_adapters.generate_missing_adapter("spaces"),
-            api_key=_user_api_key(request),
+        fn=_scoped_fn(board_id, pipeline_adapters.generate_missing_adapter("spaces", **keys)),
+    )
+    return _action_response(request, job_id, redirect_to=f"/b/{board_id}/")
+
+
+@app.post("/b/{board_id}/actions/generate-missing/all")
+async def action_generate_missing_all(request: Request, board_id: str):
+    """Generate every empty board space AND every empty UI panel in one job."""
+    _ensure_board_or_404(board_id)
+    catalog = _load_catalog(board_id)
+    missing_spaces = _missing_space_ids(board_id, catalog)
+    missing_panels = _missing_panel_ids(board_id, catalog)
+    total = len(missing_spaces) + len(missing_panels)
+    keys = _user_keys(request)
+    job_id = _enqueue(
+        label=f"Generate {total} missing asset{'s' if total != 1 else ''}",
+        operation="generate.all", target=board_id,
+        cost_estimate=pipeline_adapters.estimate_generate_all(
+            len(missing_spaces), len(missing_panels)
         ),
+        fn=_scoped_fn(board_id, pipeline_adapters.generate_all_adapter(**keys)),
     )
     return _action_response(request, job_id, redirect_to=f"/b/{board_id}/")
 
@@ -1143,8 +1272,7 @@ async def action_states(request: Request, board_id: str):
         label="Build active states",
         operation="states", target=board_id,
         cost_estimate=0.0,
-        fn=_scoped_fn(board_id, pipeline_adapters.states_adapter(),
-                      api_key=_user_api_key(request)),
+        fn=_scoped_fn(board_id, pipeline_adapters.states_adapter()),
     )
     return _action_response(request, job_id, redirect_to=f"/b/{board_id}/preview")
 
@@ -1156,8 +1284,7 @@ async def action_preview(request: Request, board_id: str):
         label="Composite preview",
         operation="preview", target=board_id,
         cost_estimate=0.0,
-        fn=_scoped_fn(board_id, pipeline_adapters.preview_adapter(),
-                      api_key=_user_api_key(request)),
+        fn=_scoped_fn(board_id, pipeline_adapters.preview_adapter()),
     )
     return _action_response(request, job_id, redirect_to=f"/b/{board_id}/preview")
 
@@ -1169,8 +1296,7 @@ async def action_export(request: Request, board_id: str):
         label="Export approved assets",
         operation="export", target=board_id,
         cost_estimate=0.0,
-        fn=_scoped_fn(board_id, pipeline_adapters.export_adapter(),
-                      api_key=_user_api_key(request)),
+        fn=_scoped_fn(board_id, pipeline_adapters.export_adapter()),
     )
     return _action_response(request, job_id, redirect_to=f"/b/{board_id}/preview")
 
@@ -1185,14 +1311,14 @@ async def action_regen_one(
     if category not in ("spaces", "panels", "centerpiece"):
         raise HTTPException(400, f"Unknown category {category}")
     p = (prompt_override or "").strip() or None
+    keys = _user_keys(request)
     job_id = _enqueue(
         label=f"Regenerate {asset_id}",
         operation=f"regen.{category}", target=asset_id,
         cost_estimate=pipeline_adapters.estimate_generate_one(category, asset_id),
         fn=_scoped_fn(board_id,
                       pipeline_adapters.generate_one_adapter(category, asset_id,
-                                                             prompt_override=p),
-                      api_key=_user_api_key(request)),
+                                                             prompt_override=p, **keys)),
     )
     return _action_response(request, job_id, redirect_to=f"/b/{board_id}/")
 
@@ -1207,9 +1333,7 @@ async def action_clean_one(request: Request, board_id: str, category: str, asset
         label=f"Clean {asset_id}",
         operation=f"clean.{category}", target=asset_id,
         cost_estimate=0.0,
-        fn=_scoped_fn(board_id,
-                      pipeline_adapters.clean_one_adapter(category, asset_id),
-                      api_key=_user_api_key(request)),
+        fn=_scoped_fn(board_id, pipeline_adapters.clean_one_adapter(category, asset_id)),
     )
     return _action_response(request, job_id, redirect_to=f"/b/{board_id}/")
 
@@ -1469,7 +1593,7 @@ def asset(board_id: str, rest: str):
     target = _safe_workspace_path(board_id, rest)
     if not target.exists() or not target.is_file():
         raise HTTPException(404)
-    return FileResponse(target)
+    return FileResponse(target, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/b/{board_id}/mockup/{name}")
