@@ -204,8 +204,13 @@ def _frame_variance(a: Image.Image, b: Image.Image) -> float:
 
 
 def board_canvas(size: tuple[int, int]) -> Image.Image:
-    """Create an empty board canvas of the given size with a transparent background."""
-    return Image.new("RGBA", size, (0, 0, 0, 0))
+    """Create an empty board canvas with the board's solid background colour.
+
+    Using a fully opaque background ensures the exported PNG has no transparent
+    pixels — empty cells render as the board background rather than transparent,
+    so the image looks correct when opened in any viewer or on any background.
+    """
+    return Image.new("RGBA", size, (13, 14, 16, 255))
 
 
 def paste_tile(

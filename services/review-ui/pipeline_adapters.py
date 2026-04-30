@@ -108,6 +108,17 @@ def estimate_generate_one(category: str, target: str | None = None) -> float:
 estimate_regen_one = estimate_generate_one
 
 
+def estimate_generate_all(
+    missing_space_count: int,
+    missing_panel_count: int,
+) -> float:
+    """Combined cost estimate for generate-all (spaces + panels)."""
+    return (
+        estimate_generate_one("spaces") * missing_space_count
+        + estimate_generate_one("panels") * missing_panel_count
+    )
+
+
 def estimate_refine() -> float:
     return 0.022  # one inpaint call
 
@@ -333,6 +344,43 @@ def generate_missing_adapter(
         job.log.append(
             f"generated {sum(1 for r in results if r.promoted_filename)} / "
             f"{len(results)} {category}  (spent ${spent:.2f})"
+        )
+        return spent
+
+    return fn
+
+
+def generate_all_adapter(
+    *,
+    pixellab_key: str | None = None,
+    openai_key: str | None = None,
+) -> Callable[[Job, threading.Event], float]:
+    """Adapter for "generate every empty space AND every empty UI panel."
+
+    Runs spaces first then panels, each as a sub-pass, so the job progress
+    reflects the combined total of missing assets.
+    """
+
+    def fn(job: Job, cancel: threading.Event) -> float:
+        from boardfactory.ops import generate_missing_panels, generate_missing_spaces
+
+        catalog = _load_catalog()
+        _validate_mockup_or_die(catalog)
+        provider = _resolve_provider(pixellab_key, openai_key)
+        check_cancel(cancel)
+
+        sink = _sink(job)
+        space_results = generate_missing_spaces(catalog, provider, sink)
+        check_cancel(cancel)
+        panel_results = generate_missing_panels(catalog, provider, sink)
+        check_cancel(cancel)
+
+        all_results = space_results + panel_results
+        spent = sum(r.spent_usd for r in all_results)
+        cost_ledger.record("generate.all", None, len(all_results), spent)
+        job.log.append(
+            f"generated {sum(1 for r in all_results if r.promoted_filename)} / "
+            f"{len(all_results)} assets  (spent ${spent:.2f})"
         )
         return spent
 

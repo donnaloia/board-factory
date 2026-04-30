@@ -19,11 +19,17 @@ from __future__ import annotations
 import base64
 import io
 import os
+import time
 
 import httpx
 from PIL import Image
 
 from .base import PixelArtProvider
+
+# Retry config for 429 / 5xx transient errors.
+_MAX_RETRIES = 5
+_RETRY_BASE_S = 5.0   # first wait: 5 s
+_RETRY_MAX_S  = 60.0  # cap each wait at 60 s
 
 
 _BASE_URL = "https://api.openai.com/v1"
@@ -145,35 +151,59 @@ class OpenAIImageProvider(PixelArtProvider):
         return {"Authorization": f"Bearer {self._api_key}"}
 
     def _json_post(self, url: str, body: dict) -> dict:
-        r = httpx.post(
-            url,
-            json=body,
-            headers={**self._auth_headers(), "Content-Type": "application/json"},
-            timeout=120.0,
+        last_exc: Exception | None = None
+        wait = _RETRY_BASE_S
+        for attempt in range(_MAX_RETRIES):
+            r = httpx.post(
+                url,
+                json=body,
+                headers={**self._auth_headers(), "Content-Type": "application/json"},
+                timeout=120.0,
+            )
+            if r.status_code == 429 or r.status_code >= 500:
+                last_exc = RuntimeError(self._error_body(r))
+                time.sleep(min(wait, _RETRY_MAX_S))
+                wait *= 2
+                continue
+            self._raise(r)
+            return r.json()
+        raise RuntimeError(
+            f"OpenAI API gave up after {_MAX_RETRIES} attempts: {last_exc}"
         )
-        self._raise(r)
-        return r.json()
 
     def _multipart_post(self, url: str, data: dict, files: dict) -> dict:
-        r = httpx.post(
-            url,
-            data=data,
-            files=files,
-            headers=self._auth_headers(),
-            timeout=120.0,
+        last_exc: Exception | None = None
+        wait = _RETRY_BASE_S
+        for attempt in range(_MAX_RETRIES):
+            r = httpx.post(
+                url,
+                data=data,
+                files=files,
+                headers=self._auth_headers(),
+                timeout=120.0,
+            )
+            if r.status_code == 429 or r.status_code >= 500:
+                last_exc = RuntimeError(self._error_body(r))
+                time.sleep(min(wait, _RETRY_MAX_S))
+                wait *= 2
+                continue
+            self._raise(r)
+            return r.json()
+        raise RuntimeError(
+            f"OpenAI API gave up after {_MAX_RETRIES} attempts: {last_exc}"
         )
-        self._raise(r)
-        return r.json()
+
+    @staticmethod
+    def _error_body(r: httpx.Response) -> str:
+        try:
+            return r.json().get("error", {}).get("message", "") or r.text[:200]
+        except Exception:
+            return r.text[:200]
 
     @staticmethod
     def _raise(r: httpx.Response) -> None:
         if not r.is_success:
-            body = ""
-            try:
-                body = r.json().get("error", {}).get("message", "")
-            except Exception:
-                body = r.text[:200]
-            raise RuntimeError(f"OpenAI API {r.status_code}: {body}")
+            raise RuntimeError(f"OpenAI API {r.status_code}: {OpenAIImageProvider._error_body(r)}")
 
     @staticmethod
     def _decode(resp: dict) -> list[bytes]:

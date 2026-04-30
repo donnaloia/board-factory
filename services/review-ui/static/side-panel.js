@@ -103,14 +103,35 @@
       const r = await fetch(`${BPATH}/api/cell/${current.category}/${current.asset_id}`);
       if (!r.ok) {
         panel.innerHTML = `<p class="muted">Could not load cell.</p>`;
-        return;
+        return null;
       }
       const data = await r.json();
       panel.innerHTML = renderPanel(data);
       wireActions(data);
+      return data;
     } catch (e) {
       panel.innerHTML = `<p class="muted">Network error.</p>`;
+      return null;
     }
+  }
+
+  // Directly update the SVG <image> href(s) for one cell to the given URL.
+  // Returns true if at least one image element was found and updated.
+  // Appends a unique bust token so the browser always fetches fresh even if
+  // the mtime-stamped URL matches a previously loaded one.
+  function updateCellImageOnBoard(category, assetId, liveUrl) {
+    if (!liveUrl) return false;
+    const svg = plate.querySelector("svg");
+    if (!svg) return false;
+    // Strip any existing query string and re-stamp with current time so the
+    // browser treats this as a new resource regardless of prior caching.
+    const base = liveUrl.split("?")[0];
+    const bustUrl = `${base}?_=${Date.now()}`;
+    const imgs = svg.querySelectorAll(
+      `[data-category="${CSS.escape(category)}"][data-asset-id="${CSS.escape(assetId)}"] image`
+    );
+    imgs.forEach(img => img.setAttribute("href", bustUrl));
+    return imgs.length > 0;
   }
 
   function renderPanel(data) {
@@ -125,9 +146,14 @@
 
     // Live preview — when a frame is locked, overlay the composed frame on
     // top so what the user sees in the panel matches what's on the board.
+    // Append a timestamp bust so the browser always fetches the current live
+    // image even if the mtime-stamped URL matches a previously loaded one.
+    const liveSrc = data.live_url
+      ? `${data.live_url.split("?")[0]}?_=${Date.now()}`
+      : null;
     const liveBlock = data.has_live
       ? `<div class="cell-live ${data.frame_locked ? 'with-frame' : ''}">
-           <img src="${data.live_url}" alt="">
+           <img src="${liveSrc}" alt="">
            ${data.frame_locked && data.frame_url
               ? `<img class="frame-overlay" src="${data.frame_url}" alt="" aria-hidden="true">`
               : ''}
@@ -430,6 +456,7 @@
         }
         const json = await res.json();
         watchedJobId = json.job_id;
+        showCellSpinner(current.category, current.asset_id);
       } catch (err) {
         alert("Network error: " + err);
         btn.removeAttribute("disabled");
@@ -453,6 +480,7 @@
         }
         const json = await res.json();
         watchedJobId = json.job_id;
+        showCellSpinner(current.category, current.asset_id);
       } catch (err) {
         alert("Network error: " + err);
         btn.removeAttribute("disabled");
@@ -474,8 +502,9 @@
         const r = await fetch(`${BPATH}/api/cell/${current.category}/${current.asset_id}/promote`,
                               { method: "POST", body: fd });
         if (r.ok) {
-          await refreshPanel();
-          refreshBoardSvg();
+          const data = await refreshPanel();
+          const updated = updateCellImageOnBoard(current.category, current.asset_id, data?.live_url);
+          if (!updated) refreshBoardSvg();
           // After refreshPanel re-renders, restore the textarea to this
           // entry's prompt if it had one (so the editor shows what produced
           // the asset that's now live).
@@ -625,6 +654,133 @@
     }
   }
 
+  // ─── Cell spinner — shown while a generation job is in flight ────────
+  // Injects a semi-transparent overlay + rotating arc directly into the SVG
+  // so the user sees activity inside the space being generated. Removed
+  // automatically when refreshBoardSvg() replaces the board plate HTML.
+
+  function showCellSpinner(category, assetId) {
+    const svg = plate.querySelector("svg");
+    if (!svg) return;
+    const link = svg.querySelector(
+      `[data-category="${CSS.escape(category)}"][data-asset-id="${CSS.escape(assetId)}"]`
+    );
+    if (!link) return;
+
+    hideCellSpinner();
+
+    const bb = link.getBBox();
+    const cx = bb.x + bb.width / 2;
+    const cy = bb.y + bb.height / 2;
+    const r  = Math.min(bb.width, bb.height) * 0.22;
+    const sw = Math.max(2, r * 0.28);
+    const circ = 2 * Math.PI * r;
+    const ns = "http://www.w3.org/2000/svg";
+
+    const g = document.createElementNS(ns, "g");
+    g.setAttribute("class", "bf-cell-spinner");
+    g.setAttribute("pointer-events", "none");
+
+    // dim overlay
+    const dim = document.createElementNS(ns, "rect");
+    dim.setAttribute("x", bb.x); dim.setAttribute("y", bb.y);
+    dim.setAttribute("width", bb.width); dim.setAttribute("height", bb.height);
+    dim.setAttribute("fill", "rgba(0,0,0,0.45)");
+    g.appendChild(dim);
+
+    // track ring
+    const track = document.createElementNS(ns, "circle");
+    track.setAttribute("cx", cx); track.setAttribute("cy", cy); track.setAttribute("r", r);
+    track.setAttribute("fill", "none");
+    track.setAttribute("stroke", "rgba(255,255,255,0.15)");
+    track.setAttribute("stroke-width", sw);
+    g.appendChild(track);
+
+    // spinning arc
+    const arc = document.createElementNS(ns, "circle");
+    arc.setAttribute("cx", cx); arc.setAttribute("cy", cy); arc.setAttribute("r", r);
+    arc.setAttribute("fill", "none");
+    arc.setAttribute("stroke", "rgba(255,255,255,0.85)");
+    arc.setAttribute("stroke-width", sw);
+    arc.setAttribute("stroke-dasharray", `${circ * 0.25} ${circ * 0.75}`);
+    arc.setAttribute("stroke-linecap", "round");
+    const anim = document.createElementNS(ns, "animateTransform");
+    anim.setAttribute("attributeName", "transform");
+    anim.setAttribute("type", "rotate");
+    anim.setAttribute("from", `0 ${cx} ${cy}`);
+    anim.setAttribute("to",   `360 ${cx} ${cy}`);
+    anim.setAttribute("dur", "0.9s");
+    anim.setAttribute("repeatCount", "indefinite");
+    arc.appendChild(anim);
+    g.appendChild(arc);
+
+    svg.appendChild(g);
+  }
+
+  function hideCellSpinner() {
+    plate.querySelector(".bf-cell-spinner")?.remove();
+  }
+
+  function hideAllSpinners() {
+    plate.querySelectorAll(".bf-cell-spinner").forEach(el => el.remove());
+  }
+
+  // Show a spinner on every space/panel cell that isn't already approved.
+  // Called when a bulk generate.spaces or generate.all job starts.
+  function showAllPendingSpinners() {
+    const svg = plate.querySelector("svg");
+    if (!svg) return;
+    hideAllSpinners();
+    svg.querySelectorAll(
+      '[data-category="spaces"]:not(.bf-approved), [data-category="panels"]:not(.bf-approved)'
+    ).forEach(link => {
+      const bb = link.getBBox();
+      if (!bb.width || !bb.height) return;
+      const cx = bb.x + bb.width / 2;
+      const cy = bb.y + bb.height / 2;
+      const r  = Math.min(bb.width, bb.height) * 0.22;
+      const sw = Math.max(2, r * 0.28);
+      const circ = 2 * Math.PI * r;
+      const ns = "http://www.w3.org/2000/svg";
+
+      const g = document.createElementNS(ns, "g");
+      g.setAttribute("class", "bf-cell-spinner");
+      g.setAttribute("pointer-events", "none");
+
+      const dim = document.createElementNS(ns, "rect");
+      dim.setAttribute("x", bb.x); dim.setAttribute("y", bb.y);
+      dim.setAttribute("width", bb.width); dim.setAttribute("height", bb.height);
+      dim.setAttribute("fill", "rgba(0,0,0,0.45)");
+      g.appendChild(dim);
+
+      const track = document.createElementNS(ns, "circle");
+      track.setAttribute("cx", cx); track.setAttribute("cy", cy); track.setAttribute("r", r);
+      track.setAttribute("fill", "none");
+      track.setAttribute("stroke", "rgba(255,255,255,0.15)");
+      track.setAttribute("stroke-width", sw);
+      g.appendChild(track);
+
+      const arc = document.createElementNS(ns, "circle");
+      arc.setAttribute("cx", cx); arc.setAttribute("cy", cy); arc.setAttribute("r", r);
+      arc.setAttribute("fill", "none");
+      arc.setAttribute("stroke", "rgba(255,255,255,0.85)");
+      arc.setAttribute("stroke-width", sw);
+      arc.setAttribute("stroke-dasharray", `${circ * 0.25} ${circ * 0.75}`);
+      arc.setAttribute("stroke-linecap", "round");
+      const anim = document.createElementNS(ns, "animateTransform");
+      anim.setAttribute("attributeName", "transform");
+      anim.setAttribute("type", "rotate");
+      anim.setAttribute("from", `0 ${cx} ${cy}`);
+      anim.setAttribute("to",   `360 ${cx} ${cy}`);
+      anim.setAttribute("dur", "0.9s");
+      anim.setAttribute("repeatCount", "indefinite");
+      arc.appendChild(anim);
+      g.appendChild(arc);
+
+      svg.appendChild(g);
+    });
+  }
+
   // ─── Board refresh after live changes ─────────────────────────────────
   // Reload only the SVG fragment so the current cell's image updates without
   // losing scroll/panel state. Cheap because the SVG is a server-rendered
@@ -645,9 +801,44 @@
   }
 
   // ─── Listen for job updates from jobs.js ─────────────────────────────
-  // jobs.js doesn't dispatch events today; we listen for our watched job
-  // settling by polling /jobs/<id>. Cheap because it only runs while the
-  // user has a job in flight from this panel.
+  // jobs.js dispatches bf:job-update for every SSE update. We use it here
+  // to show bulk-generation spinners and refresh individual spaces as they
+  // complete, without waiting for the whole job to finish.
+  let _lastSpacesProgress = -1;
+  let _spaceRefreshPending = false;
+
+  window.addEventListener("bf:job-update", e => {
+    const j = e.detail;
+    if (j.operation !== "generate.spaces" && j.operation !== "generate.all") return;
+
+    if (j.status === "queued" || j.status === "running") {
+      const progress = j.progress ?? 0;
+
+      if (_lastSpacesProgress === -1) {
+        // Job just started — show spinners immediately.
+        _lastSpacesProgress = progress;
+        showAllPendingSpinners();
+        return;
+      }
+
+      if (progress !== _lastSpacesProgress && !_spaceRefreshPending) {
+        // A space just finished — refresh the board so it shows the new image,
+        // then re-add spinners only to the cells that are still pending.
+        _lastSpacesProgress = progress;
+        _spaceRefreshPending = true;
+        refreshBoardSvg().then(() => {
+          _spaceRefreshPending = false;
+          // Re-add spinners only if the job is still running.
+          if (_lastSpacesProgress >= 0) showAllPendingSpinners();
+        });
+      }
+    } else {
+      // Job settled — clear spinners and reset state.
+      _lastSpacesProgress = -1;
+      _spaceRefreshPending = false;
+      hideAllSpinners();
+    }
+  });
 
   let pollHandle = null;
   function watchJob() {
@@ -663,9 +854,11 @@
           clearInterval(pollHandle);
           pollHandle = null;
           watchedJobId = null;
+          hideCellSpinner();
           if (current) {
-            await refreshPanel();
-            refreshBoardSvg();
+            const data = await refreshPanel();
+            const updated = updateCellImageOnBoard(current.category, current.asset_id, data?.live_url);
+            if (!updated) refreshBoardSvg();
           }
         }
       } catch (_) { /* swallow */ }

@@ -83,30 +83,29 @@
     </span>
     {% endif %}
 
-    {# Spaces: bulk-generate every empty space. The board shows N positions,
-       but multiple positions can share one design id (e.g. seven copies of
-       side_property). Cost is billed per design (one provider call fills all
-       its positions), so the line shows both numbers honestly:
-         "19 spaces · 9 designs · ~$0.41 total" #}
-    {% if space_generation.missing_designs %}
-    <form method="post" action="/b/{{ board_id }}/actions/generate-missing/spaces" data-action class="board-action-form">
+    {# Generate all: board spaces + UI panels in one job. Board spaces may
+       share a design id across multiple positions (e.g. seven copies of
+       side_property) so cost is billed per design, not per position. #}
+    {% if all_generation.missing %}
+    <form method="post" action="/b/{{ board_id }}/actions/generate-missing/all" data-action class="board-action-form">
       <button type="submit" class="board-action">
         <span class="board-action-eyebrow">Generate</span>
-        <span class="board-action-label">{{ space_generation.label }}</span>
+        <span class="board-action-label">{{ all_generation.label }}</span>
         <span class="board-action-est">
-          {{ space_generation.missing }} space{% if space_generation.missing != 1 %}s{% endif %}
-          &middot; {{ space_generation.missing_designs }} design{% if space_generation.missing_designs != 1 %}s{% endif %}
-          &middot; ~${{ "%.2f"|format(space_generation.estimate) }} total
+          {% if all_generation.missing_spaces %}{{ all_generation.missing_spaces }} space{% if all_generation.missing_spaces != 1 %}s{% endif %}{% endif %}
+          {% if all_generation.missing_spaces and all_generation.missing_panels %}&middot;{% endif %}
+          {% if all_generation.missing_panels %}{{ all_generation.missing_panels }} UI panel{% if all_generation.missing_panels != 1 %}s{% endif %}{% endif %}
+          &middot; ~${{ "%.2f"|format(all_generation.estimate) }} total
         </span>
       </button>
     </form>
     {% else %}
     <span class="board-action is-ghosted" aria-disabled="true"
-          title="Every space already has a generated asset. Open a cell from the board to regenerate it individually.">
+          title="Every space and UI panel already has a generated asset. Open a cell from the board to regenerate it individually.">
       <span class="board-action-eyebrow">Generate</span>
-      <span class="board-action-label">{{ space_generation.label }}</span>
+      <span class="board-action-label">{{ all_generation.label }}</span>
       <span class="board-action-est">
-        {{ space_generation.generated }} / {{ space_generation.total }} ready
+        {{ all_generation.generated }} / {{ all_generation.total }} ready
       </span>
     </span>
     {% endif %}
@@ -137,7 +136,7 @@
     class="board-with-panel is-panel-closed"
     id="board-with-panel"
     data-board-id="{{ board_id }}"
-    data-reload-on="style,generate.spaces,cleanup"
+    data-reload-on="style,generate.spaces,generate.all,cleanup"
   >
     <div class="board-plate" id="board-plate">
       {{ svg_markup | safe }}

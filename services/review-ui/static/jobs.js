@@ -125,6 +125,8 @@
   function onJobUpdate(j) {
     jobs.set(j.id, j);
     render();
+    // Broadcast to other modules (e.g. side-panel.js for cell spinners).
+    window.dispatchEvent(new CustomEvent("bf:job-update", { detail: j }));
     if (j.status === "done" || j.status === "failed" || j.status === "killed") {
       // Refresh cost meter when anything settles.
       refreshCost();

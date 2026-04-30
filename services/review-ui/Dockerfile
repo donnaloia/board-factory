@@ -15,9 +15,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # via the pipeline_adapters module.
 COPY pipeline/requirements.txt /tmp/pipeline-requirements.txt
 RUN pip install --no-cache-dir -r /tmp/pipeline-requirements.txt
-COPY pipeline/pyproject.toml  /tmp/pipeline/pyproject.toml
-COPY pipeline/boardfactory    /tmp/pipeline/boardfactory
-RUN pip install --no-cache-dir -e /tmp/pipeline
+# Install from /repo/pipeline so the runtime bind-mount (./:/repo) makes
+# pipeline edits visible without a rebuild. The COPY here seeds the path
+# for standalone image runs; the volume overlay replaces it at runtime.
+COPY pipeline/pyproject.toml  /repo/pipeline/pyproject.toml
+COPY pipeline/boardfactory    /repo/pipeline/boardfactory
+RUN pip install --no-cache-dir -e /repo/pipeline
 
 # Application code
 COPY services/review-ui/server.py             /app/
@@ -34,4 +37,6 @@ COPY services/review-ui/templates             /app/templates
 COPY services/review-ui/static                /app/static
 
 EXPOSE 8473
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8473"]
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8473", \
+     "--reload", "--reload-dir", "/app", "--reload-dir", "/repo/pipeline/boardfactory", \
+     "--timeout-graceful-shutdown", "2"]

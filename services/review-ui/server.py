@@ -450,6 +450,14 @@ def _missing_space_ids(board_id: str, catalog: dict) -> list[str]:
     ]
 
 
+def _missing_panel_ids(board_id: str, catalog: dict) -> list[str]:
+    return [
+        p["id"]
+        for p in catalog.get("feature_panels", {}).get("panels", [])
+        if not _has_generated_asset(board_id, "panels", p["id"])
+    ]
+
+
 def _safe_workspace_path(board_id: str, rel: str) -> Path:
     """Resolve a workspace-relative path safely (no traversal outside workspace)."""
     ws = _workspace(board_id)
@@ -532,7 +540,7 @@ def _cell_status(board_id: str, category: str, asset_id: str) -> CellStatus:
     live_url = None
     if is_live:
         rel = live.relative_to(_workspace(board_id))
-        live_url = f"/b/{board_id}/asset/{rel.as_posix()}"
+        live_url = f"/b/{board_id}/asset/{rel.as_posix()}?t={int(live.stat().st_mtime)}"
 
     return CellStatus(
         asset_id=asset_id,
@@ -707,7 +715,9 @@ def board_view(request: Request, board_id: str):
     designs_done = sum(1 for s in space_status.values() if s.approved)
     panels_done = sum(1 for s in panel_status.values() if s.approved)
     missing_space_ids = _missing_space_ids(board_id, catalog)
+    missing_panel_ids = _missing_panel_ids(board_id, catalog)
     n_missing_designs = len(missing_space_ids)
+    n_missing_panels = len(missing_panel_ids)
     generated_designs = n_designs - n_missing_designs
 
     # The board shows N positions; each design id can fill multiple positions
@@ -724,7 +734,12 @@ def board_view(request: Request, board_id: str):
     generated_positions = total_positions - missing_positions
 
     per_space_cost = pipeline_adapters.estimate_generate_one("spaces")
-    space_generate_estimate = per_space_cost * n_missing_designs
+    per_panel_cost = pipeline_adapters.estimate_generate_one("panels")
+    all_generate_estimate = pipeline_adapters.estimate_generate_all(
+        n_missing_designs, n_missing_panels
+    )
+    n_missing_all = n_missing_designs + n_missing_panels
+    n_generated_all = generated_designs + (n_panels - n_missing_panels)
 
     frame_overlay_url = None
     frame_block = catalog.get("frame", {}) or {}
@@ -757,21 +772,17 @@ def board_view(request: Request, board_id: str):
             "panels_done": panels_done,
             "centerpiece_done": cp_status.approved,
         },
-        "space_generation": {
-            # Position-based counts (what the user sees on the board).
-            "missing": missing_positions,
-            "generated": generated_positions,
-            "total": total_positions,
-            # Design-based counts (what we'll actually pay for).
-            "missing_designs": n_missing_designs,
-            "generated_designs": generated_designs,
-            "total_designs": n_designs,
-            "per_design_cost": per_space_cost,
-            "estimate": space_generate_estimate,
+        "all_generation": {
+            "missing": n_missing_all,
+            "generated": n_generated_all,
+            "total": n_designs + n_panels,
+            "missing_spaces": n_missing_designs,
+            "missing_panels": n_missing_panels,
+            "estimate": all_generate_estimate,
             "label": (
-                "All spaces generated" if n_missing_designs == 0
-                else "Generate all spaces" if generated_designs == 0
-                else "Generate missing spaces"
+                "All assets generated" if n_missing_all == 0
+                else "Generate all spaces & UI" if n_generated_all == 0
+                else "Generate missing spaces & UI"
             ),
         },
     })
@@ -1186,8 +1197,7 @@ async def action_style(request: Request, board_id: str):
         label="Extract style from mockup",
         operation="style", target=board_id,
         cost_estimate=pipeline_adapters.estimate_style(),
-        fn=_scoped_fn(board_id, pipeline_adapters.style_adapter(),
-                      api_key=_user_api_key(request)),
+        fn=_scoped_fn(board_id, pipeline_adapters.style_adapter()),
     )
     return _action_response(request, job_id, redirect_to=f"/b/{board_id}/")
 
@@ -1231,6 +1241,26 @@ async def action_generate_missing_spaces(request: Request, board_id: str):
         operation="generate.spaces", target=board_id,
         cost_estimate=pipeline_adapters.estimate_generate_one("spaces") * count,
         fn=_scoped_fn(board_id, pipeline_adapters.generate_missing_adapter("spaces", **keys)),
+    )
+    return _action_response(request, job_id, redirect_to=f"/b/{board_id}/")
+
+
+@app.post("/b/{board_id}/actions/generate-missing/all")
+async def action_generate_missing_all(request: Request, board_id: str):
+    """Generate every empty board space AND every empty UI panel in one job."""
+    _ensure_board_or_404(board_id)
+    catalog = _load_catalog(board_id)
+    missing_spaces = _missing_space_ids(board_id, catalog)
+    missing_panels = _missing_panel_ids(board_id, catalog)
+    total = len(missing_spaces) + len(missing_panels)
+    keys = _user_keys(request)
+    job_id = _enqueue(
+        label=f"Generate {total} missing asset{'s' if total != 1 else ''}",
+        operation="generate.all", target=board_id,
+        cost_estimate=pipeline_adapters.estimate_generate_all(
+            len(missing_spaces), len(missing_panels)
+        ),
+        fn=_scoped_fn(board_id, pipeline_adapters.generate_all_adapter(**keys)),
     )
     return _action_response(request, job_id, redirect_to=f"/b/{board_id}/")
 
@@ -1563,7 +1593,7 @@ def asset(board_id: str, rest: str):
     target = _safe_workspace_path(board_id, rest)
     if not target.exists() or not target.is_file():
         raise HTTPException(404)
-    return FileResponse(target)
+    return FileResponse(target, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/b/{board_id}/mockup/{name}")

@@ -35,6 +35,9 @@ services:
       - ./services/review-ui/sessions.py:/app/sessions.py
       - ./services/review-ui/users.py:/app/users.py
       - ./services/review-ui/pixellab_status.py:/app/pixellab_status.py
+      # Pipeline library — live-mounted so edits to boardfactory/ are picked
+      # up by uvicorn --reload without rebuilding the image.
+      - ./pipeline/boardfactory:/repo/pipeline/boardfactory
     environment:
       # Inpainting needs the same API key as the pipeline. Per-user keys
       # set via the account modal override this on a per-job basis.
