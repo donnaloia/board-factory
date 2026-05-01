@@ -32,13 +32,49 @@ _TIMEOUT_SEC = 120
 # Update against your actual PixelLab plan billing as needed.
 _COST_PER_IMAGE = 0.03
 
+# Named user-facing model presets. Each maps to PixelLab's per-call style knobs
+# (detail / shading / outline). Pixflux is the txt2img endpoint; img2img always
+# routes through bitforge regardless of the preset.
+PIXELLAB_PRESETS: dict[str, dict[str, str]] = {
+    "pixflux_sharp": {
+        "label": "Pixflux Sharp",
+        "description": "High detail, basic shading, single black outline.",
+        "detail": "highly detailed",
+        "shading": "basic shading",
+        "outline": "single color black outline",
+    },
+    "pixflux_soft": {
+        "label": "Pixflux Soft",
+        "description": "Medium detail, basic shading, no outline.",
+        "detail": "medium detail",
+        "shading": "basic shading",
+        "outline": "lineless",
+    },
+    "pixflux_bold": {
+        "label": "Pixflux Bold",
+        "description": "High detail, flat shading, bold black outline.",
+        "detail": "highly detailed",
+        "shading": "flat shading",
+        "outline": "single color black outline",
+    },
+}
+_DEFAULT_PRESET = "pixflux_sharp"
+
+
+def list_pixellab_presets() -> list[dict[str, str]]:
+    """Return UI-friendly preset descriptors (id, label, description)."""
+    return [
+        {"id": pid, "label": p["label"], "description": p["description"]}
+        for pid, p in PIXELLAB_PRESETS.items()
+    ]
+
 
 class PixelLabProvider(PixelArtProvider):
     @property
     def name(self) -> str:
         return "pixellab"
 
-    def __init__(self) -> None:
+    def __init__(self, *, preset: str | None = None) -> None:
         self._api_key = os.environ.get("PIXELLAB_API_KEY", "").strip()
         if not self._api_key:
             raise RuntimeError(
@@ -46,6 +82,10 @@ class PixelLabProvider(PixelArtProvider):
                 "service in docker-compose.yml, or set BOARDFACTORY_PROVIDER: mock "
                 "to test the pipeline without an API key."
             )
+        self._preset = (preset or _DEFAULT_PRESET).strip()
+        if self._preset not in PIXELLAB_PRESETS:
+            self._preset = _DEFAULT_PRESET
+        self._params = PIXELLAB_PRESETS[self._preset]
 
     # ────────────────── public API ──────────────────
 
@@ -61,9 +101,9 @@ class PixelLabProvider(PixelArtProvider):
             "description": prompt,
             "image_size": {"width": size[0], "height": size[1]},
             "no_background": True,
-            "outline": "single color black outline",
-            "shading": "basic shading",
-            "detail": "medium detail",
+            "outline": self._params["outline"],
+            "shading": self._params["shading"],
+            "detail": self._params["detail"],
         }
         if palette:
             body["forced_palette"] = [list(c) for c in palette]

@@ -28,6 +28,25 @@
   const BOARD_ID = wrap.getAttribute("data-board-id");
   const BPATH = `/b/${BOARD_ID}`;
 
+  // Inline SVG spinner strokes — slightly muted vs pure white on dark boards.
+  const SPINNER_STROKE_TRACK = "rgba(118, 128, 145, 0.26)";
+  const SPINNER_STROKE_ARC = "rgba(112, 122, 142, 0.9)";
+
+  /** Stable per-cell SMIL timing — similar speeds, different period + phase. */
+  function spinnerTiming(category, assetId) {
+    const s = String(category) + "\0" + String(assetId);
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619) >>> 0;
+    }
+    const u = (h >>> 0) / 0xffffffff;
+    const durSec = 0.92 + u * 0.36; // 0.92s … 1.28s — close, not frantic
+    const h2 = Math.imul(h ^ 0x9e3779b9, 1103515245) >>> 0;
+    const beginSec = -((h2 % 1000) / 1000) * 0.85; // −0.85s … 0 — stagger phase
+    return { durSec, beginSec };
+  }
+
   let current = null;            // { category, asset_id }
   let watchedJobId = null;       // job id we're waiting on for a refresh
 
@@ -692,7 +711,7 @@
     const track = document.createElementNS(ns, "circle");
     track.setAttribute("cx", cx); track.setAttribute("cy", cy); track.setAttribute("r", r);
     track.setAttribute("fill", "none");
-    track.setAttribute("stroke", "rgba(255,255,255,0.15)");
+    track.setAttribute("stroke", SPINNER_STROKE_TRACK);
     track.setAttribute("stroke-width", sw);
     g.appendChild(track);
 
@@ -700,16 +719,18 @@
     const arc = document.createElementNS(ns, "circle");
     arc.setAttribute("cx", cx); arc.setAttribute("cy", cy); arc.setAttribute("r", r);
     arc.setAttribute("fill", "none");
-    arc.setAttribute("stroke", "rgba(255,255,255,0.85)");
+    arc.setAttribute("stroke", SPINNER_STROKE_ARC);
     arc.setAttribute("stroke-width", sw);
     arc.setAttribute("stroke-dasharray", `${circ * 0.25} ${circ * 0.75}`);
     arc.setAttribute("stroke-linecap", "round");
+    const { durSec, beginSec } = spinnerTiming(category, assetId);
     const anim = document.createElementNS(ns, "animateTransform");
     anim.setAttribute("attributeName", "transform");
     anim.setAttribute("type", "rotate");
     anim.setAttribute("from", `0 ${cx} ${cy}`);
     anim.setAttribute("to",   `360 ${cx} ${cy}`);
-    anim.setAttribute("dur", "0.9s");
+    anim.setAttribute("dur", `${durSec.toFixed(2)}s`);
+    if (beginSec < 0) anim.setAttribute("begin", `${beginSec.toFixed(3)}s`);
     anim.setAttribute("repeatCount", "indefinite");
     arc.appendChild(anim);
     g.appendChild(arc);
@@ -736,12 +757,15 @@
     ).forEach(link => {
       const bb = link.getBBox();
       if (!bb.width || !bb.height) return;
+      const cat = link.getAttribute("data-category") || "";
+      const aid = link.getAttribute("data-asset-id") || "";
       const cx = bb.x + bb.width / 2;
       const cy = bb.y + bb.height / 2;
       const r  = Math.min(bb.width, bb.height) * 0.22;
       const sw = Math.max(2, r * 0.28);
       const circ = 2 * Math.PI * r;
       const ns = "http://www.w3.org/2000/svg";
+      const { durSec, beginSec } = spinnerTiming(cat, aid);
 
       const g = document.createElementNS(ns, "g");
       g.setAttribute("class", "bf-cell-spinner");
@@ -756,14 +780,14 @@
       const track = document.createElementNS(ns, "circle");
       track.setAttribute("cx", cx); track.setAttribute("cy", cy); track.setAttribute("r", r);
       track.setAttribute("fill", "none");
-      track.setAttribute("stroke", "rgba(255,255,255,0.15)");
+      track.setAttribute("stroke", SPINNER_STROKE_TRACK);
       track.setAttribute("stroke-width", sw);
       g.appendChild(track);
 
       const arc = document.createElementNS(ns, "circle");
       arc.setAttribute("cx", cx); arc.setAttribute("cy", cy); arc.setAttribute("r", r);
       arc.setAttribute("fill", "none");
-      arc.setAttribute("stroke", "rgba(255,255,255,0.85)");
+      arc.setAttribute("stroke", SPINNER_STROKE_ARC);
       arc.setAttribute("stroke-width", sw);
       arc.setAttribute("stroke-dasharray", `${circ * 0.25} ${circ * 0.75}`);
       arc.setAttribute("stroke-linecap", "round");
@@ -772,7 +796,8 @@
       anim.setAttribute("type", "rotate");
       anim.setAttribute("from", `0 ${cx} ${cy}`);
       anim.setAttribute("to",   `360 ${cx} ${cy}`);
-      anim.setAttribute("dur", "0.9s");
+      anim.setAttribute("dur", `${durSec.toFixed(2)}s`);
+      if (beginSec < 0) anim.setAttribute("begin", `${beginSec.toFixed(3)}s`);
       anim.setAttribute("repeatCount", "indefinite");
       arc.appendChild(anim);
       g.appendChild(arc);

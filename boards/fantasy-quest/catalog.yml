@@ -5,7 +5,7 @@ board_size:
 - 1080
 style:
   reference_image: mockup/board.png
-  palette_size: 24
+  palette_size: 36
   prompt: ''
 board_spaces:
   layout: {}

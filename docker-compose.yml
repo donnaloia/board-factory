@@ -39,6 +39,11 @@ services:
       # up by uvicorn --reload without rebuilding the image.
       - ./pipeline/boardfactory:/repo/pipeline/boardfactory
     environment:
+      # OpenAI Images API (`gpt-image-2`). Prefer a shell export or `.env` in this
+      # directory (Compose interpolates vars; keep `.env` out of git). Per-user keys
+      # saved in Account → Connections override this when set.
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+
       # Inpainting needs the same API key as the pipeline. Per-user keys
       # set via the account modal override this on a per-job basis.
       PIXELLAB_API_KEY: ""

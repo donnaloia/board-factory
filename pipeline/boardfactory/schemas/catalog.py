@@ -24,10 +24,60 @@ class StyleSpec(BaseModel):
         ..., description="Path (relative to repo root) to your mockup PNG."
     )
     palette_size: int = Field(
-        24, ge=4, le=64, description="Number of colors to extract from the reference."
+        36, ge=4, le=64,
+        description=(
+            "Legacy: number of colors to extract from the reference. "
+            "Prefer `generation.palette_size`; this field is kept in sync "
+            "for backward compatibility."
+        ),
     )
     prompt: str = Field(
         ..., description="Style brief prepended to every generation prompt."
+    )
+
+
+# ────────────────────────── per-board generation settings ──────────────────────────
+
+
+OpenAIModel = Literal["gpt-image-1", "gpt-image-2"]
+OpenAIQuality = Literal["low", "medium", "high"]
+# Named PixelLab presets — internally mapped to {endpoint, detail, shading, outline}.
+PixelLabModel = Literal["pixflux_sharp", "pixflux_soft", "pixflux_bold"]
+ProviderName = Literal["openai", "pixellab", "mock"]
+
+
+class OpenAIGenerationSpec(BaseModel):
+    model: OpenAIModel = "gpt-image-2"
+    quality: OpenAIQuality = "low"
+
+
+class PixelLabGenerationSpec(BaseModel):
+    model: PixelLabModel = "pixflux_sharp"
+
+
+class GenerationSpec(BaseModel):
+    """Per-board generation settings.
+
+    These travel with the board so any future regeneration uses the same
+    palette size, provider, and model the board was first set up with —
+    unless the user opens the settings modal and changes them.
+    """
+
+    palette_size: int = Field(
+        36, ge=4, le=64,
+        description="Number of colors extracted from the reference for cleanup.",
+    )
+    provider: ProviderName = Field(
+        "openai", description="Image-generation backend used for this board."
+    )
+    openai: OpenAIGenerationSpec = Field(default_factory=OpenAIGenerationSpec)
+    pixellab: PixelLabGenerationSpec = Field(default_factory=PixelLabGenerationSpec)
+    configured: bool = Field(
+        False,
+        description=(
+            "True once the user has confirmed settings via the modal at least once. "
+            "Boards in their initial state will trigger the modal on first generate."
+        ),
     )
 
 
@@ -179,6 +229,7 @@ class Catalog(BaseModel):
     board_spaces: BoardSpacesSpec
     feature_panels: FeaturePanelsSpec
     frame: FrameSpec = Field(default_factory=FrameSpec)
+    generation: GenerationSpec = Field(default_factory=GenerationSpec)
 
     @model_validator(mode="after")
     def _validate_positions(self) -> "Catalog":
@@ -186,6 +237,13 @@ class Catalog(BaseModel):
             for ref in design.positions:
                 self.board_spaces.resolve_position(ref)
             self.board_spaces.design_size(design)
+        return self
+
+    @model_validator(mode="after")
+    def _sync_palette_size(self) -> "Catalog":
+        # Single source of truth: generation.palette_size. Mirror to style.palette_size
+        # so older steps that still read style.palette_size keep working.
+        self.style.palette_size = self.generation.palette_size
         return self
 
     @classmethod

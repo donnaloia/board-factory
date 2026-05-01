@@ -133,7 +133,18 @@
       // If the page should refresh on completion (e.g. a generate that should
       // populate the candidates), do it after a short grace.
       if (j.status === "done" && pageReloadOnSettle.has(j.operation)) {
-        setTimeout(() => window.location.reload(), 1200);
+        setTimeout(() => {
+          // First-time setup: extracting style redirects to GET /setup; a plain reload
+          // would stay here forever — send the editor view once palette exists.
+          const setupMatch =
+            /^\/b\/([^/]+)\/setup\/?$/i.exec(window.location.pathname || "");
+          if (j.operation === "style" && setupMatch) {
+            const bid = setupMatch[1];
+            window.location.assign(`/b/${bid}/?t=${Date.now()}`);
+            return;
+          }
+          window.location.reload();
+        }, 1200);
       }
     }
   }

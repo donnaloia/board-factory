@@ -1,17 +1,17 @@
-"""OpenAI image provider — gpt-image-1 / DALL-E backed generation.
+"""OpenAI image provider — gpt-image-2 (Images API).
 
 Uses the OpenAI Images API for all three draw modes:
 
-  generate  → POST /v1/images/generations  (gpt-image-1)
-  img2img   → POST /v1/images/edits        (gpt-image-1 with source image)
-  inpaint   → POST /v1/images/edits        (gpt-image-1 with source + mask)
+  generate  → POST /v1/images/generations
+  img2img   → POST /v1/images/edits       (with source image)
+  inpaint   → POST /v1/images/edits       (with source + mask)
 
 OpenAI only supports fixed canvas sizes (smallest: 1024×1024), so every
 call generates at 1024×1024 and is then resized to the requested board-tile
 size with LANCZOS before being handed back to draw_cell for cleanup.
 
-Cost reference (gpt-image-1, medium quality, 1024×1024 as of 2025):
-  ~$0.04 per image. Use quality="low" to halve that during testing.
+See https://platform.openai.com/pricing for current per-image pricing;
+`_QUALITY` controls low / medium / high.
 """
 
 from __future__ import annotations
@@ -33,35 +33,49 @@ _RETRY_MAX_S  = 60.0  # cap each wait at 60 s
 
 
 _BASE_URL = "https://api.openai.com/v1"
-_GEN_SIZE  = "1024x1024"       # smallest gpt-image-1 supports
-_QUALITY   = "low"             # low | medium | high — use low for cheap tests
-_COST_LOW  = 0.011             # gpt-image-1 low-quality 1024×1024 per image
-_COST_MED  = 0.042
+_GEN_SIZE = "1024x1024"       # smallest size supported by the image models we use
+_DEFAULT_QUALITY = "low"      # low | medium | high
+_DEFAULT_MODEL = "gpt-image-2"
+# Fallback estimates for ui cost hints — verify against OpenAI pricing.
+_COST_LOW = 0.011
+_COST_MED = 0.042
 _COST_HIGH = 0.167
 
 _COST_MAP = {"low": _COST_LOW, "medium": _COST_MED, "high": _COST_HIGH}
+_VALID_MODELS = {"gpt-image-1", "gpt-image-2"}
+_VALID_QUALITIES = set(_COST_MAP.keys())
 
-# Prepended to every prompt to steer gpt-image-1 toward pixel-art style.
+# Prepended to every prompt — pixel discipline without implying a monochrome look.
 _STYLE_PREFIX = (
-    "pixel art style, board game tile, flat colors, crisp edges, "
-    "no gradients, limited palette. "
+    "pixel art board game tile, flat fills, crisp pixel edges, no smooth gradients; "
+    "rich cohesive palette with varied accents (warm metals, jewel tones, bone, "
+    "cool shadows) — avoid collapsing to one hue across the tile. "
 )
 
 
 class OpenAIImageProvider(PixelArtProvider):
-    """Wraps gpt-image-1 behind the PixelArtProvider interface."""
+    """Wraps GPT Image models (gpt-image-2) behind the PixelArtProvider interface."""
 
     @property
     def name(self) -> str:
         return "openai"
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        model: str | None = None,
+        quality: str | None = None,
+    ) -> None:
         self._api_key = os.environ.get("OPENAI_API_KEY", "").strip()
         if not self._api_key:
             raise RuntimeError(
                 "OPENAI_API_KEY is not set. Save it in Account → Connections → "
                 "OpenAI / ChatGPT, or set OPENAI_API_KEY in docker-compose.yml."
             )
+        chosen_model = (model or _DEFAULT_MODEL).strip()
+        chosen_quality = (quality or _DEFAULT_QUALITY).strip()
+        self._model = chosen_model if chosen_model in _VALID_MODELS else _DEFAULT_MODEL
+        self._quality = chosen_quality if chosen_quality in _VALID_QUALITIES else _DEFAULT_QUALITY
 
     # ────────────────────────── public API ──────────────────────────
 
@@ -77,11 +91,11 @@ class OpenAIImageProvider(PixelArtProvider):
         resp = self._json_post(
             f"{_BASE_URL}/images/generations",
             {
-                "model": "gpt-image-1",
+                "model": self._model,
                 "prompt": full_prompt,
                 "n": min(n, 4),
                 "size": _GEN_SIZE,
-                "quality": _QUALITY,
+                "quality": self._quality,
             },
         )
         return [self._to_target_size(raw, size) for raw in self._decode(resp)]
@@ -100,11 +114,11 @@ class OpenAIImageProvider(PixelArtProvider):
         resp = self._multipart_post(
             f"{_BASE_URL}/images/edits",
             data={
-                "model": "gpt-image-1",
+                "model": self._model,
                 "prompt": full_prompt,
                 "n": str(min(n, 4)),
                 "size": _GEN_SIZE,
-                "quality": _QUALITY,
+                "quality": self._quality,
             },
             files={"image": ("source.png", src_buf, "image/png")},
         )
@@ -129,11 +143,11 @@ class OpenAIImageProvider(PixelArtProvider):
         resp = self._multipart_post(
             f"{_BASE_URL}/images/edits",
             data={
-                "model": "gpt-image-1",
+                "model": self._model,
                 "prompt": full_prompt,
                 "n": str(min(n, 4)),
                 "size": _GEN_SIZE,
-                "quality": _QUALITY,
+                "quality": self._quality,
             },
             files={
                 "image": ("source.png", src_buf,  "image/png"),
@@ -143,7 +157,7 @@ class OpenAIImageProvider(PixelArtProvider):
         return [self._to_target_size(raw, target_size) for raw in self._decode(resp)]
 
     def cost_estimate(self, size: tuple[int, int], n: int) -> float:
-        return _COST_MAP.get(_QUALITY, _COST_LOW) * n
+        return _COST_MAP.get(self._quality, _COST_LOW) * n
 
     # ────────────────────────── helpers ──────────────────────────
 

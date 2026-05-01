@@ -132,6 +132,27 @@
     </span>
   </nav>
 
+  {# ── Generation settings strip ──────────────────────────────────────
+     A small inline summary so the artist can see and edit the model /
+     palette this board will use. The same modal opens on demand or is
+     forced open the first time any paid generate button is clicked.
+  #}
+  <div class="gen-settings-strip" id="gen-settings-strip"
+       data-board-id="{{ board_id }}"
+       data-configured="{{ 'true' if generation.configured else 'false' }}">
+    <span class="gen-settings-eyebrow">Generation</span>
+    <span class="gen-settings-summary" id="gen-settings-summary">
+      {% if generation.provider == 'openai' %}
+        OpenAI · {{ generation.openai.model }} · {{ generation.openai.quality }} quality
+      {% else %}
+        PixelLab · {{ generation.pixellab.model }}
+      {% endif %}
+      &middot; {{ generation.palette_size }} colors
+      {% if not generation.configured %}<em class="gen-settings-pending"> · defaults (not yet chosen)</em>{% endif %}
+    </span>
+    <button type="button" class="gen-settings-edit" id="gen-settings-edit">Edit</button>
+  </div>
+
   <div
     class="board-with-panel is-panel-closed"
     id="board-with-panel"
@@ -154,6 +175,80 @@
 
 </section>
 
-<script src="/static/side-panel.js"></script>
-<script src="/static/board-title.js"></script>
+{# ── Generation settings modal ──────────────────────────────────────
+   Rendered once at the bottom of the board page; opened by the strip's
+   "Edit" button or auto-opened when an unconfigured board's first
+   paid generate button is clicked.
+#}
+<div class="gen-modal" id="gen-modal" aria-hidden="true">
+  <div class="gen-modal-backdrop" data-close-modal></div>
+  <div class="gen-modal-card" role="dialog" aria-modal="true" aria-labelledby="gen-modal-title">
+    <header class="gen-modal-head">
+      <h2 id="gen-modal-title">Generation settings</h2>
+      <p class="gen-modal-sub">
+        These settings stay with the board. Future regenerations &mdash; whether
+        a single cell or a bulk run &mdash; use the choices saved here.
+      </p>
+    </header>
+
+    <form id="gen-modal-form" class="gen-modal-form">
+      <fieldset class="gen-field">
+        <legend>Color palette size</legend>
+        <label class="gen-radio">
+          <input type="radio" name="palette_size" value="24"> <span>24 colors &mdash; punchier limited look</span>
+        </label>
+        <label class="gen-radio">
+          <input type="radio" name="palette_size" value="36"> <span>36 colors &mdash; more nuance and accent shades</span>
+        </label>
+      </fieldset>
+
+      <fieldset class="gen-field">
+        <legend>Provider</legend>
+        <label class="gen-radio">
+          <input type="radio" name="provider" value="openai"> <span>OpenAI &mdash; GPT Image (gpt-image-1 / 2)</span>
+        </label>
+        <label class="gen-radio">
+          <input type="radio" name="provider" value="pixellab"> <span>PixelLab &mdash; native pixel art</span>
+        </label>
+      </fieldset>
+
+      <fieldset class="gen-field" data-provider-block="openai">
+        <legend>OpenAI model</legend>
+        <label class="gen-radio">
+          <input type="radio" name="openai_model" value="gpt-image-1"> <span>gpt-image-1 &mdash; legacy, slightly cheaper</span>
+        </label>
+        <label class="gen-radio">
+          <input type="radio" name="openai_model" value="gpt-image-2"> <span>gpt-image-2 &mdash; recommended</span>
+        </label>
+
+        <legend class="gen-sub-legend">Quality</legend>
+        <label class="gen-radio">
+          <input type="radio" name="openai_quality" value="low"> <span>Low &mdash; cheapest, good for iteration</span>
+        </label>
+        <label class="gen-radio">
+          <input type="radio" name="openai_quality" value="medium"> <span>Medium</span>
+        </label>
+        <label class="gen-radio">
+          <input type="radio" name="openai_quality" value="high"> <span>High &mdash; most expensive, slowest</span>
+        </label>
+      </fieldset>
+
+      <fieldset class="gen-field" data-provider-block="pixellab">
+        <legend>PixelLab model</legend>
+        <div id="gen-pixellab-options"><!-- populated from /api/generation --></div>
+      </fieldset>
+
+      <p class="gen-modal-error" id="gen-modal-error" hidden></p>
+
+      <footer class="gen-modal-foot">
+        <button type="button" class="btn-ghost" data-close-modal>Cancel</button>
+        <button type="submit" class="btn-primary" id="gen-modal-save">Save settings</button>
+      </footer>
+    </form>
+  </div>
+</div>
+
+<script src="/static/side-panel.js?v={{ asset_v('side-panel.js') }}"></script>
+<script src="/static/board-title.js?v={{ asset_v('board-title.js') }}"></script>
+<script src="/static/gen-settings.js?v={{ asset_v('gen-settings.js') }}"></script>
 {% endblock %}

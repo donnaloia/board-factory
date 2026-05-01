@@ -21,7 +21,7 @@ from typing import Iterable
 from PIL import Image
 
 
-def extract_palette(image_path: Path, n: int = 24) -> list[tuple[int, int, int]]:
+def extract_palette(image_path: Path, n: int = 36) -> list[tuple[int, int, int]]:
     """Extract the N most representative colors from `image_path` via median-cut."""
     img = Image.open(image_path).convert("RGB")
     quantized = img.quantize(colors=n, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)

@@ -3506,3 +3506,150 @@ body.modal-open {
   background: #000;
 }
 
+/* ─────────────────────────────────────────────
+   Generation settings — board-stage strip + modal
+   ───────────────────────────────────────────── */
+
+.gen-settings-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--rule);
+  background: var(--paper-2);
+  border-radius: 2px;
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.gen-settings-eyebrow {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.gen-settings-summary { flex: 1; min-width: 0; }
+.gen-settings-summary em.gen-settings-pending {
+  color: var(--ember-bright);
+  font-style: normal;
+  margin-left: 4px;
+}
+.gen-settings-edit {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--rule-strong);
+  border-radius: 2px;
+  padding: 6px 12px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+.gen-settings-edit:hover { border-color: var(--brass-bright); color: var(--brass-bright); }
+
+.gen-modal {
+  position: fixed; inset: 0;
+  display: none;
+  z-index: 200;
+}
+.gen-modal.is-open { display: block; }
+.gen-modal-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,.65);
+}
+.gen-modal-card {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(640px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  background: var(--paper-2);
+  border: 1px solid var(--rule-strong);
+  border-radius: 4px;
+  box-shadow: 0 30px 80px rgba(0,0,0,.65);
+  padding: 28px 28px 20px;
+  overflow-y: auto;
+  font-family: var(--sans);
+  color: var(--ink);
+}
+.gen-modal-head h2 {
+  margin: 0 0 6px;
+  font-family: var(--serif);
+  font-size: 24px;
+  letter-spacing: -0.01em;
+}
+.gen-modal-sub {
+  margin: 0 0 18px;
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.gen-modal-form { display: flex; flex-direction: column; gap: 18px; }
+.gen-field {
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  padding: 14px 16px 12px;
+}
+.gen-field legend {
+  padding: 0 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.gen-field .gen-sub-legend {
+  display: block;
+  margin: 12px 0 4px;
+  padding: 0;
+}
+.gen-radio {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 6px 4px;
+  border-radius: 2px;
+  font-size: 13px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.gen-radio:hover { color: var(--ink); }
+.gen-radio input { margin-top: 4px; accent-color: var(--brass-bright); }
+.gen-modal-error {
+  color: var(--ember-bright);
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+.gen-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 6px;
+}
+.gen-modal-foot .btn-primary,
+.gen-modal-foot .btn-ghost {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  padding: 8px 16px;
+  border-radius: 2px;
+  cursor: pointer;
+  border: 1px solid var(--rule-strong);
+  background: transparent;
+  color: var(--ink);
+}
+.gen-modal-foot .btn-ghost:hover { border-color: var(--ink-3); }
+.gen-modal-foot .btn-primary {
+  background: var(--brass);
+  border-color: var(--brass);
+  color: var(--paper);
+}
+.gen-modal-foot .btn-primary:hover {
+  background: var(--brass-bright);
+  border-color: var(--brass-bright);
+}
