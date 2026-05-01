@@ -10,7 +10,7 @@ project: damnation-board
 
 style:
   reference_image: mockup/board.png
-  palette_size: 24
+  palette_size: 36
   prompt: >-
     dark macabre pixel art, gothic horror theme, deep red and gold accents on
     aged wood and stone, occult symbols, hand-painted shading

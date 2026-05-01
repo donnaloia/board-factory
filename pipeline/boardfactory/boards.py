@@ -138,8 +138,15 @@ def create_board(board_id: str, project_name: str | None = None) -> BoardInfo:
         "board_size": [1920, 1080],
         "style": {
             "reference_image": "mockup/board.png",
-            "palette_size": 24,
+            "palette_size": 36,
             "prompt": "",
+        },
+        "generation": {
+            "palette_size": 36,
+            "provider": "openai",
+            "openai": {"model": "gpt-image-2", "quality": "low"},
+            "pixellab": {"model": "pixflux_sharp"},
+            "configured": False,
         },
         "centerpiece": {
             "bbox": [700, 180, 1220, 900],

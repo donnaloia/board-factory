@@ -500,6 +500,56 @@ def _load_catalog(board_id: str) -> dict:
         return yaml.safe_load(f)
 
 
+def _save_catalog(board_id: str, data: dict) -> None:
+    """Atomic write of the catalog YAML."""
+    p = _catalog_path(board_id)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    with tmp.open("w") as f:
+        yaml.safe_dump(data, f, sort_keys=False)
+    os.replace(tmp, p)
+
+
+def _generation_defaults() -> dict:
+    """Default generation block for boards that don't have one yet."""
+    return {
+        "palette_size": 36,
+        "provider": "openai",
+        "openai": {"model": "gpt-image-2", "quality": "low"},
+        "pixellab": {"model": "pixflux_sharp"},
+        "configured": False,
+    }
+
+
+def _read_generation(catalog: dict) -> dict:
+    """Return the generation block, filling defaults for missing fields."""
+    block = dict(_generation_defaults())
+    existing = catalog.get("generation") or {}
+    if isinstance(existing, dict):
+        if "palette_size" in existing:
+            try:
+                ps = int(existing["palette_size"])
+                if 4 <= ps <= 64:
+                    block["palette_size"] = ps
+            except (TypeError, ValueError):
+                pass
+        if existing.get("provider") in ("openai", "pixellab", "mock"):
+            block["provider"] = existing["provider"]
+        oa = existing.get("openai") or {}
+        if isinstance(oa, dict):
+            if oa.get("model") in ("gpt-image-1", "gpt-image-2"):
+                block["openai"]["model"] = oa["model"]
+            if oa.get("quality") in ("low", "medium", "high"):
+                block["openai"]["quality"] = oa["quality"]
+        pl = existing.get("pixellab") or {}
+        if isinstance(pl, dict):
+            from boardfactory.providers.pixel.pixellab import PIXELLAB_PRESETS
+            if pl.get("model") in PIXELLAB_PRESETS:
+                block["pixellab"]["model"] = pl["model"]
+        if "configured" in existing:
+            block["configured"] = bool(existing["configured"])
+    return block
+
+
 def _ensure_board_or_404(board_id: str) -> bf_boards.BoardInfo:
     if not bf_boards.is_valid_id(board_id):
         raise HTTPException(400, "Invalid board id")
@@ -690,6 +740,85 @@ def api_rename_board(board_id: str, project_name: str = Form(...)):
     return JSONResponse({"id": info.id, "project": info.project})
 
 
+@app.get("/b/{board_id}/api/generation")
+def api_generation_get(board_id: str):
+    """Return the current generation settings + the menu of available choices.
+
+    The UI uses this both to populate the modal and to show the summary on the
+    board page. Available models / presets are listed here so the modal stays
+    in lockstep with what the providers actually accept.
+    """
+    _ensure_board_or_404(board_id)
+    catalog = _load_catalog(board_id)
+    settings = _read_generation(catalog)
+    from boardfactory.providers.pixel.pixellab import list_pixellab_presets
+
+    return JSONResponse({
+        "settings": settings,
+        "options": {
+            "palette_sizes": [24, 36],
+            "providers": ["openai", "pixellab"],
+            "openai_models": ["gpt-image-1", "gpt-image-2"],
+            "openai_qualities": ["low", "medium", "high"],
+            "pixellab_models": list_pixellab_presets(),
+        },
+    })
+
+
+@app.put("/b/{board_id}/api/generation")
+async def api_generation_put(request: Request, board_id: str):
+    """Save the generation settings for a board.
+
+    Body: { palette_size, provider, openai: {model, quality}, pixellab: {model} }
+    `configured` is set to True automatically the first time we save.
+    """
+    _ensure_board_or_404(board_id)
+    body = await request.json()
+    catalog = _load_catalog(board_id)
+    current = _read_generation(catalog)
+
+    from boardfactory.providers.pixel.pixellab import PIXELLAB_PRESETS
+
+    palette_size = body.get("palette_size", current["palette_size"])
+    try:
+        palette_size = int(palette_size)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "palette_size must be an integer")
+    if palette_size not in (24, 36):
+        raise HTTPException(400, "palette_size must be 24 or 36")
+
+    provider = body.get("provider", current["provider"])
+    if provider not in ("openai", "pixellab"):
+        raise HTTPException(400, "provider must be 'openai' or 'pixellab'")
+
+    oa = body.get("openai") or {}
+    oa_model = oa.get("model", current["openai"]["model"])
+    if oa_model not in ("gpt-image-1", "gpt-image-2"):
+        raise HTTPException(400, "openai.model must be 'gpt-image-1' or 'gpt-image-2'")
+    oa_quality = oa.get("quality", current["openai"]["quality"])
+    if oa_quality not in ("low", "medium", "high"):
+        raise HTTPException(400, "openai.quality must be low/medium/high")
+
+    pl = body.get("pixellab") or {}
+    pl_model = pl.get("model", current["pixellab"]["model"])
+    if pl_model not in PIXELLAB_PRESETS:
+        raise HTTPException(400, f"pixellab.model must be one of {list(PIXELLAB_PRESETS)}")
+
+    new_block = {
+        "palette_size": palette_size,
+        "provider": provider,
+        "openai": {"model": oa_model, "quality": oa_quality},
+        "pixellab": {"model": pl_model},
+        "configured": True,
+    }
+    catalog["generation"] = new_block
+    # Mirror palette_size into legacy style block too — older steps still read it.
+    style = catalog.setdefault("style", {})
+    style["palette_size"] = palette_size
+    _save_catalog(board_id, catalog)
+    return JSONResponse({"settings": new_block})
+
+
 # ────────────────────────── routes: per-board views ──────────────────────────
 
 
@@ -785,6 +914,7 @@ def board_view(request: Request, board_id: str):
                 else "Generate missing spaces & UI"
             ),
         },
+        "generation": _read_generation(catalog),
     })
     return templates.TemplateResponse(request, "board.html", ctx)
 

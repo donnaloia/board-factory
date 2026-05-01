@@ -206,12 +206,17 @@ def analyze_adapter(openai_key: str) -> Callable[[Job, threading.Event], float]:
 def _resolve_provider(
     pixellab_key: str | None = None,
     openai_key: str | None = None,
+    *,
+    catalog=None,
 ):
-    """Return the configured provider, injecting per-user keys as needed.
+    """Return the configured provider, injecting per-user keys + board settings.
 
     Temporarily overrides the relevant API key env var so the provider
     constructor reads the user's saved key instead of the compose-level one.
     Falls back to whatever the env var already holds when no key is supplied.
+
+    When `catalog` is provided, its `generation` block selects the provider,
+    model, and quality/preset — overriding the env-level BOARDFACTORY_PROVIDER.
     """
     import os
     from boardfactory.providers import get_provider
@@ -222,16 +227,18 @@ def _resolve_provider(
     if openai_key:
         overrides["OPENAI_API_KEY"] = openai_key
 
+    settings = getattr(catalog, "generation", None) if catalog is not None else None
+
     if overrides:
         old = {k: os.environ.get(k, "") for k in overrides}
         for k, v in overrides.items():
             os.environ[k] = v
         try:
-            return get_provider()
+            return get_provider(settings=settings)
         finally:
             for k, v in old.items():
                 os.environ[k] = v
-    return get_provider()
+    return get_provider(settings=settings)
 
 
 def style_adapter() -> Callable[[Job, threading.Event], float]:
@@ -277,7 +284,7 @@ def generate_one_adapter(
         catalog = _load_catalog()
         if category != "centerpiece":
             _validate_mockup_or_die(catalog)
-        provider = _resolve_provider(pixellab_key, openai_key)
+        provider = _resolve_provider(pixellab_key, openai_key, catalog=catalog)
         check_cancel(cancel)
 
         if category == "spaces":
@@ -325,7 +332,7 @@ def generate_missing_adapter(
         catalog = _load_catalog()
         if category != "centerpiece":
             _validate_mockup_or_die(catalog)
-        provider = _resolve_provider(pixellab_key, openai_key)
+        provider = _resolve_provider(pixellab_key, openai_key, catalog=catalog)
         check_cancel(cancel)
 
         sink = _sink(job)
@@ -366,7 +373,7 @@ def generate_all_adapter(
 
         catalog = _load_catalog()
         _validate_mockup_or_die(catalog)
-        provider = _resolve_provider(pixellab_key, openai_key)
+        provider = _resolve_provider(pixellab_key, openai_key, catalog=catalog)
         check_cancel(cancel)
 
         sink = _sink(job)

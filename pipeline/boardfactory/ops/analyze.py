@@ -145,7 +145,7 @@ Board regions:
 • CENTER ARTWORK: large region at x={cx1}-{cx2}, y={cy1}-{cy2}
 • INTERIOR PANELS: 12 rectangular panels (260×240px each) flanking the center on both sides
 
-TASK: Fill every empty string "" in the JSON below with a SHORT pixel-art generation prompt (max 15 words) describing the visual content at those coordinates. For "style_prompt", write 1-2 sentences capturing the board's overall theme, art style, color palette, and mood.
+TASK: Fill every empty string "" in the JSON below with a SHORT pixel-art generation prompt (max 15 words) describing the visual content at those coordinates. For "style_prompt", write 1-2 sentences capturing the board's overall theme, art style, color palette (name several distinct accent colors visible in the mockup), and mood — not a monochrome summary unless the mockup truly is monochrome.
 
 Return ONLY the completed JSON — nothing else.
 
