@@ -1,5 +1,11 @@
 # Legacy flat layout (migrated boards live under boards/)
 workspace/style/*
+# Track extracted palette + style sheet so another clone can open the editor
+# without re-running "Extract style from mockup".
+!workspace/style/palette.json
+!workspace/style/palette.gpl
+!workspace/style/palette_swatch.png
+!workspace/style/style_sheet.png
 workspace/candidates/*
 workspace/cleaned/*
 workspace/approved/*
@@ -12,6 +18,10 @@ board_assets/*
 
 # Per-board workspace artifacts
 boards/*/workspace/style/*
+!boards/*/workspace/style/palette.json
+!boards/*/workspace/style/palette.gpl
+!boards/*/workspace/style/palette_swatch.png
+!boards/*/workspace/style/style_sheet.png
 boards/*/workspace/candidates/*
 boards/*/workspace/cleaned/*
 boards/*/workspace/approved/*
