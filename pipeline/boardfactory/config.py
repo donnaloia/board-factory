@@ -98,39 +98,33 @@ def board_root(board_id: str | None = None) -> Path:
     return BOARDS_DIR / bid
 
 
-# ────────────────────────── path properties (compat layer) ──────────────────────────
+# ────────────────────────── path properties ──────────────────────────
 
 
-def _path_for(name: str) -> Path:
-    """Resolve a board-scoped path by symbolic name."""
-    root = board_root()
-    return {
-        "BOARD_ROOT":     root,
-        "CATALOG_PATH":   root / "catalog.yml",
-        "MOCKUP_DIR":     root / "mockup",
-        "WORKSPACE":      root / "workspace",
-        "STYLE_DIR":      root / "workspace" / "style",
-        "REFINEMENTS_DIR":root / "workspace" / "refinements",
-        "PREVIEW_DIR":    root / "workspace" / "preview",
-        "LOGS_DIR":       root / "workspace" / "logs",
-        "HISTORY_DIR":    root / "workspace" / "history",
-        "LIVE_DIR":       root / "workspace" / "live",
-        "EXPORT_DIR":     root / "export",
-    }[name]
-
-
-_PATH_NAMES = {
-    "BOARD_ROOT", "CATALOG_PATH", "MOCKUP_DIR", "WORKSPACE", "STYLE_DIR",
-    "REFINEMENTS_DIR",
-    "PREVIEW_DIR", "LOGS_DIR", "HISTORY_DIR", "LIVE_DIR", "EXPORT_DIR",
+# Map of attribute-style path names to their layout under boards/<id>/.
+# Resolved lazily via PEP 562 module __getattr__ so each access reflects
+# the currently active board id.
+_PATH_LAYOUT: dict[str, tuple[str, ...]] = {
+    "BOARD_ROOT":      (),
+    "CATALOG_PATH":    ("catalog.yml",),
+    "MOCKUP_DIR":      ("mockup",),
+    "WORKSPACE":       ("workspace",),
+    "STYLE_DIR":       ("workspace", "style"),
+    "REFINEMENTS_DIR": ("workspace", "refinements"),
+    "PREVIEW_DIR":     ("workspace", "preview"),
+    "LOGS_DIR":        ("workspace", "logs"),
+    "HISTORY_DIR":     ("workspace", "history"),
+    "LIVE_DIR":        ("workspace", "live"),
+    "EXPORT_DIR":      ("export",),
 }
 
 
 def __getattr__(name: str) -> Path:
     """Resolve path attributes lazily so they always reflect the active board."""
-    if name in _PATH_NAMES:
-        return _path_for(name)
-    raise AttributeError(f"module 'boardfactory.config' has no attribute {name!r}")
+    parts = _PATH_LAYOUT.get(name)
+    if parts is None:
+        raise AttributeError(f"module 'boardfactory.config' has no attribute {name!r}")
+    return board_root().joinpath(*parts)
 
 
 # ────────────────────────── filesystem bootstrap ──────────────────────────
@@ -138,11 +132,12 @@ def __getattr__(name: str) -> Path:
 
 def ensure_dirs() -> None:
     """Create every workspace subdir the web pipeline writes to."""
+    root = board_root()
     for name in (
         "STYLE_DIR", "REFINEMENTS_DIR", "PREVIEW_DIR", "LOGS_DIR",
         "HISTORY_DIR", "LIVE_DIR", "EXPORT_DIR", "MOCKUP_DIR",
     ):
-        _path_for(name).mkdir(parents=True, exist_ok=True)
+        root.joinpath(*_PATH_LAYOUT[name]).mkdir(parents=True, exist_ok=True)
 
 
 # ────────────────────────── per-request scope helper ──────────────────────────

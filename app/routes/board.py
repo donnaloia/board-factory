@@ -40,22 +40,16 @@ def board_view(request: Request, board_id: str):
         return RedirectResponse(f"/b/{board_id}/setup", status_code=303)
 
     catalog = deps.load_board_catalog(board_id)
-    space_status = {
-        d["id"]: svc_cells.cell_status(board_id, "spaces", d["id"])
-        for d in catalog.get("board_spaces", {}).get("designs", [])
-    }
-    panel_status = {
-        p["id"]: svc_cells.cell_status(board_id, "panels", p["id"])
-        for p in catalog.get("feature_panels", {}).get("panels", [])
-    }
-    cp_status = svc_cells.cell_status(board_id, "centerpiece", "centerpiece")
-
-    n_designs = len(space_status)
-    n_panels = len(panel_status)
-    designs_done = sum(1 for s in space_status.values() if s.approved)
-    panels_done = sum(1 for s in panel_status.values() if s.approved)
-    missing_space_ids = svc_cells.missing_space_ids(board_id, catalog)
-    missing_panel_ids = svc_cells.missing_panel_ids(board_id, catalog)
+    stats = svc_cells.collect_board_stats(board_id, catalog)
+    space_status = stats.space_status
+    panel_status = stats.panel_status
+    cp_status = stats.centerpiece_status
+    n_designs = stats.designs_total
+    n_panels = stats.panels_total
+    designs_done = stats.designs_done
+    panels_done = stats.panels_done
+    missing_space_ids = stats.missing_space_ids
+    missing_panel_ids = stats.missing_panel_ids
     n_missing_designs = len(missing_space_ids)
     n_missing_panels = len(missing_panel_ids)
     generated_designs = n_designs - n_missing_designs
