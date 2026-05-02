@@ -6,6 +6,7 @@ import base64
 import io
 import os
 import time
+from functools import partial
 
 import httpx
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
@@ -607,7 +608,9 @@ async def action_analyze(request: Request, board_id: str):
         label="Analyze mockup with GPT-4o",
         operation="analyze", target=board_id,
         cost_estimate=pipeline_adapters.ANALYZE_COST_USD,
-        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.analyze_adapter(openai_key)),
+        fn=deps.scoped_pipeline_callable(
+            board_id, partial(pipeline_adapters.analyze, openai_key=openai_key),
+        ),
     )
     return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/")
 
@@ -619,7 +622,7 @@ async def action_style(request: Request, board_id: str):
         label="Extract style from mockup",
         operation="style", target=board_id,
         cost_estimate=pipeline_adapters.estimate_style(),
-        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.style_adapter()),
+        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.style),
     )
     return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/")
 
@@ -639,7 +642,9 @@ async def action_generate_missing_all(request: Request, board_id: str):
         cost_estimate=pipeline_adapters.estimate_generate_all(
             len(missing_spaces), len(missing_panels)
         ),
-        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.generate_all_adapter(**keys)),
+        fn=deps.scoped_pipeline_callable(
+            board_id, partial(pipeline_adapters.generate_all, **keys),
+        ),
     )
     return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/")
 
@@ -651,7 +656,7 @@ async def action_states(request: Request, board_id: str):
         label="Build active states",
         operation="states", target=board_id,
         cost_estimate=0.0,
-        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.states_adapter()),
+        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.states),
     )
     return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/preview")
 
@@ -663,7 +668,7 @@ async def action_preview(request: Request, board_id: str):
         label="Composite preview",
         operation="preview", target=board_id,
         cost_estimate=0.0,
-        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.preview_adapter()),
+        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.preview),
     )
     return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/preview")
 
@@ -675,7 +680,7 @@ async def action_export(request: Request, board_id: str):
         label="Export approved assets",
         operation="export", target=board_id,
         cost_estimate=0.0,
-        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.export_adapter()),
+        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.export),
     )
     return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/preview")
 
@@ -695,9 +700,16 @@ async def action_regen_one(
         label=f"Regenerate {asset_id}",
         operation=f"regen.{category}", target=asset_id,
         cost_estimate=pipeline_adapters.estimate_generate_one(category, asset_id),
-        fn=deps.scoped_pipeline_callable(board_id,
-                      pipeline_adapters.generate_one_adapter(category, asset_id,
-                                                             prompt_override=p, **keys)),
+        fn=deps.scoped_pipeline_callable(
+            board_id,
+            partial(
+                pipeline_adapters.generate_one,
+                category=category,
+                asset_id=asset_id,
+                prompt_override=p,
+                **keys,
+            ),
+        ),
     )
     return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/")
 
@@ -712,7 +724,10 @@ async def action_clean_one(request: Request, board_id: str, category: str, asset
         label=f"Clean {asset_id}",
         operation=f"clean.{category}", target=asset_id,
         cost_estimate=0.0,
-        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.clean_one_adapter(category, asset_id)),
+        fn=deps.scoped_pipeline_callable(
+            board_id,
+            partial(pipeline_adapters.clean_one, category=category, asset_id=asset_id),
+        ),
     )
     return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/")
 
