@@ -10,7 +10,7 @@ JSON object with:
   - centerpiece   : prompt string             (→ catalog.centerpiece.prompt)
 
 The caller (pipeline_adapters.analyze_adapter) is responsible for writing
-the results back to catalog.yml on disk.
+the results back into the catalog (relational store via the web app).
 """
 
 from __future__ import annotations

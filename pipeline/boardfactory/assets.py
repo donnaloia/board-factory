@@ -19,13 +19,37 @@ so the same primitives work for it.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from . import config
+
+
+_asset_db_listeners: list[Callable[..., None]] = []
+
+
+def register_asset_db_listener(fn: Callable[..., None]) -> None:
+    """Services layer registers DB-backed asset index hooks (optional — empty by default)."""
+    _asset_db_listeners.append(fn)
+
+
+def _notify_asset_db(kind: str, **kwargs: Any) -> None:
+    if not _asset_db_listeners:
+        return
+    bid = config.active_board()
+    if not bid:
+        return
+    for cb in list(_asset_db_listeners):
+        try:
+            cb(kind, board_id=bid, **kwargs)
+        except Exception:
+            pass
 
 
 # Note: do not bind HISTORY_DIR / LIVE_DIR at import time — they would lock to
@@ -52,10 +76,26 @@ def history_dir(category: str, asset_id: str) -> Path:
     return config.HISTORY_DIR / category / asset_id
 
 
-def live_path(category: str, asset_id: str) -> Path:
+def physical_live_path(category: str, asset_id: str) -> Path:
+    """Fixed ``live/...`` path (legacy duplicate). Prefer ``live_path()`` for reads."""
     if category == "centerpiece":
         return config.LIVE_DIR / "centerpiece" / "centerpiece.png"
     return config.LIVE_DIR / category / f"{asset_id}.png"
+
+
+def live_path(category: str, asset_id: str) -> Path:
+    """Resolved path for the cell's live image (DB pointer → ``history/`` or ``live/``)."""
+    bid = config.active_board()
+    if bid:
+        try:
+            from services.asset_live import resolved_live_path
+
+            p = resolved_live_path(bid, category, asset_id)
+            if p.exists():
+                return p
+        except Exception:
+            pass
+    return physical_live_path(category, asset_id)
 
 
 def has_live(category: str, asset_id: str) -> bool:
@@ -74,13 +114,11 @@ def push_to_history(
     prompt: str | None = None,
     extras: dict | None = None,
 ) -> Path:
-    """Write a new PNG into history with a metadata sidecar, return its path.
+    """Write a new PNG into history and notify the asset index. Returns its path.
 
-    The sidecar lives at <basename>.meta.json and records:
-    - operation: one of OP_REGEN | OP_CLEAN | OP_REFINE | OP_LEGACY
-    - prompt:    the prompt actually used for this generation (None for clean)
-    - ts_ms:     creation time
-    - extras:    optional free-form fields (provider name, palette size, etc.)
+    Metadata is recorded in SQLite via the registered listener
+    (``asset_versions.meta_json``). Legacy ``.meta.json`` sidecars are no
+    longer written for new entries.
 
     Caller decides whether to also call promote() to make this entry live.
     """
@@ -99,21 +137,55 @@ def push_to_history(
     }
     if extras:
         meta["extras"] = extras
-    (out.with_suffix(".meta.json")).write_text(json.dumps(meta, indent=2))
+    try:
+        rel = str(out.relative_to(config.WORKSPACE)).replace("\\", "/")
+    except ValueError:
+        rel = f"history/{category}/{asset_id}/{out.name}"
+    _notify_asset_db(
+        "history_push",
+        category=category,
+        asset_id=asset_id,
+        basename=out.name,
+        rel_path=rel,
+        sha256=hashlib.sha256(png_bytes).hexdigest(),
+        ts_ms=ts,
+        meta_json=json.dumps(meta),
+    )
     return out
 
 
 def read_meta(category: str, asset_id: str, history_filename: str) -> dict:
-    """Return the sidecar metadata for one history entry, or an empty dict
-    if there is no sidecar (e.g. legacy migrated entries)."""
-    d = history_dir(category, asset_id)
-    p = (d / history_filename).with_suffix(".meta.json")
-    if not p.exists():
-        return {}
-    try:
-        return json.loads(p.read_text())
-    except Exception:
-        return {}
+    """Return metadata for one history entry (merge DB ``meta_json`` + legacy sidecar).
+
+    New history rows record metadata only in SQLite. Legacy boards may still
+    have ``.meta.json`` sidecars; if the DB row exists but omits ``prompt``
+    (index gaps, partial rows), a sidecar prompt is still visible.
+    """
+    hist_dir = history_dir(category, asset_id)
+    sidecar = (hist_dir / history_filename).with_suffix(".meta.json")
+    fs_meta: dict = {}
+    if sidecar.exists():
+        try:
+            fs_meta = json.loads(sidecar.read_text())
+        except Exception:
+            fs_meta = {}
+
+    db_meta: dict | None = None
+    bid = config.active_board()
+    if bid:
+        try:
+            from services.asset_meta import read_meta_from_db
+
+            db_meta = read_meta_from_db(bid, category, asset_id, history_filename)
+        except Exception:
+            db_meta = None
+
+    if db_meta:
+        merged = {**fs_meta, **db_meta}
+        if merged.get("prompt") is None and fs_meta.get("prompt"):
+            merged["prompt"] = fs_meta["prompt"]
+        return merged
+    return fs_meta if fs_meta else {}
 
 
 def promote(category: str, asset_id: str, history_filename: str) -> Path:
@@ -124,14 +196,41 @@ def promote(category: str, asset_id: str, history_filename: str) -> Path:
     src = history_dir(category, asset_id) / history_filename
     if not src.exists():
         raise FileNotFoundError(f"No history entry {src}")
-    dst = live_path(category, asset_id)
+    try:
+        rel_hist = str(src.relative_to(config.WORKSPACE)).replace("\\", "/")
+    except ValueError:
+        rel_hist = f"history/{category}/{asset_id}/{history_filename}"
+    _notify_asset_db(
+        "promote",
+        category=category,
+        asset_id=asset_id,
+        basename=history_filename,
+        rel_path=rel_hist,
+    )
+    bid = config.active_board()
+    if bid:
+        try:
+            from services.asset_live import resolved_live_path
+
+            rp = resolved_live_path(bid, category, asset_id)
+            if rp.exists():
+                try:
+                    if rp.resolve() == src.resolve():
+                        return rp
+                except OSError:
+                    if rp == src:
+                        return rp
+        except Exception:
+            pass
+    dst = physical_live_path(category, asset_id)
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
     return dst
 
 
 def clear_live(category: str, asset_id: str) -> None:
-    p = live_path(category, asset_id)
+    _notify_asset_db("clear_live", category=category, asset_id=asset_id)
+    p = physical_live_path(category, asset_id)
     if p.exists():
         p.unlink()
 
@@ -154,8 +253,18 @@ def list_history(category: str, asset_id: str) -> list[HistoryEntry]:
     d = history_dir(category, asset_id)
     if not d.exists():
         return []
+    pointer_rel: str | None = None
+    bid = config.active_board()
+    if bid:
+        try:
+            from services.asset_live import get_live_rel_path
+
+            pointer_rel = get_live_rel_path(bid, category, asset_id)
+        except Exception:
+            pointer_rel = None
+
     live_bytes: bytes | None = None
-    lp = live_path(category, asset_id)
+    lp = physical_live_path(category, asset_id)
     if lp.exists():
         try:
             live_bytes = lp.read_bytes()
@@ -172,8 +281,15 @@ def list_history(category: str, asset_id: str) -> list[HistoryEntry]:
             seq = int(seq_str)
         except ValueError:
             continue
+        entry_rel: str | None = None
+        try:
+            entry_rel = str(p.relative_to(config.WORKSPACE)).replace("\\", "/")
+        except ValueError:
+            entry_rel = None
         is_live = False
-        if live_bytes is not None:
+        if pointer_rel and entry_rel:
+            is_live = pointer_rel == entry_rel
+        elif live_bytes is not None:
             try:
                 is_live = p.read_bytes() == live_bytes
             except OSError:
@@ -201,10 +317,11 @@ def seed_from_legacy_approved(category: str, asset_id: str) -> Path | None:
     Returns the live path on success, None if nothing to migrate.
     """
     legacy: Path
+    approved = config.WORKSPACE / "approved"
     if category == "centerpiece":
-        legacy = config.APPROVED_DIR / "centerpiece.png"
+        legacy = approved / "centerpiece.png"
     else:
-        legacy = config.APPROVED_DIR / category / f"{asset_id}.png"
+        legacy = approved / category / f"{asset_id}.png"
 
     if not legacy.exists():
         return None
@@ -212,11 +329,9 @@ def seed_from_legacy_approved(category: str, asset_id: str) -> Path | None:
         return live_path(category, asset_id)
 
     raw = legacy.read_bytes()
-    push_to_history(category, asset_id, raw, operation=OP_LEGACY, prompt=None)
-    dst = live_path(category, asset_id)
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(legacy, dst)
-    return dst
+    out = push_to_history(category, asset_id, raw, operation=OP_LEGACY, prompt=None)
+    promote(category, asset_id, out.name)
+    return live_path(category, asset_id)
 
 
 # ────────────────────────── one-board legacy purge ──────────────────────────

@@ -63,10 +63,13 @@ class OpenAIImageProvider(PixelArtProvider):
     def __init__(
         self,
         *,
+        api_key: str | None = None,
         model: str | None = None,
         quality: str | None = None,
     ) -> None:
-        self._api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+        # Prefer the explicit ``api_key`` arg; fall back to the env var so
+        # callers that haven't been migrated to pass-through yet keep working.
+        self._api_key = (api_key or os.environ.get("OPENAI_API_KEY", "")).strip()
         if not self._api_key:
             raise RuntimeError(
                 "OPENAI_API_KEY is not set. Save it in Account → Connections → "

@@ -16,7 +16,7 @@ COPY pyproject.toml /app/
 COPY boardfactory /app/boardfactory
 RUN pip install --no-cache-dir -e .
 
-# This image is a library used by services/review-ui — there is no CLI
+# This image is a library used by the Board Factory web app (`app/`) — there is no CLI
 # entrypoint anymore. The web app installs this package editable and calls
 # `boardfactory.ops.draw_cell` directly.
 WORKDIR /repo

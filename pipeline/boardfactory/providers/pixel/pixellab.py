@@ -74,11 +74,18 @@ class PixelLabProvider(PixelArtProvider):
     def name(self) -> str:
         return "pixellab"
 
-    def __init__(self, *, preset: str | None = None) -> None:
-        self._api_key = os.environ.get("PIXELLAB_API_KEY", "").strip()
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        preset: str | None = None,
+    ) -> None:
+        # Prefer the explicit ``api_key`` arg; fall back to the env var so
+        # CLI / legacy callers that don't pass-through still work.
+        self._api_key = (api_key or os.environ.get("PIXELLAB_API_KEY", "")).strip()
         if not self._api_key:
             raise RuntimeError(
-                "PIXELLAB_API_KEY is not set. Add it under the boardfactory-cli "
+                "PIXELLAB_API_KEY is not set. Add it under the board-factory "
                 "service in docker-compose.yml, or set BOARDFACTORY_PROVIDER: mock "
                 "to test the pipeline without an API key."
             )

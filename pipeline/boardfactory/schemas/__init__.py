@@ -5,6 +5,7 @@ from .catalog import (
     BoardSpacesSpec,
     BoardSpaceLayout,
     BoardSpaceDesign,
+    SpaceKind,
     FeaturePanelsSpec,
     FeaturePanelSpec,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "BoardSpacesSpec",
     "BoardSpaceLayout",
     "BoardSpaceDesign",
+    "SpaceKind",
     "FeaturePanelsSpec",
     "FeaturePanelSpec",
 ]
