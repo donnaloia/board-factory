@@ -11,6 +11,8 @@ from storage.models.core import AssetVersionRecord, BoardGameRecord
 
 
 def test_catalog_persists_to_board_games(isolated_repo, seeded_board, board_id):
+    import json
+
     from services import catalog as svc_catalog
 
     data = svc_catalog.load_catalog(board_id)
@@ -18,7 +20,7 @@ def test_catalog_persists_to_board_games(isolated_repo, seeded_board, board_id):
     with session_scope() as session:
         bg = session.get(BoardGameRecord, board_id)
         assert bg is not None
-        assert bg.project == "Test Board"
+        assert json.loads(bg.body_json)["project"] == "Test Board"
 
 
 def test_yaml_disk_edit_requires_explicit_sync(isolated_repo, seeded_board, board_id):
@@ -41,6 +43,8 @@ def test_yaml_disk_edit_requires_explicit_sync(isolated_repo, seeded_board, boar
 
 
 def test_save_catalog_updates_db(isolated_repo, seeded_board, board_id):
+    import json
+
     from services import catalog as svc_catalog
 
     cat = svc_catalog.load_catalog(board_id)
@@ -49,7 +53,7 @@ def test_save_catalog_updates_db(isolated_repo, seeded_board, board_id):
     with session_scope() as session:
         bg = session.get(BoardGameRecord, board_id)
         assert bg is not None
-        assert bg.project == "Saved Via DB"
+        assert json.loads(bg.body_json)["project"] == "Saved Via DB"
 
 
 def test_asset_index_counts_history_push(isolated_repo, seeded_board, board_id):
