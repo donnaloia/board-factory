@@ -623,49 +623,6 @@ async def action_style(request: Request, board_id: str):
     return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/")
 
 
-@router.post("/b/{board_id}/actions/generate/{category}")
-async def action_generate(request: Request, board_id: str, category: str):
-    """Generate every cell in this category that doesn't have a live asset yet.
-
-    The button label distinguishes "Generate all X" from "Generate missing X"
-    based on whether anything is already live; both routes converge here so
-    the back-end behavior is identical: skip cells that already have art,
-    only spend on what's actually missing.
-    """
-    deps.ensure_owned_board(request, board_id)
-    if category not in ("spaces", "panels", "centerpiece"):
-        raise HTTPException(400, f"Unknown category {category}")
-    keys = deps.user_provider_api_keys(request)
-    job_id = deps.enqueue_pipeline_job(
-        label=f"Generate missing {category}",
-        operation=f"generate.{category}", target=board_id,
-        cost_estimate=pipeline_adapters.estimate_generate(category),
-        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.generate_missing_adapter(category, **keys)),
-    )
-    return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/")
-
-
-@router.post("/b/{board_id}/actions/generate-missing/spaces")
-async def action_generate_missing_spaces(request: Request, board_id: str):
-    """Alias for /actions/generate/spaces kept for the existing UI button.
-
-    Both routes funnel through generate_missing_adapter("spaces"), which
-    skips designs with a live asset and only spends on what's empty.
-    """
-    deps.ensure_owned_board(request, board_id)
-    catalog = deps.load_board_catalog(board_id)
-    missing_space_ids = deps.missing_space_ids(board_id, catalog)
-    count = len(missing_space_ids)
-    keys = deps.user_provider_api_keys(request)
-    job_id = deps.enqueue_pipeline_job(
-        label=f"Generate {count} missing space{'s' if count != 1 else ''}",
-        operation="generate.spaces", target=board_id,
-        cost_estimate=pipeline_adapters.estimate_generate_one("spaces") * count,
-        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.generate_missing_adapter("spaces", **keys)),
-    )
-    return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/")
-
-
 @router.post("/b/{board_id}/actions/generate-missing/all")
 async def action_generate_missing_all(request: Request, board_id: str):
     """Generate every empty board space AND every empty UI panel in one job."""

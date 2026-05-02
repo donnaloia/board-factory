@@ -83,10 +83,6 @@ def read_generation_from_catalog(catalog: dict) -> dict:
     return svc_catalog.read_generation(catalog)
 
 
-def seed_cell_history_if_needed(board_id: str, category: str, asset_id: str) -> None:
-    svc_cells.seed_history_if_needed(board_id, category, asset_id)
-
-
 def workspace_cell_status(board_id: str, category: str, asset_id: str) -> CellStatus:
     return svc_cells.cell_status(board_id, category, asset_id)
 
@@ -235,7 +231,6 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
     """JSON state for one cell: spec + live url + history list (with prompts)."""
     from storage.fs import workspace as fs_ws
 
-    seed_cell_history_if_needed(board_id, category, asset_id)
     catalog = load_board_catalog(board_id)
 
     spec: dict = {}

@@ -40,29 +40,6 @@ def export_dir(board_id: str) -> Path:
     return board_root(board_id) / "export"
 
 
-def migrate_legacy_board_assets_to_export(board_id: str) -> None:
-    """Rename ``board_assets/`` → ``export/`` when the legacy name is still on disk."""
-    legacy = board_root(board_id) / "board_assets"
-    target = export_dir(board_id)
-    if legacy.exists() and not target.exists():
-        try:
-            legacy.rename(target)
-        except OSError:
-            pass
-
-
-def migrate_all_legacy_board_assets_to_export() -> None:
-    root = boards_dir()
-    if not root.exists():
-        return
-    for child in root.iterdir():
-        if child.is_dir() and not child.name.startswith("."):
-            try:
-                migrate_legacy_board_assets_to_export(child.name)
-            except OSError:
-                continue
-
-
 def catalog_path(board_id: str) -> Path:
     return board_root(board_id) / "catalog.yml"
 
@@ -99,36 +76,6 @@ def live_path(board_id: str, category: str, asset_id: str) -> Path:
 
 def history_dir(board_id: str, category: str, asset_id: str) -> Path:
     return workspace_dir(board_id) / "history" / category / asset_id
-
-
-def approved_path_legacy(board_id: str, category: str, asset_id: str) -> Path:
-    """Legacy CLI-era path; read-only at this point - migration code seeds
-    these into ``live/`` + ``history/`` and then ``purge_legacy_dirs()``
-    removes them.
-    """
-    if category == "centerpiece":
-        return workspace_dir(board_id) / "approved" / "centerpiece.png"
-    return workspace_dir(board_id) / "approved" / category / f"{asset_id}.png"
-
-
-def legacy_cli_workspace_trees_exist(board_id: str) -> bool:
-    """True if any legacy CLI staging directory is still present under ``workspace/``.
-
-    Boot-time seed/purge skips boards when this is false so normal servers do
-    not scan every cell on every startup.
-    """
-    ws = workspace_dir(board_id)
-    return any((ws / name).exists() for name in ("candidates", "cleaned", "approved"))
-
-
-def cleaned_dir_legacy(board_id: str, category: str, asset_id: str | None = None) -> Path:
-    base = workspace_dir(board_id) / "cleaned" / category
-    return base / asset_id if asset_id else base
-
-
-def candidates_dir_legacy(board_id: str, category: str, asset_id: str | None = None) -> Path:
-    base = workspace_dir(board_id) / "candidates" / category
-    return base / asset_id if asset_id else base
 
 
 # ────────────────────────── safe path resolution ──────────────────────────
@@ -199,21 +146,3 @@ def list_history_pngs(board_id: str, category: str, asset_id: str) -> list[Path]
     if not d.exists():
         return []
     return sorted(p for p in d.glob("*.png"))
-
-
-def list_legacy_cleaned(
-    board_id: str, category: str, asset_id: str | None = None
-) -> list[Path]:
-    base = cleaned_dir_legacy(board_id, category, asset_id)
-    if not base.exists():
-        return []
-    return sorted(p for p in base.glob("*.png") if not p.name.startswith("_"))
-
-
-def list_legacy_raw_candidates(
-    board_id: str, category: str, asset_id: str | None = None
-) -> list[Path]:
-    base = candidates_dir_legacy(board_id, category, asset_id)
-    if not base.exists():
-        return []
-    return sorted(p for p in base.glob("*.png") if not p.name.startswith("_"))

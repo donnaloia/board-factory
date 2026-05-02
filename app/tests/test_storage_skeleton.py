@@ -52,29 +52,3 @@ def test_config_has_no_legacy_cli_path_attrs(isolated_repo):
     with pytest.raises(AttributeError):
         _ = cfg.APPROVED_DIR  # type: ignore[attr-defined]
 
-
-def test_migrate_legacy_board_assets_to_export(isolated_repo, seeded_board, board_id):
-    import shutil
-
-    from storage.fs import workspace as fs_ws
-
-    root = fs_ws.board_root(board_id)
-    exp = fs_ws.export_dir(board_id)
-    if exp.exists():
-        shutil.rmtree(exp)
-    legacy = root / "board_assets"
-    legacy.mkdir(parents=True)
-    (legacy / "marker.txt").write_text("x")
-    assert not fs_ws.export_dir(board_id).exists()
-    fs_ws.migrate_legacy_board_assets_to_export(board_id)
-    assert fs_ws.export_dir(board_id).exists()
-    assert (fs_ws.export_dir(board_id) / "marker.txt").read_text() == "x"
-    assert not legacy.exists()
-
-
-def test_legacy_cli_workspace_trees_exist(isolated_repo, seeded_board, board_id):
-    from storage.fs import workspace as fs_ws
-
-    assert fs_ws.legacy_cli_workspace_trees_exist(board_id) is False
-    (fs_ws.workspace_dir(board_id) / "approved").mkdir(parents=True)
-    assert fs_ws.legacy_cli_workspace_trees_exist(board_id) is True

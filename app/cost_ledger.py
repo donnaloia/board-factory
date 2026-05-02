@@ -1,29 +1,18 @@
-"""Cost ledger in SQLite; legacy ``workspace/.costs.jsonl`` imported once.
+"""Cost ledger backed by ``cost_entries`` in SQL.
 
 ``record()`` is safe from worker threads — each call opens a short-lived session.
 """
 
 from __future__ import annotations
 
-import json
-import os
 import time
 from collections import defaultdict
-from pathlib import Path
 from threading import Lock
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from storage.db import session_scope
 from storage.models.core import CostEntryRecord
-
-
-def repo_root() -> Path:
-    return Path(os.environ.get("BOARDFACTORY_REPO", "/repo"))
-
-
-def ledger_jsonl_path() -> Path:
-    return repo_root() / "workspace" / ".costs.jsonl"
 
 
 _lock = Lock()
@@ -45,38 +34,6 @@ def record(operation: str, target: str | None, units: int, usd: float) -> None:
                     usd=round(float(usd), 4),
                 )
             )
-
-
-def import_from_jsonl_if_needed() -> None:
-    path = ledger_jsonl_path()
-    if not path.exists():
-        return
-    with session_scope() as session:
-        n = session.scalar(select(func.count()).select_from(CostEntryRecord)) or 0
-        if int(n) > 0:
-            return
-        rows: list[CostEntryRecord] = []
-        try:
-            for line in path.read_text().splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    e = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                rows.append(
-                    CostEntryRecord(
-                        ts=float(e.get("ts") or 0),
-                        op=str(e.get("op") or "unknown"),
-                        target=e.get("target"),
-                        units=int(e.get("units") or 1),
-                        usd=float(e.get("usd") or 0),
-                    )
-                )
-        except Exception:
-            return
-        session.add_all(rows)
 
 
 def summary() -> dict:

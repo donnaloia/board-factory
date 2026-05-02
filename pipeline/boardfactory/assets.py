@@ -307,54 +307,6 @@ def list_history(category: str, asset_id: str) -> list[HistoryEntry]:
     return entries
 
 
-# ────────────────────────── back-compat seeding ──────────────────────────
-
-
-def seed_from_legacy_approved(category: str, asset_id: str) -> Path | None:
-    """If we have an approved/<asset_id>.png from the classic pipeline but
-    no live/, copy it into both live/ and history/ so the web app sees it.
-
-    Returns the live path on success, None if nothing to migrate.
-    """
-    legacy: Path
-    approved = config.WORKSPACE / "approved"
-    if category == "centerpiece":
-        legacy = approved / "centerpiece.png"
-    else:
-        legacy = approved / category / f"{asset_id}.png"
-
-    if not legacy.exists():
-        return None
-    if has_live(category, asset_id):
-        return live_path(category, asset_id)
-
-    raw = legacy.read_bytes()
-    out = push_to_history(category, asset_id, raw, operation=OP_LEGACY, prompt=None)
-    promote(category, asset_id, out.name)
-    return live_path(category, asset_id)
-
-
-# ────────────────────────── one-board legacy purge ──────────────────────────
-
-
-def purge_legacy_dirs() -> list[str]:
-    """Delete the active board's legacy `candidates/`, `cleaned/`, `approved/`
-    directories. Caller must guarantee everything worth keeping has already
-    been seeded into live/ + history/.
-
-    Returns a list of human-readable directory names that were removed. Safe
-    to call repeatedly — missing dirs are silently skipped.
-    """
-    removed: list[str] = []
-    workspace = config.WORKSPACE
-    for name in ("candidates", "cleaned", "approved"):
-        d = workspace / name
-        if d.exists():
-            shutil.rmtree(d, ignore_errors=True)
-            removed.append(name)
-    return removed
-
-
 # ────────────────────────── re-cleanup (free, no provider) ──────────────────────────
 
 

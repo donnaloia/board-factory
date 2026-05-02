@@ -17,7 +17,6 @@ Public surface:
 
   - ``load_catalog`` / ``safe_load_catalog`` / ``save_catalog``
   - ``read_generation`` / ``read_generation_block`` / ``write_generation``
-  - ``materialize_catalog_yaml_for_pipeline`` (deprecated no-op)
   - ``sync_disk_yaml_into_relational``
 """
 
@@ -148,14 +147,6 @@ def load_catalog(board_id: str) -> dict[str, Any]:
 def save_catalog(board_id: str, data: dict[str, Any]) -> None:
     """Validate and persist the catalog to relational tables only."""
     bd.persist_catalog_dict(board_id, data)
-
-
-def materialize_catalog_yaml_for_pipeline(board_id: str) -> None:
-    """Deprecated: pipeline jobs no longer materialize ``catalog.yml``.
-
-    Kept as a no-op so older callers can be removed incrementally.
-    """
-    del board_id
 
 
 def sync_disk_yaml_into_relational(board_id: str) -> None:
