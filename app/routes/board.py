@@ -25,6 +25,7 @@ from boardfactory.providers.pixel.pixellab import list_pixellab_presets
 from routes import deps
 from services import boards as svc_boards
 from services import catalog as svc_catalog
+from services import cells as svc_cells
 from services import mockup_prompt as mockup_prompt_svc
 from storage.fs import workspace as fs_ws
 
@@ -34,26 +35,26 @@ router = APIRouter()
 @router.get("/b/{board_id}/", response_class=HTMLResponse)
 def board_view(request: Request, board_id: str):
     deps.ensure_owned_board(request, board_id)
-    if not deps.has_board_palette(board_id):
+    if not fs_ws.has_palette(board_id):
         return RedirectResponse(f"/b/{board_id}/setup", status_code=303)
 
     catalog = deps.load_board_catalog(board_id)
     space_status = {
-        d["id"]: deps.workspace_cell_status(board_id, "spaces", d["id"])
+        d["id"]: svc_cells.cell_status(board_id, "spaces", d["id"])
         for d in catalog.get("board_spaces", {}).get("designs", [])
     }
     panel_status = {
-        p["id"]: deps.workspace_cell_status(board_id, "panels", p["id"])
+        p["id"]: svc_cells.cell_status(board_id, "panels", p["id"])
         for p in catalog.get("feature_panels", {}).get("panels", [])
     }
-    cp_status = deps.workspace_cell_status(board_id, "centerpiece", "centerpiece")
+    cp_status = svc_cells.cell_status(board_id, "centerpiece", "centerpiece")
 
     n_designs = len(space_status)
     n_panels = len(panel_status)
     designs_done = sum(1 for s in space_status.values() if s.approved)
     panels_done = sum(1 for s in panel_status.values() if s.approved)
-    missing_space_ids = deps.missing_space_ids(board_id, catalog)
-    missing_panel_ids = deps.missing_panel_ids(board_id, catalog)
+    missing_space_ids = svc_cells.missing_space_ids(board_id, catalog)
+    missing_panel_ids = svc_cells.missing_panel_ids(board_id, catalog)
     n_missing_designs = len(missing_space_ids)
     n_missing_panels = len(missing_panel_ids)
     generated_designs = n_designs - n_missing_designs
@@ -123,7 +124,7 @@ def board_view(request: Request, board_id: str):
                 else "Generate missing spaces & UI"
             ),
         },
-        "generation": deps.read_generation_from_catalog(catalog),
+        "generation": svc_catalog.read_generation(catalog),
     })
     return request.app.state.templates.TemplateResponse(request, "board.html", ctx)
 
@@ -131,7 +132,7 @@ def board_view(request: Request, board_id: str):
 @router.get("/b/{board_id}/setup", response_class=HTMLResponse)
 def setup_view(request: Request, board_id: str):
     deps.ensure_owned_board(request, board_id)
-    mockup_present, mockup_rel = deps.mockup_present_for_board(board_id)
+    mockup_present, mockup_rel = svc_boards.mockup_present(board_id)
     ctx = deps.editorial_template_context(board_id, request)
     ctx.update({
         "mockup_present": mockup_present,
@@ -221,7 +222,7 @@ async def action_generate_mockup(request: Request, board_id: str):
         )
 
     catalog = deps.load_board_catalog(board_id)
-    settings = deps.read_generation_from_catalog(catalog)
+    settings = svc_catalog.read_generation(catalog)
     oa_model = settings["openai"]["model"]
     oa_quality = settings["openai"]["quality"]
 
@@ -329,7 +330,7 @@ def spec_view(request: Request, board_id: str):
         "svg_markup": render_spec_svg(catalog),
         "prose": prose,
         "cost": cost_ledger.summary(),
-        "has_palette": deps.has_board_palette(board_id),
+        "has_palette": fs_ws.has_palette(board_id),
         "estimates": {"spaces": 0, "panels": 0, "centerpiece": 0, "refine": 0},
         "user": user.public_dict() if user else None,
     }
@@ -349,7 +350,7 @@ def frame_view(request: Request, board_id: str):
     panels = catalog.get("feature_panels", {}).get("panels", [])
     candidates = []
     for p in panels:
-        live = deps.resolved_live_asset_path(board_id, "panels", p["id"])
+        live = fs_ws.live_path(board_id, "panels", p["id"])
         if live.exists():
             candidates.append({
                 "id": p["id"],
@@ -417,7 +418,7 @@ async def api_frame_adopt(
     src_size: tuple[int, int]
 
     if source_kind == "panel":
-        live = deps.resolved_live_asset_path(board_id, "panels", source_id)
+        live = fs_ws.live_path(board_id, "panels", source_id)
         if not live.exists():
             raise HTTPException(404, f"No live panel asset for {source_id}")
         src_img = Image.open(live).convert("RGBA")
@@ -461,7 +462,7 @@ async def api_frame_adopt(
         data.setdefault("frame", {})
         data["frame"]["enabled"] = True
         data["frame"]["apply_to_panels"] = True
-        deps.save_board_catalog(board_id, data)
+        svc_catalog.save_catalog(board_id, data)
 
     return JSONResponse({
         "ok": True,
@@ -478,7 +479,7 @@ async def api_frame_disable(request: Request, board_id: str):
     data = deps.load_board_catalog(board_id)
     data.setdefault("frame", {})
     data["frame"]["enabled"] = False
-    deps.save_board_catalog(board_id, data)
+    svc_catalog.save_catalog(board_id, data)
     return JSONResponse({"ok": True})
 
 
@@ -495,7 +496,7 @@ def api_frame_preview(request: Request, board_id: str, source_kind: str, source_
 
     catalog = deps.load_board_catalog(board_id)
     if source_kind == "panel":
-        live = deps.resolved_live_asset_path(board_id, "panels", source_id)
+        live = fs_ws.live_path(board_id, "panels", source_id)
         if not live.exists():
             raise HTTPException(404)
         src_img = Image.open(live).convert("RGBA")
@@ -628,8 +629,8 @@ async def action_generate_missing_all(request: Request, board_id: str):
     """Generate every empty board space AND every empty UI panel in one job."""
     deps.ensure_owned_board(request, board_id)
     catalog = deps.load_board_catalog(board_id)
-    missing_spaces = deps.missing_space_ids(board_id, catalog)
-    missing_panels = deps.missing_panel_ids(board_id, catalog)
+    missing_spaces = svc_cells.missing_space_ids(board_id, catalog)
+    missing_panels = svc_cells.missing_panel_ids(board_id, catalog)
     total = len(missing_spaces) + len(missing_panels)
     keys = deps.user_provider_api_keys(request)
     job_id = deps.enqueue_pipeline_job(
@@ -721,7 +722,7 @@ def api_get_generation(request: Request, board_id: str):
     """JSON for the generation settings modal (palette, provider, models)."""
     deps.ensure_owned_board(request, board_id)
     catalog = deps.load_board_catalog(board_id)
-    settings = deps.read_generation_from_catalog(catalog)
+    settings = svc_catalog.read_generation(catalog)
     return JSONResponse({
         "settings": settings,
         "options": {"pixellab_models": list_pixellab_presets()},
