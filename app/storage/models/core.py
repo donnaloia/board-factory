@@ -111,16 +111,6 @@ class CostEntryRecord(Base):
     usd: Mapped[float] = mapped_column(Float, nullable=False)
 
 
-class BoardCatalogRecord(Base):
-    """Legacy mirror of the full catalog JSON (kept in sync for transitional code)."""
-
-    __tablename__ = "board_catalogs"
-
-    board_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    body_json: Mapped[str] = mapped_column(Text, nullable=False)
-    updated_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
-
-
 class BoardGameRecord(Base):
     """One row per board: global board spec (parent for normalized children)."""
 
@@ -240,17 +230,3 @@ class AssetVersionRecord(Base):
     )
 
 
-class AssetLiveRecord(Base):
-    """DB-backed pointer to the on-disk image that is ``live`` for one cell."""
-
-    __tablename__ = "asset_live"
-
-    board_id: Mapped[str] = mapped_column(
-        String(128),
-        ForeignKey("board_games.board_id", ondelete="CASCADE"),
-        primary_key=True,
-    )
-    category: Mapped[str] = mapped_column(String(32), primary_key=True)
-    asset_id: Mapped[str] = mapped_column(String(256), primary_key=True)
-    live_rel_path: Mapped[str] = mapped_column(String(512), nullable=False)
-    updated_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)

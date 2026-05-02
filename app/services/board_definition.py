@@ -3,9 +3,6 @@
 The pipeline consumes a nested dict / ``Catalog`` model; the database stores a
 normalized ``board_games`` row plus child tables. This module is the single
 adapter between those representations.
-
-``board_catalogs.body_json`` is updated on every persist as a transitional mirror
-for code that still expects one JSON blob.
 """
 
 from __future__ import annotations
@@ -15,13 +12,11 @@ import time
 from typing import Any
 
 from sqlalchemy import delete, select
-from sqlalchemy.orm import Session
 
 from boardfactory.schemas import Catalog
 
 from storage.db import session_scope
 from storage.models.core import (
-    BoardCatalogRecord,
     BoardFeaturePanelRecord,
     BoardGameRecord,
     BoardSpaceDesignRecord,
@@ -31,17 +26,6 @@ from storage.models.core import (
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
-
-
-def _legacy_mirror(session: Session, board_id: str, body: dict[str, Any]) -> None:
-    blob = json.dumps(body, ensure_ascii=False)
-    stamp = _now_ms()
-    row = session.get(BoardCatalogRecord, board_id)
-    if row is None:
-        session.add(BoardCatalogRecord(board_id=board_id, body_json=blob, updated_ms=stamp))
-    else:
-        row.body_json = blob
-        row.updated_ms = stamp
 
 
 def load_catalog_dict(board_id: str) -> dict[str, Any] | None:
@@ -128,7 +112,7 @@ def load_catalog_dict(board_id: str) -> dict[str, Any] | None:
 
 
 def persist_catalog_dict(board_id: str, data: dict[str, Any]) -> dict[str, Any]:
-    """Validate ``data`` as a ``Catalog``, persist relational + legacy mirror.
+    """Validate ``data`` as a ``Catalog`` and persist into the relational tables.
 
     Returns the validated model as a dict (JSON-friendly).
     """
@@ -219,8 +203,6 @@ def persist_catalog_dict(board_id: str, data: dict[str, Any]) -> dict[str, Any]:
                     active_kind=str(p.active_kind),
                 )
             )
-
-        _legacy_mirror(session, board_id, dumped)
 
     return dumped
 

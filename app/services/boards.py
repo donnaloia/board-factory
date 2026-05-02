@@ -25,7 +25,6 @@ from storage.db import session_scope
 from storage.fs import workspace as fs_ws
 from storage.models.core import (
     AssetVersionRecord,
-    BoardCatalogRecord,
     BoardGameRecord,
     OwnedBoardRecord,
 )
@@ -133,9 +132,6 @@ def delete_board(user_id: str, board_id: str) -> None:
     with session_scope() as session:
         session.execute(
             delete(AssetVersionRecord).where(AssetVersionRecord.board_id == board_id)
-        )
-        session.execute(
-            delete(BoardCatalogRecord).where(BoardCatalogRecord.board_id == board_id)
         )
         session.execute(delete(OwnedBoardRecord).where(OwnedBoardRecord.board_id == board_id))
         session.execute(delete(BoardGameRecord).where(BoardGameRecord.board_id == board_id))

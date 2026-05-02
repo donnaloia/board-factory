@@ -22,13 +22,10 @@ Public surface:
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
-from storage.db import session_scope
 from storage.fs import workspace as fs_ws
 from storage.fs import yaml_io as fs_yaml
-from storage.models.core import BoardCatalogRecord
 
 from services import board_definition as bd
 
@@ -106,7 +103,7 @@ def read_generation(catalog: dict) -> dict:
 
 
 def safe_load_catalog(board_id: str) -> dict[str, Any] | None:
-    """Prefer relational storage; migrate from YAML or legacy JSON blob if needed."""
+    """Prefer relational storage; migrate from a legacy ``catalog.yml`` if needed."""
     d = bd.load_catalog_dict(board_id)
     if d is not None:
         return d
@@ -116,13 +113,6 @@ def safe_load_catalog(board_id: str) -> dict[str, Any] | None:
     if yaml_blob is not None:
         bd.persist_catalog_dict(board_id, yaml_blob)
         return bd.load_catalog_dict(board_id)
-
-    with session_scope() as session:
-        row = session.get(BoardCatalogRecord, board_id)
-        if row is not None:
-            data = json.loads(row.body_json)
-            bd.persist_catalog_dict(board_id, data)
-            return bd.load_catalog_dict(board_id)
 
     # Board dirs on disk without DB rows (fresh Postgres, or never-persisted
     # skeleton) — same default template ``create_board`` + the UI normally persist.

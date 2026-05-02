@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from board_svg import CellStatus
 
 from services import asset_index
-from services import asset_live
 from storage.fs import workspace as fs_ws
 
 
@@ -24,7 +23,7 @@ from storage.fs import workspace as fs_ws
 
 def has_generated_asset(board_id: str, category: str, asset_id: str) -> bool:
     """Truthy when the cell has a live PNG."""
-    return asset_live.resolved_live_path(board_id, category, asset_id).exists()
+    return fs_ws.live_path(board_id, category, asset_id).exists()
 
 
 def missing_space_ids(board_id: str, catalog: dict) -> list[str]:
@@ -48,7 +47,7 @@ def missing_panel_ids(board_id: str, catalog: dict) -> list[str]:
 
 def cell_status(board_id: str, category: str, asset_id: str) -> CellStatus:
     """Status for one cell — live PNG presence, history count, asset URL."""
-    live = asset_live.resolved_live_path(board_id, category, asset_id)
+    live = fs_ws.live_path(board_id, category, asset_id)
     is_live = live.exists()
 
     history_pngs = fs_ws.list_history_pngs(board_id, category, asset_id)

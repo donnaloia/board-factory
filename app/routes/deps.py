@@ -96,9 +96,9 @@ def missing_panel_ids(board_id: str, catalog: dict) -> list[str]:
 
 
 def resolved_live_asset_path(board_id: str, category: str, asset_id: str) -> Path:
-    from services import asset_live
+    from storage.fs import workspace as fs_ws
 
-    return asset_live.resolved_live_path(board_id, category, asset_id)
+    return fs_ws.live_path(board_id, category, asset_id)
 
 
 def workspace_file_or_404(board_id: str, rel: str) -> Path:

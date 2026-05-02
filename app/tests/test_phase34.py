@@ -7,18 +7,15 @@ from pathlib import Path
 from sqlalchemy import select
 
 from storage.db import session_scope
-from storage.models.core import AssetVersionRecord, BoardCatalogRecord, BoardGameRecord
+from storage.models.core import AssetVersionRecord, BoardGameRecord
 
 
-def test_catalog_migrates_yaml_to_db(isolated_repo, seeded_board, board_id):
+def test_catalog_persists_to_board_games(isolated_repo, seeded_board, board_id):
     from services import catalog as svc_catalog
 
     data = svc_catalog.load_catalog(board_id)
     assert data.get("project") == "Test Board"
     with session_scope() as session:
-        row = session.get(BoardCatalogRecord, board_id)
-        assert row is not None
-        assert "Test Board" in row.body_json
         bg = session.get(BoardGameRecord, board_id)
         assert bg is not None
         assert bg.project == "Test Board"
@@ -50,9 +47,6 @@ def test_save_catalog_updates_db(isolated_repo, seeded_board, board_id):
     cat["project"] = "Saved Via DB"
     svc_catalog.save_catalog(board_id, cat)
     with session_scope() as session:
-        row = session.get(BoardCatalogRecord, board_id)
-        assert row is not None
-        assert "Saved Via DB" in row.body_json
         bg = session.get(BoardGameRecord, board_id)
         assert bg is not None
         assert bg.project == "Saved Via DB"
@@ -80,12 +74,12 @@ def test_asset_index_counts_history_push(isolated_repo, seeded_board, board_id):
         bf_assets._asset_db_listeners.clear()
 
 
-def test_promote_persists_asset_live_pointer(isolated_repo, seeded_board, board_id):
+def test_promote_copies_history_to_live(isolated_repo, seeded_board, board_id):
     from boardfactory import assets as bf_assets
     from boardfactory import config as bf_config
 
     from services import asset_index
-    from services.asset_live import get_live_rel_path
+    from storage.fs import workspace as fs_ws
 
     bf_assets.register_asset_db_listener(asset_index.on_asset_event)
     try:
@@ -99,8 +93,10 @@ def test_promote_persists_asset_live_pointer(isolated_repo, seeded_board, board_
             )
             bf_assets.promote("spaces", "slot-a", out.name)
             meta = bf_assets.read_meta("spaces", "slot-a", out.name)
-        rel = get_live_rel_path(board_id, "spaces", "slot-a")
-        assert rel == f"history/spaces/slot-a/{out.name}"
+        live = fs_ws.live_path(board_id, "spaces", "slot-a")
+        assert live.exists()
+        history = fs_ws.history_dir(board_id, "spaces", "slot-a") / out.name
+        assert live.read_bytes() == history.read_bytes()
         assert meta.get("prompt") == "hello"
     finally:
         bf_assets._asset_db_listeners.clear()

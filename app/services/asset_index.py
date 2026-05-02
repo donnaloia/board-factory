@@ -16,30 +16,7 @@ from storage.models.core import AssetVersionRecord
 
 
 def on_asset_event(kind: str, board_id: str, **kw: object) -> None:
-    """Registered with ``boardfactory.assets`` — keeps SQLite in sync with disk."""
-    if kind == "promote":
-        rel_path = kw.get("rel_path")
-        category = kw.get("category")
-        asset_id = kw.get("asset_id")
-        if isinstance(rel_path, str) and isinstance(category, str) and isinstance(asset_id, str):
-            try:
-                from services.asset_live import upsert_live_pointer
-
-                upsert_live_pointer(board_id, category, asset_id, rel_path)
-            except Exception:
-                pass
-        return
-    if kind == "clear_live":
-        category = kw.get("category")
-        asset_id = kw.get("asset_id")
-        if isinstance(category, str) and isinstance(asset_id, str):
-            try:
-                from services.asset_live import delete_live_pointer
-
-                delete_live_pointer(board_id, category, asset_id)
-            except Exception:
-                pass
-        return
+    """Registered with ``boardfactory.assets`` — index new history rows in SQL."""
     if kind != "history_push":
         return
     basename = kw.get("basename")

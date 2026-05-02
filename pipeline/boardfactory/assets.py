@@ -76,26 +76,14 @@ def history_dir(category: str, asset_id: str) -> Path:
     return config.HISTORY_DIR / category / asset_id
 
 
-def physical_live_path(category: str, asset_id: str) -> Path:
-    """Fixed ``live/...`` path (legacy duplicate). Prefer ``live_path()`` for reads."""
+def live_path(category: str, asset_id: str) -> Path:
+    """Canonical on-disk path for a cell's live image (``live/<cat>/<id>.png``).
+
+    Tracked by git so a fresh clone reproduces the board grid.
+    """
     if category == "centerpiece":
         return config.LIVE_DIR / "centerpiece" / "centerpiece.png"
     return config.LIVE_DIR / category / f"{asset_id}.png"
-
-
-def live_path(category: str, asset_id: str) -> Path:
-    """Resolved path for the cell's live image (DB pointer → ``history/`` or ``live/``)."""
-    bid = config.active_board()
-    if bid:
-        try:
-            from services.asset_live import resolved_live_path
-
-            p = resolved_live_path(bid, category, asset_id)
-            if p.exists():
-                return p
-        except Exception:
-            pass
-    return physical_live_path(category, asset_id)
 
 
 def has_live(category: str, asset_id: str) -> bool:
@@ -189,48 +177,21 @@ def read_meta(category: str, asset_id: str, history_filename: str) -> dict:
 
 
 def promote(category: str, asset_id: str, history_filename: str) -> Path:
-    """Make a specific history file the live asset. Returns the live path.
+    """Copy a specific history file to ``live/<cat>/<id>.png``. Returns the live path.
 
     history_filename is just the basename (e.g. '1735012345__001.png').
     """
     src = history_dir(category, asset_id) / history_filename
     if not src.exists():
         raise FileNotFoundError(f"No history entry {src}")
-    try:
-        rel_hist = str(src.relative_to(config.WORKSPACE)).replace("\\", "/")
-    except ValueError:
-        rel_hist = f"history/{category}/{asset_id}/{history_filename}"
-    _notify_asset_db(
-        "promote",
-        category=category,
-        asset_id=asset_id,
-        basename=history_filename,
-        rel_path=rel_hist,
-    )
-    bid = config.active_board()
-    if bid:
-        try:
-            from services.asset_live import resolved_live_path
-
-            rp = resolved_live_path(bid, category, asset_id)
-            if rp.exists():
-                try:
-                    if rp.resolve() == src.resolve():
-                        return rp
-                except OSError:
-                    if rp == src:
-                        return rp
-        except Exception:
-            pass
-    dst = physical_live_path(category, asset_id)
+    dst = live_path(category, asset_id)
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
     return dst
 
 
 def clear_live(category: str, asset_id: str) -> None:
-    _notify_asset_db("clear_live", category=category, asset_id=asset_id)
-    p = physical_live_path(category, asset_id)
+    p = live_path(category, asset_id)
     if p.exists():
         p.unlink()
 
@@ -253,18 +214,8 @@ def list_history(category: str, asset_id: str) -> list[HistoryEntry]:
     d = history_dir(category, asset_id)
     if not d.exists():
         return []
-    pointer_rel: str | None = None
-    bid = config.active_board()
-    if bid:
-        try:
-            from services.asset_live import get_live_rel_path
-
-            pointer_rel = get_live_rel_path(bid, category, asset_id)
-        except Exception:
-            pointer_rel = None
-
     live_bytes: bytes | None = None
-    lp = physical_live_path(category, asset_id)
+    lp = live_path(category, asset_id)
     if lp.exists():
         try:
             live_bytes = lp.read_bytes()
@@ -281,15 +232,8 @@ def list_history(category: str, asset_id: str) -> list[HistoryEntry]:
             seq = int(seq_str)
         except ValueError:
             continue
-        entry_rel: str | None = None
-        try:
-            entry_rel = str(p.relative_to(config.WORKSPACE)).replace("\\", "/")
-        except ValueError:
-            entry_rel = None
         is_live = False
-        if pointer_rel and entry_rel:
-            is_live = pointer_rel == entry_rel
-        elif live_bytes is not None:
+        if live_bytes is not None:
             try:
                 is_live = p.read_bytes() == live_bytes
             except OSError:
