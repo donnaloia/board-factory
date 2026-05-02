@@ -14,7 +14,7 @@ sees N/M panels filling in live in the job tray.
 "Missing" = no live asset. A cell with raw candidates from an abandoned
 earlier run still counts as missing — until something is on the board,
 the artist hasn't accepted anything for that cell. This matches the
-semantics in `services/review-ui/server.py:_has_generated_asset`.
+semantics in `app/server.py:_has_generated_asset`.
 """
 
 from __future__ import annotations

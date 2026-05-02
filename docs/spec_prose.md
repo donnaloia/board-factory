@@ -2,9 +2,9 @@
 
 ## intro
 
-This document is the source of truth for the damnation board's geometry — every coordinate, dimension, and tile classification used by the Board Factory pipeline. The pipeline reads `catalog/board.yml` and uses these dimensions for every step: style lock, generation, cleanup, composition, and export.
+This document is the source of truth for the damnation board's geometry — every coordinate, dimension, and tile classification used by the Board Factory pipeline. The pipeline reads `boards/damnation/catalog.yml` and uses these dimensions for every step: style lock, generation, cleanup, composition, and export.
 
-**The catalog *is* the spec.** Every diagram, table, and number on this page is generated live from `catalog/board.yml`. If you want to change the board, edit the catalog — this page will update automatically. There is no longer a way for the docs to drift.
+**The catalog *is* the spec.** Every diagram, table, and number on this page is generated live from that catalog file. If you want to change the board, edit the catalog — this page will update automatically. There is no longer a way for the docs to drift.
 
 ## battle-tiles
 
@@ -32,13 +32,13 @@ The mockup file (`mockup/board.png`) is a **stylistic reference**, not the dimen
 
 ### Coordinate spaces
 
-Every bbox in `catalog/board.yml` lives in **canvas coordinates** (0–1920 × 0–1080). When the pipeline needs to crop a reference region from the mockup for img2img conditioning, it reads the mockup file's actual dimensions at runtime and scales each bbox into the mockup's coordinate space using `canvas_to_mockup` in `geometry.py`. Both axes scale independently.
+Every bbox in `boards/damnation/catalog.yml` lives in **canvas coordinates** (0–1920 × 0–1080). When the pipeline crops a reference region from the mockup for **panel** img2img conditioning, it reads the mockup file's actual dimensions at runtime and scales each bbox into the mockup's coordinate space using `canvas_to_mockup` in `geometry.py`. Both axes scale independently.
 
 Result: the same catalog works whether the mockup is 1024 × 583, 1920 × 1080, 1500 × 844, or anything in between, with no manual adjustment.
 
 ### Aspect-ratio sanity check
 
-Pipeline startup (style, generate, preview, and full run) calls `validate_mockup_dimensions`, which compares the mockup's aspect ratio to the canvas. The tolerance is **5%**. Within tolerance, a note is printed but the run continues. Beyond tolerance, the run aborts with a clear error — img2img reference crops would be visibly stretched and that's almost never what you want.
+Pipeline startup (style, generate, preview, and full run) calls `validate_mockup_dimensions`, which compares the mockup's aspect ratio to the canvas. The tolerance is **5%**. Within tolerance, a note is printed but the run continues. Beyond tolerance, the run aborts with a clear error — **panel** img2img reference crops would be visibly stretched and that's almost never what you want.
 
 For the canonical 1920 × 1080 (1.778) canvas, the acceptable mockup ratio range is roughly **1.689–1.867**. That covers all common 16:9 outputs from AI image generators (1024 × 576 = 1.778, 1024 × 583 = 1.756, 1280 × 720 = 1.778, 1536 × 864 = 1.778, etc.) plus some tolerance for off-by-a-few-pixels rendering.
 
@@ -47,8 +47,9 @@ For the canonical 1920 × 1080 (1.778) canvas, the acceptable mockup ratio range
 | Pipeline step | Mockup usage |
 |---|---|
 | Style Lock | Palette extraction (median-cut on full mockup) + 4×4 style sheet |
-| Generate (panels + centerpiece) | Per-asset img2img seeding via `crop_region` with canvas → mockup translation |
 | Generate (board spaces) | None — perimeter spaces use text-to-image only with the style sheet as reference |
+| Generate (centerpiece) | **While no live centerpiece exists:** bbox crop → img2img (`crop_region`, canvas → mockup). **Once a live asset exists (regenerate):** text-to-image at catalog `target_size` with style sheet + palette — same as perimeter spaces; no mockup crop |
+| Generate (functional panels) | Per-asset img2img seeding via `crop_region` with canvas → mockup translation (unless frame inpaint uses a live panel instead) |
 | Compositor | Faded backdrop, aspect-preserving fit (letterboxed if needed) |
 | Cleanup / States / Export | None — operate on candidates only |
 
@@ -64,7 +65,7 @@ For the canonical 1920 × 1080 (1.778) canvas, the acceptable mockup ratio range
 
 ## changelog
 
-- **0.5** — Spec page rewritten as a live render of `catalog/board.yml`. Geometry, cell tables, summary stats, legend, and battle-tile coords are all generated. Prose moved to `docs/spec_prose.md`.
+- **0.6** — Centerpiece: initial generation uses mockup bbox img2img; after a live asset exists, regenerations use txt2img like perimeter spaces. Functional panels still use mockup crops or frame inpaint as before.
 - **0.4** — Decoupled mockup dimensions from canvas. Pipeline now scales canvas-space bboxes into mockup-space at crop time. Added aspect-ratio sanity check at pipeline startup (5% tolerance, hard-fails beyond).
 - **0.3** — Added 5 battle tiles (top.3, bottom.7, left.2, right.0, right.4). Reframed doc as a tech spec.
 - **0.2** — Fixed inner-grid math (260 × 240 functional cells, 520 × 720 centerpiece). Pulled per-row size into schema.

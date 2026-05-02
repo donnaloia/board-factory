@@ -1,0 +1,13 @@
+Alembic migrations for the Board Factory web application.
+
+Revision ``0001_baseline`` is an empty parent for the chain; schema changes live
+in ``0002_`` onward. Revisions are maintained by hand (``target_metadata`` is
+unset in ``env.py``).
+
+Operational commands (run inside the **board-factory** container, ``cd`` to
+``/repo/app`` so ``alembic.ini`` resolves):
+
+    alembic upgrade head            # apply outstanding migrations
+    alembic current                 # show the DB's current revision
+    alembic revision -m "what"      # add a new migration file (edit upgrade/downgrade)
+    alembic downgrade -1            # roll back one revision

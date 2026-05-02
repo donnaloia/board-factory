@@ -1,0 +1,171 @@
+{% extends "_base.html" %}
+{% block title %}{{ project }} — layout spec{% endblock %}
+
+{% block content %}
+<div class="spec-doc">
+  <header class="spec-header">
+    <div>
+      <h1 class="spec-title">{{ project }} — layout spec</h1>
+      <div class="spec-subtitle">Board Factory · pixel-art board game asset specification</div>
+    </div>
+    <dl class="spec-meta">
+      <dt>Version</dt><dd>{{ summary.version }}</dd>
+      <dt>Native</dt><dd>{{ summary.board_size[0] }} × {{ summary.board_size[1] }}</dd>
+      <dt>Aspect</dt><dd>{{ summary.aspect }}</dd>
+      <dt>Source</dt><dd><code>boards/{{ board_id }}/catalog.yml</code></dd>
+    </dl>
+  </header>
+
+  <section class="spec-intro">{{ prose.intro | safe }}</section>
+
+  {# ────────── SUMMARY ────────── #}
+  <section>
+    <h2>Summary</h2>
+    <dl class="spec-summary-grid">
+      <div><dt>Perimeter</dt><dd>{{ summary.perimeter_count }}</dd></div>
+      <div><dt>of which Battle</dt><dd>{{ summary.battle_count }}</dd></div>
+      <div><dt>Functional UI</dt><dd>{{ summary.functional_count }}</dd></div>
+      <div><dt>Centerpiece</dt><dd>{{ summary.centerpiece_count }}</dd></div>
+    </dl>
+    <p class="muted">{{ summary.design_count }} unique design entries cover the {{ summary.perimeter_count }} perimeter positions.</p>
+  </section>
+
+  {# ────────── BOARD DIAGRAM ────────── #}
+  <section>
+    <h2>Board diagram</h2>
+    <span class="spec-scale-note">SVG below is to scale — every coordinate is in true source pixels and rendered live from the catalog.</span>
+    <div class="spec-board-frame">
+      {{ svg_markup | safe }}
+    </div>
+  </section>
+
+  {# ────────── LEGEND ────────── #}
+  <section>
+    <h2>Legend</h2>
+    <dl class="spec-legend">
+      {% for entry in legend %}
+      <dt class="l-{{ entry.kind }}">
+        {{ entry.kind | capitalize }} ({{ entry.designs }} design{% if entry.designs != 1 %}s{% endif %} · {{ entry.positions }} position{% if entry.positions != 1 %}s{% endif %})
+      </dt>
+      <dd>{{ entry.size_str }} — {{ entry.sample_prompt | truncate(80) }}</dd>
+      {% endfor %}
+      <dt class="l-functional">Functional UI cells ({{ summary.functional_count }})</dt>
+      <dd>Inner-grid panels — leaderboard, dice, roulette, etc.</dd>
+      <dt class="l-centerpiece">Centerpiece (1)</dt>
+      <dd>Marquee illustration spanning the middle column of the inner grid.</dd>
+    </dl>
+  </section>
+
+  {# ────────── PIXEL DENSITY ────────── #}
+  <section>
+    <h2>Pixel density per asset class</h2>
+    <table class="spec-table">
+      <thead>
+        <tr><th>Asset class</th><th>Source dimensions</th><th>Source pixels</th><th>Count</th></tr>
+      </thead>
+      <tbody>
+        {% for row in density %}
+        <tr>
+          <td class="label">{{ row.label }}</td>
+          <td>{{ row.size_str }}</td>
+          <td>{{ row.pixels_str }}</td>
+          <td>{{ row.count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  {# ────────── DESIGN ENTRIES ────────── #}
+  <section>
+    <h2>Board space designs</h2>
+    <p class="muted">One row per design entry in <code>boards/{{ board_id }}/catalog.yml &rarr; board_spaces.designs</code>. Edit prompts there.</p>
+    <table class="spec-table">
+      <thead>
+        <tr><th>ID</th><th>Kind</th><th>Size</th><th>Uses</th><th>Prompt</th></tr>
+      </thead>
+      <tbody>
+        {% for row in designs %}
+        <tr>
+          <td><code>{{ row.id }}</code></td>
+          <td><span class="kind-badge kind-{{ row.kind }}">{{ row.kind }}</span></td>
+          <td>{{ row.size_str }}</td>
+          <td>{{ row.uses }}</td>
+          <td class="prompt-cell">{{ row.prompt }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  {# ────────── FUNCTIONAL PANELS ────────── #}
+  <section>
+    <h2>Functional UI cells</h2>
+    <table class="spec-table">
+      <thead>
+        <tr><th>ID</th><th>Bounds</th><th>Size</th><th>Active</th><th>Prompt</th></tr>
+      </thead>
+      <tbody>
+        {% for row in panels %}
+        <tr>
+          <td><code>{{ row.id }}</code></td>
+          <td>{{ row.bbox_str }}</td>
+          <td>{{ row.size_str }}</td>
+          <td>
+            {% if row.needs_active %}
+              <span class="active-pill">{{ row.active_kind or "yes" }}</span>
+            {% else %}
+              <span class="muted">—</span>
+            {% endif %}
+          </td>
+          <td class="prompt-cell">{{ row.prompt }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  {# ────────── BATTLE TILES ────────── #}
+  <section>
+    <h2>Battle tiles</h2>
+    {{ prose["battle-tiles"] | safe }}
+    <table class="spec-table">
+      <thead>
+        <tr><th>Position ref</th><th>Edge</th><th>Tile size</th><th>Coords (x, y)</th><th>Design</th></tr>
+      </thead>
+      <tbody>
+        {% for row in battles %}
+        <tr>
+          <td><code>{{ row.ref }}</code></td>
+          <td class="label">{{ row.edge }}</td>
+          <td>{{ row.size_str }}</td>
+          <td>{{ row.coords_str }}</td>
+          <td><code>{{ row.design_id }}</code></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  {# ────────── PROSE SECTIONS ────────── #}
+  <section>
+    <h2>Geometry derivation</h2>
+    {{ prose["geometry-derivation"] | safe }}
+  </section>
+
+  <section>
+    <h2>Mockup handling</h2>
+    {{ prose["mockup-handling"] | safe }}
+  </section>
+
+  <section>
+    <h2>Display behavior at common resolutions</h2>
+    {{ prose["display-behavior"] | safe }}
+  </section>
+
+  <section>
+    <h2>Changelog</h2>
+    {{ prose.changelog | safe }}
+  </section>
+</div>
+{% endblock %}

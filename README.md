@@ -9,17 +9,17 @@ Most AI asset pipelines assume "UI screen → many small isolated assets." Board
 - **Style discipline matters more than coverage.** All assets share one quantized palette extracted from a reference image, so they look like they came from one artist.
 - **Three asset categories, three generation strategies.** Board spaces are batch-generated for coverage. Feature panels are per-asset with rich prompts. The centerpiece uses image-to-image translation from your existing mockup with iterative inpainting refinement.
 - **Pixel cleanup is a first-class step.** AI generators produce smooth gradients pretending to be pixel art; Board Factory snaps everything to a shared palette and pixel grid so the output is real pixel art, not "AI's idea of pixel art."
-- **Geometry is declarative, not detected.** Your board layout is a known grid; you describe it once in YAML and the pipeline computes positions arithmetically. No vision-AI bbox detection that fails on dense small tiles.
+- **Geometry is declarative, not detected.** Your board layout is a known grid; you describe it once in the board catalog (stored in the application database and edited in the web UI) and the pipeline computes positions arithmetically. No vision-AI bbox detection that fails on dense small tiles.
 
 ## How it works
 
-The pipeline is eight steps. You start it with one command and a catalog file; the only steps that require you to be present are the review steps.
+The pipeline is eight steps. You start jobs from the web app; the only steps that require you to be present are the review steps.
 
 ### 1. Style Lock
 
 | | |
 |---|---|
-| **Input** | Your mockup PNG + a written style brief in `catalog/board.yml` |
+| **Input** | Your mockup PNG + a written style brief (board catalog in the DB, edited in the UI) |
 | **Powered by** | PIL palette extraction (median-cut quantization to 16–32 colors) |
 | **Output** | `workspace/style/palette.json` (the shared palette) and `workspace/style/style_sheet.png` (visual reference) |
 
@@ -27,7 +27,7 @@ The pipeline is eight steps. You start it with one command and a catalog file; t
 
 | | |
 |---|---|
-| **Input** | `catalog/board.yml` |
+| **Input** | Board catalog (validated Pydantic `Catalog` shape, loaded from the database) |
 | **Powered by** | Pydantic schema validation |
 | **Output** | A normalized catalog with all board space positions resolved and all panel bboxes verified against the mockup dimensions |
 
@@ -45,7 +45,7 @@ The pipeline is eight steps. You start it with one command and a catalog file; t
 |---|---|
 | **Input** | All raw candidates from step 3 |
 | **Powered by** | PIL — palette quantization + grid snapping |
-| **Output** | `workspace/cleaned/` — every candidate downscaled to native resolution, locked to the shared palette, edges snapped to the pixel grid |
+| **Output** | Quantized candidates (palette-locked, grid-snapped) fed into the live/history asset flow under each board’s `workspace/` |
 
 ### 5. Review
 
@@ -78,25 +78,19 @@ Three view modes at `http://localhost:8473`:
 | | |
 |---|---|
 | **Input** | All approved assets + animation configs |
-| **Output** | `board_assets/` — individual PNGs organized by category, plus `board_manifest.json` for engine import |
+| **Output** | `export/` (under each board id) — individual PNGs by category, plus `board_manifest.json` for engine import |
 
 ## Requirements
 
 - Docker + Docker Compose
-- A [PixelLab API key](https://www.pixellab.ai) (recommended; ~$0.03/image, ~$5 per full board run)
+- A [PixelLab API key](https://www.pixellab.ai) or OpenAI Images API access (see `docker-compose.yml` — default provider is configurable)
 - Optionally: a local Stable Diffusion install for the offline path (Apple Silicon recommended)
 
-You can also run end-to-end with the **mock provider** to test the pipeline structure without spending anything — useful for validating your catalog and seeing the review UI before plugging in the real model.
+You can also run end-to-end with the **mock provider** to test the pipeline structure without spending anything — useful for validating your catalog and seeing the web app before plugging in a real model.
 
 ## Setup
 
-1. Fill in your API key in `docker-compose.yml` near the top of the `boardfactory-cli` service:
-
-   ```yaml
-   PIXELLAB_API_KEY: "your-pixellab-key-here"
-   ```
-
-   Or skip this and use `BOARDFACTORY_PROVIDER: mock` to test the pipeline shape without an API.
+1. Fill in API keys in `docker-compose.yml` under the **`board-factory`** service (or use a `.env` file in the same directory; Compose interpolates variables). For PixelLab, set `PIXELLAB_API_KEY`. For OpenAI image generation, set `OPENAI_API_KEY`. Use `BOARDFACTORY_PROVIDER: mock` to exercise the app without external APIs.
 
 2. (Optional but recommended) Stop git from tracking your edits to that file:
 
@@ -104,7 +98,7 @@ You can also run end-to-end with the **mock provider** to test the pipeline stru
    make protect-keys
    ```
 
-3. Drop your mockup PNG into `mockup/` and edit `catalog/board.yml` to describe your board.
+3. Create or pick a board under `boards/<board-id>/`, put your mockup at `boards/<board-id>/mockup/board.png`, and edit geometry and prompts in the **web UI**. Catalog data lives in the application database. Optional legacy `catalog.yml` on disk is still imported when present and the DB row is missing.
 
 4. Bring everything up:
 
@@ -112,111 +106,116 @@ You can also run end-to-end with the **mock provider** to test the pipeline stru
    make up
    ```
 
+   On first boot, the app runs **Alembic migrations** during startup (`storage.bootstrap`). You can also run `make db-upgrade` manually inside the stack.
+
+## Database: PostgreSQL (default) vs SQLite
+
+**Docker Compose (default)** uses the **`postgres`** service and sets `BOARDFACTORY_DATABASE_URL` on **`board-factory`** to a `postgresql+psycopg://…` URL. Application data (users, sessions, catalog rows, jobs, ownership, …) lives in Postgres inside the **`postgres_data`** volume — not in git.
+
+**SQLite at the repository root** (`.boardfactory.db`) is still supported: omit or override `BOARDFACTORY_DATABASE_URL` and set `BOARDFACTORY_DB_PATH` if you want a file-backed DB (useful for portable checkouts or simple local runs). The repo may carry a committed `.boardfactory.db` for shared dev fixtures; **WAL sidecars** (`.boardfactory.db-wal`, `.boardfactory.db-shm`) should not be committed — see below.
+
+`make db-checkpoint` merges SQLite WAL into `.boardfactory.db` and is only relevant when you use **SQLite**, not when using Postgres-only dev.
+
+## Fresh clone
+
+1. `git clone` and `cd` into the repo.
+2. Set provider/API keys in `.env` or `docker-compose.yml` if you use real generation.
+3. `make up` — wait for Postgres to become healthy; migrations run when the app starts.
+4. Open `http://localhost:8473`. If the database was empty after migrations, revision **`0007_seed_dev_admin_user`** seeds a dev admin; **`board_ownership.backfill_owned_boards_if_empty()`** can attach on-disk boards when the `owned_boards` table is empty. For a long-lived **Postgres** volume, your existing users and data persist across restarts.
+5. Add API keys under **Account → Connections** if you did not set compose-level keys.
+
+For **SQLite** workflows with a committed `.boardfactory.db`: merge WAL before committing the main file (`make db-checkpoint`). Tracked PNGs under `boards/*/workspace/live/` and style snapshots may be part of git; large generated trees (`history/`, raw churn) stay ignored and rebuild when you run the pipeline again.
+
+### SQLite WAL files (`.db-wal` / `.db-shm`)
+
+Relevant only when the app uses **SQLite** with WAL enabled: recent changes may appear in sidecar files until checkpointed. **`make db-checkpoint`** folds WAL into `.boardfactory.db` and removes those sidecars so they do not clutter `git status`.
+
+| File | Role |
+|------|------|
+| `.boardfactory.db` | Main SQLite database file (when using SQLite) |
+| `workspace/.costs.jsonl` | Legacy cost import — used only if the cost table is empty |
+
 ## Usage
 
-End-to-end run on one mockup:
+Typical workflow:
 
-```bash
-make run
-```
+1. `make up` and open `http://localhost:8473`.
+2. Pick or create a board, upload a mockup if needed, edit the catalog in the UI.
+3. Run pipeline steps from the app (style lock, generate, review, export, …). Progress appears in the job tray.
 
-That runs steps 1–4 (style lock, catalog validation, generate, cleanup) and stops. Then open the review UI:
+For debugging, `make shell` opens a shell in the **`board-factory`** container (`/repo` is the bind-mounted repo, `/app` is the app package). The pipeline is imported as the **`boardfactory`** Python package from `/repo/pipeline`.
 
-```bash
-open http://localhost:8473
-```
-
-Approve assets in each of the three view modes. When everything is approved, finish:
-
-```bash
-make states     # generate active variants for panels
-make preview    # composite the board for visual review
-make export     # copy approved assets to board_assets/
-```
-
-## Folder Overview
+## Folder overview
 
 ```text
-pipeline/                 Python pipeline code
+pipeline/                 Python pipeline library (boardfactory), used by the web app
   boardfactory/
-    providers/            Pluggable image-gen providers (PixelLab, mock)
+    providers/            Pluggable image-gen providers (PixelLab, OpenAI, mock)
     schemas/              Pydantic models for catalog + manifest
-    steps/                One module per pipeline step
-services/
-  review-ui/              Local web UI for approve/refine
-catalog/
-  example.yml             Sample catalog file
-  board.yml               Your catalog (you create this)
-mockup/                   Source mockup PNG (you provide)
-workspace/                All intermediate pipeline artifacts
-  style/                  Palette + style sheet
-  candidates/             Raw generated candidates
-  cleaned/                Palette-quantized + grid-snapped candidates
-  approved/               Candidates promoted via the review UI
-  refinements/            Centerpiece inpainting iterations
-  preview/                Composited board preview
-  logs/                   Run logs
-board_assets/             Final exported asset set (engine-ready)
+    steps/                Pipeline steps (style, generate, cleanup, …)
+app/                      FastAPI app: routes/, services/, storage/, migrations/
+boards/                   One directory per board (slug = id)
+  <board-id>/
+    mockup/               Source mockup PNG (e.g. board.png)
+    workspace/            Pipeline artifacts (style, live, history, preview, …)
+    export/               Engine-ready export (tiles + board_manifest.json)
+.boardfactory.db          Optional SQLite DB at repo root (only when not using Postgres URL)
 docs/
   architecture.md         Design notes
+  workspace-db-migration-plan.md   Workspace ↔ DB migration notes
 ```
 
-## Make Targets
+## Make targets
 
-| target | what it does |
-|---|---|
-| `make up` | Build images and start review-ui in the background |
+| Target | What it does |
+|--------|----------------|
+| `make up` | Build images and start **postgres** + **board-factory** |
 | `make down` | Stop all services |
-| `make logs` | Tail logs |
-| `make shell` | Open a bash shell inside the pipeline container |
-| `make run` | Steps 1–4: style + catalog + generate + cleanup |
-| `make style` | Just the style lock step |
-| `make catalog` | Validate the catalog |
-| `make generate` | Just the generate step |
-| `make cleanup` | Just the cleanup step |
-| `make states` | Generate active state variants for approved panels |
-| `make preview` | Composite the assembled board |
-| `make export` | Copy approved assets to board_assets/ |
-| `make clean` | Wipe workspace/ subdirectories |
-| `make protect-keys` | Stop git from tracking your edits to docker-compose.yml |
-| `make unprotect-keys` | Reverse of protect-keys |
+| `make logs` | Tail **board-factory** logs |
+| `make shell` | Bash shell inside the **board-factory** container |
+| `make rebuild` | Rebuild the **board-factory** image and recreate the container |
+| `make clean` | Remove generated files under per-board `workspace/` style/refinements/preview/logs |
+| `make protect-keys` | `git update-index --skip-worktree` on `docker-compose.yml` |
+| `make unprotect-keys` | Undo protect-keys |
+| `make test` | Run pytest inside **board-factory** (container must be up) |
+| `make db-upgrade` | `alembic upgrade head` (same DB URL as the app) |
+| `make db-current` | Show current Alembic revision |
+| `make db-checkpoint` | SQLite only — merge WAL into `.boardfactory.db` for a clean commit |
 
 ## Configuration
 
-All configuration lives in `docker-compose.yml` under the `boardfactory-cli` service's `environment` block. Useful knobs:
+Most settings live in **`docker-compose.yml`** under the **`board-factory`** service `environment` block (or in a `.env` file next to it). Common variables:
 
-- `BOARDFACTORY_PROVIDER: pixellab|mock` — image gen provider. Use `mock` for offline testing.
-- `BOARDFACTORY_PALETTE_SIZE: 24` — number of colors in the locked palette
-- `BOARDFACTORY_SPACE_CANDIDATES: 3` — candidates per board space design
-- `BOARDFACTORY_PANEL_CANDIDATES: 6` — candidates per feature panel
-- `BOARDFACTORY_CENTERPIECE_CANDIDATES: 12` — candidates for the centerpiece
+- `BOARDFACTORY_PROVIDER` — e.g. `openai`, `pixellab`, or `mock` (see `pipeline/boardfactory/providers/`).
+- `BOARDFACTORY_PALETTE_SIZE` — colors in the locked palette (default `24`).
+- `BOARDFACTORY_SPACE_CANDIDATES`, `BOARDFACTORY_PANEL_CANDIDATES`, `BOARDFACTORY_CENTERPIECE_CANDIDATES` — candidate counts per step.
+- `BOARDFACTORY_DATABASE_URL` — explicit SQLAlchemy URL (Compose sets Postgres by default).
+- `BOARDFACTORY_REPO` — repository root inside the container (`/repo`).
 
-After changing values, run `make down && make up`.
+After changing Compose env, run `make down && make up` (or `make rebuild` if you changed the image).
+
+## Developing
+
+Compose bind-mounts parts of `./app/` into `/app`. If you add a **new top-level module or package** under `app/` that is not yet listed in `docker-compose.yml` volumes, either add a volume line for it or rebuild the image so the file exists in the container.
 
 ## Costs
 
-With PixelLab provider on a typical board (~12 unique board space designs + 8 panels + 1 centerpiece):
-
-| Step | Calls | Cost |
-|---|---|---|
-| Generate spaces | 12 designs × 3 candidates | ~$1.10 |
-| Generate panels | 8 panels × 6 candidates | ~$1.45 |
-| Generate centerpiece | 12 candidates | ~$0.40 |
-| Centerpiece inpainting | ~5 refinements typical | ~$0.20 |
-| **Total per full board run** | | **~$3.15** |
-
-State generation, compositing, cleanup, and export are all free (local compute).
+With a paid API provider on a typical board (~12 unique board space designs + 8 panels + 1 centerpiece), ballpark costs depend on provider pricing. State generation, compositing, cleanup, and export are local compute.
 
 ## Troubleshooting
 
 **`PIXELLAB_API_KEY is not set`**
-Add it to `docker-compose.yml` under the `boardfactory-cli` service, then `make down && make up`. Or set `BOARDFACTORY_PROVIDER: mock` to bypass.
+
+Add it under **`board-factory`** in `docker-compose.yml` or Account → Connections, then restart. Or set `BOARDFACTORY_PROVIDER: mock`.
 
 **`segment` produces poor cutouts on detailed assets**
-Edit the bbox in `catalog/board.yml` to tighten the region around the asset.
+
+Tighten the asset bbox in the board editor (catalog data in the database).
 
 **Generated assets don't match the original mockup style**
-Tighten `style.prompt` in `catalog/board.yml` and re-run `make style && make run`. The style sheet is regenerated each run from your reference and prompt.
+
+Tighten `style.prompt` in the board UI and re-run **Style** / **Generate** from the app.
 
 **I accidentally committed my API keys**
-Run `git rm --cached docker-compose.yml`, rotate the key at the PixelLab dashboard, paste the new key, then `make protect-keys`.
+
+Run `git rm --cached docker-compose.yml`, rotate the key at the provider, paste the new key, then `make protect-keys`.

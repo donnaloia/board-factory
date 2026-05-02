@@ -221,12 +221,35 @@ def spec_for_centerpiece(
     *,
     prompt_override: str | None = None,
 ) -> DrawSpec:
-    """Build a DrawSpec for the centerpiece (always img2img against the mockup)."""
+    """Build a DrawSpec for the centerpiece.
+
+    **Initial generation** (no live centerpiece yet): img2img against the
+    mockup bbox crop — anchors the first asset to the board sketch.
+
+    **Regeneration** (a live centerpiece already exists): txt2img at
+    ``centerpiece.target_size`` with the style sheet, same modality as
+    perimeter spaces — subsequent passes are not tied to the mockup crop.
+    """
     cp = catalog.centerpiece
     style_prefix = catalog.style.prompt + ". " if catalog.style.prompt else ""
     base = prompt_override if prompt_override else cp.prompt
-    _, palette = _read_style_assets()
+    style_ref, palette = _read_style_assets()
     target_size = cp.target_size
+
+    if assets.has_live("centerpiece", "centerpiece"):
+        return DrawSpec(
+            category="centerpiece",
+            asset_id="centerpiece",
+            prompt=style_prefix + base,
+            base_prompt=base,
+            size=target_size,
+            candidates=config.CENTERPIECE_CANDIDATES,
+            mode="txt2img",
+            palette=palette,
+            style_reference=style_ref,
+            reference_bytes=None,
+            mask_bytes=None,
+        )
 
     mockup_path = config.BOARD_ROOT / catalog.style.reference_image
     ref_img = crop_region(

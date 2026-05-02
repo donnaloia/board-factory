@@ -11,30 +11,64 @@
 #   make protect-keys
 #
 # (To resume tracking changes later: `make unprotect-keys`.)
+#
+# Postgres runs in a separate container. Set POSTGRES_PASSWORD in a `.env` file
+# (same directory as this file) for production. First boot: `make db-upgrade`
+# (or `docker compose exec board-factory sh -c 'cd /repo/app && alembic upgrade head'`).
+# If the password contains `@`, `:`, or `#`, set a fully escaped
+# BOARDFACTORY_DATABASE_URL in `.env` instead of relying on interpolation.
+#
+# Deploy region (e.g. AWS us-east-2, GCP us-central1) is chosen on your host
+# provider; this file is region-agnostic.
 
 services:
-  review-ui:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-boardfactory}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-boardfactory}"
+      POSTGRES_DB: "${POSTGRES_DB:-boardfactory}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  board-factory:
     build:
       context: .
-      dockerfile: services/review-ui/Dockerfile
+      dockerfile: app/Dockerfile
     ports:
       - "8473:8473"
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - ./:/repo
       # Live-mount the web app so `git pull` shows up without rebuilding the
       # image. (The Dockerfile still COPYs these into /app for standalone runs.)
-      - ./services/review-ui/templates:/app/templates
-      - ./services/review-ui/static:/app/static
-      - ./services/review-ui/server.py:/app/server.py
-      - ./services/review-ui/board_svg.py:/app/board_svg.py
-      - ./services/review-ui/spec_data.py:/app/spec_data.py
-      - ./services/review-ui/jobs.py:/app/jobs.py
-      - ./services/review-ui/cost_ledger.py:/app/cost_ledger.py
-      - ./services/review-ui/pipeline_adapters.py:/app/pipeline_adapters.py
-      - ./services/review-ui/auth.py:/app/auth.py
-      - ./services/review-ui/sessions.py:/app/sessions.py
-      - ./services/review-ui/users.py:/app/users.py
-      - ./services/review-ui/pixellab_status.py:/app/pixellab_status.py
+      - ./app/templates:/app/templates
+      - ./app/static:/app/static
+      - ./app/server.py:/app/server.py
+      - ./app/routes:/app/routes
+      - ./app/board_svg.py:/app/board_svg.py
+      - ./app/spec_data.py:/app/spec_data.py
+      - ./app/jobs.py:/app/jobs.py
+      - ./app/cost_ledger.py:/app/cost_ledger.py
+      - ./app/pipeline_adapters.py:/app/pipeline_adapters.py
+      - ./app/auth.py:/app/auth.py
+      - ./app/sessions.py:/app/sessions.py
+      - ./app/users.py:/app/users.py
+      - ./app/pixellab_status.py:/app/pixellab_status.py
+      # ORM, filesystem helpers, Alembic — mounted live for development.
+      - ./app/storage:/app/storage
+      - ./app/services:/app/services
+      - ./app/migrations:/app/migrations
+      - ./app/alembic.ini:/app/alembic.ini
+      - ./app/tests:/app/tests
       # Pipeline library — live-mounted so edits to boardfactory/ are picked
       # up by uvicorn --reload without rebuilding the image.
       - ./pipeline/boardfactory:/repo/pipeline/boardfactory
@@ -59,3 +93,13 @@ services:
       BOARDFACTORY_CENTERPIECE_CANDIDATES: "12"
 
       BOARDFACTORY_REPO: /repo
+
+      # Reload subprocess must resolve ``routes``, ``storage``, etc. CWD alone is
+      # unreliable when uvicorn --reload respawns workers — match Makefile tests.
+      PYTHONPATH: /app:/repo/pipeline
+
+      # PostgreSQL (compose service `postgres`). Requires psycopg3 — app/requirements.txt.
+      BOARDFACTORY_DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER:-boardfactory}:${POSTGRES_PASSWORD:-boardfactory}@postgres:5432/${POSTGRES_DB:-boardfactory}"
+
+volumes:
+  postgres_data:

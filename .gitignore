@@ -22,6 +22,8 @@ boards/*/workspace/style/*
 !boards/*/workspace/style/palette.gpl
 !boards/*/workspace/style/palette_swatch.png
 !boards/*/workspace/style/style_sheet.png
+# live/ = promoted PNG per cell — NOT ignored so clones show the same board grid.
+# history/, candidates/, etc. stay ignored (high churn / huge trees).
 boards/*/workspace/candidates/*
 boards/*/workspace/cleaned/*
 boards/*/workspace/approved/*
@@ -29,7 +31,6 @@ boards/*/workspace/refinements/*
 boards/*/workspace/preview/*
 boards/*/workspace/logs/*
 boards/*/workspace/history/*
-boards/*/workspace/live/*
 boards/*/workspace/frames/*
 boards/*/workspace/.costs.jsonl
 boards/*/board_assets/*
@@ -39,3 +40,10 @@ boards/*/board_assets/*
 __pycache__/
 *.pyc
 .DS_Store
+
+# SQLite: commit ``boards/.boardfactory.db`` for identical clones; ignore sidecar
+# files so WAL/SHM from a running container do not dirty the working tree.
+boards/.boardfactory.db-journal
+boards/.boardfactory.db-wal
+boards/.boardfactory.db-shm
+.pytest_cache/

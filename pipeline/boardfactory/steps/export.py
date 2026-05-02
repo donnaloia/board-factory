@@ -1,14 +1,13 @@
-"""Export live assets + manifest to board_assets/ for engine consumption.
+"""Export live assets + manifest under ``boards/<id>/export/`` for engine use.
 
 Outputs three things:
 
-  1. Tile PNGs organized by category under board_assets/<board>/board_assets/
-  2. board_manifest.json mapping tile_id -> file path + position + animation
-  3. The composited preview as a reference asset
+  1. Tile PNGs organized by category under ``export/{centerpiece,panels,spaces}/``
+  2. ``board_manifest.json`` mapping tile_id -> file path + position + animation
+  3. The composited preview as a reference asset (under ``export/preview/``)
 
-Reads from `live/` only. The legacy `approved/` fallback was removed when
-the pipeline became web-only — `live/` is the single source of truth and
-anything not promoted there is intentionally not yet ready to ship.
+Reads from resolved live paths only. Anything not promoted as live is
+intentionally not included in the export bundle.
 """
 
 from __future__ import annotations
@@ -92,6 +91,7 @@ def do_export(catalog: Catalog, sink: ProgressSink) -> None:
             x, y, w, h = catalog.board_spaces.resolve_position(ref)
             manifest["board_spaces"].append({
                 "design_id": design.id,
+                "space_kind": design.space_kind,
                 "file": f"spaces/{design.id}.png",
                 "position": [x, y],
                 "size": [w, h],
@@ -104,7 +104,7 @@ def do_export(catalog: Catalog, sink: ProgressSink) -> None:
         if src.exists():
             files_to_copy.append((src, config.EXPORT_DIR / "preview" / name))
 
-    sink.start("copy live -> board_assets", total=len(files_to_copy))
+    sink.start("copy live -> export", total=len(files_to_copy))
     for src, dst in files_to_copy:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)

@@ -3,7 +3,6 @@
 Each Board Factory project ("board") owns a self-contained directory tree:
 
     boards/<board-id>/
-        catalog.yml
         workspace/
             style/        # palette + style sheet (cheap, local)
             history/      # every generated version, per cell, with sidecars
@@ -13,25 +12,31 @@ Each Board Factory project ("board") owns a self-contained directory tree:
             logs/
             frames/       # 9-slice house frame for functional panels
         mockup/
-        board_assets/     # exported tiles + manifest for the engine
+        export/           # engine-ready tiles + manifest (Export step output)
 
-The active board id is held as module-level mutable state so every existing
-`config.WORKSPACE`-style access keeps working without threading a board id
-through every call site. The web app calls `set_board()` per request via
-`scope_board()`.
+The board **catalog spec** lives in the application database; ``catalog.yml`` is
+optional legacy-only. ``config.CATALOG_PATH`` still resolves for rare tools that
+open a path.
 
-Legacy paths (`candidates/`, `cleaned/`, `approved/`) are still resolvable
-so the boot-time migration can read them, but `ensure_dirs()` no longer
-creates them — once migrated, they're deleted and never come back.
+The **active board id is stored per OS thread** (``threading.local()``). Paths
+resolved via ``config.WORKSPACE`` et al. always reflect that thread's active
+board, which lets the JobRunner process concurrent jobs on different boards.
 
-Threading note: this is process-global state. The web app holds a lock around
-each request to serialize board-scoped work. Acceptable because all expensive
-operations are offloaded to the JobRunner thread pool, not the request handler.
+``scope_board(board_id)`` acquires a **per-board re-entrant lock** so two
+threads never mutate the same board workspace simultaneously; unrelated boards
+can run in parallel (Phase 5).
+
+Legacy CLI-era directories (`workspace/candidates/`, ``cleaned/``, ``approved/``)
+are not exposed on ``config`` anymore. One-time migration reads them via
+``WORKSPACE / "approved" / …`` inside ``boardfactory.assets``; the web app
+startup skips that work unless those trees still exist on disk.
 """
 
 from __future__ import annotations
 
 import os
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 from threading import RLock
 
@@ -54,24 +59,37 @@ PROVIDER_NAME = os.environ.get("BOARDFACTORY_PROVIDER", "pixellab").lower()
 # ────────────────────────── board scope ──────────────────────────
 
 
-_lock = RLock()
-_active_board: str | None = None
+_tls = threading.local()
+
+_board_locks: dict[str, RLock] = {}
+_board_locks_guard = RLock()
+
+
+def _lock_for_board(board_id: str) -> RLock:
+    with _board_locks_guard:
+        lk = _board_locks.get(board_id)
+        if lk is None:
+            lk = RLock()
+            _board_locks[board_id] = lk
+        return lk
 
 
 def set_board(board_id: str | None) -> None:
-    """Set the active board id. Pass None to clear (rare)."""
-    global _active_board
-    with _lock:
-        _active_board = board_id
+    """Assign ``board_id`` as this thread's active board (``None`` clears)."""
+    if board_id is None:
+        if hasattr(_tls, "board_id"):
+            del _tls.board_id
+    else:
+        _tls.board_id = board_id
 
 
 def active_board() -> str | None:
-    return _active_board
+    return getattr(_tls, "board_id", None)
 
 
 def board_root(board_id: str | None = None) -> Path:
     """Return the root dir for a board. Defaults to the active board."""
-    bid = board_id or _active_board
+    bid = board_id or active_board()
     if not bid:
         raise RuntimeError(
             "No active board set. Call config.set_board(board_id) first, "
@@ -81,10 +99,6 @@ def board_root(board_id: str | None = None) -> Path:
 
 
 # ────────────────────────── path properties (compat layer) ──────────────────────────
-#
-# Existing code does `config.WORKSPACE`, `config.STYLE_DIR`, etc. These were
-# module attributes before; now they're computed properties via __getattr__
-# so they always reflect the currently-active board.
 
 
 def _path_for(name: str) -> Path:
@@ -96,31 +110,24 @@ def _path_for(name: str) -> Path:
         "MOCKUP_DIR":     root / "mockup",
         "WORKSPACE":      root / "workspace",
         "STYLE_DIR":      root / "workspace" / "style",
-        "CANDIDATES_DIR": root / "workspace" / "candidates",
-        "CLEANED_DIR":    root / "workspace" / "cleaned",
-        "APPROVED_DIR":   root / "workspace" / "approved",
         "REFINEMENTS_DIR":root / "workspace" / "refinements",
         "PREVIEW_DIR":    root / "workspace" / "preview",
         "LOGS_DIR":       root / "workspace" / "logs",
         "HISTORY_DIR":    root / "workspace" / "history",
         "LIVE_DIR":       root / "workspace" / "live",
-        "EXPORT_DIR":     root / "board_assets",
+        "EXPORT_DIR":     root / "export",
     }[name]
 
 
 _PATH_NAMES = {
     "BOARD_ROOT", "CATALOG_PATH", "MOCKUP_DIR", "WORKSPACE", "STYLE_DIR",
-    "CANDIDATES_DIR", "CLEANED_DIR", "APPROVED_DIR", "REFINEMENTS_DIR",
+    "REFINEMENTS_DIR",
     "PREVIEW_DIR", "LOGS_DIR", "HISTORY_DIR", "LIVE_DIR", "EXPORT_DIR",
 }
 
 
 def __getattr__(name: str) -> Path:
-    """Resolve path attributes lazily so they always reflect the active board.
-
-    This is only called for attributes not found in the module's normal
-    namespace, so the constants above (PALETTE_SIZE etc.) are unaffected.
-    """
+    """Resolve path attributes lazily so they always reflect the active board."""
     if name in _PATH_NAMES:
         return _path_for(name)
     raise AttributeError(f"module 'boardfactory.config' has no attribute {name!r}")
@@ -130,13 +137,7 @@ def __getattr__(name: str) -> Path:
 
 
 def ensure_dirs() -> None:
-    """Create every workspace subdir the web pipeline writes to.
-
-    Note: the legacy CLI working dirs (`candidates/`, `cleaned/`, `approved/`)
-    are intentionally not pre-created. They are read by the boot-time
-    migration if they happen to exist (carrying old assets that need
-    seeding into live/ + history/) and otherwise never recreated.
-    """
+    """Create every workspace subdir the web pipeline writes to."""
     for name in (
         "STYLE_DIR", "REFINEMENTS_DIR", "PREVIEW_DIR", "LOGS_DIR",
         "HISTORY_DIR", "LIVE_DIR", "EXPORT_DIR", "MOCKUP_DIR",
@@ -147,19 +148,12 @@ def ensure_dirs() -> None:
 # ────────────────────────── per-request scope helper ──────────────────────────
 
 
-from contextlib import contextmanager
-
-
 @contextmanager
 def scope_board(board_id: str):
-    """Set the active board for the duration of a block, restore after.
-
-    Used by the web app to scope each request to one board. Holds the global
-    lock so concurrent requests for different boards don't trample each other.
-    Acceptable because actual work is offloaded to the JobRunner thread pool.
-    """
-    with _lock:
-        prev = _active_board
+    """Serialize same-board work; other boards may proceed concurrently."""
+    lock = _lock_for_board(board_id)
+    with lock:
+        prev = active_board()
         set_board(board_id)
         try:
             yield

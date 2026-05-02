@@ -3,7 +3,7 @@
 Two coordinate systems are in play:
 
 - **Canvas coordinates**: the authoritative space the catalog and spec are
-  written in (e.g. 1920 × 1080). Every bbox in `catalog/board.yml` lives here.
+  written in (e.g. 1920 × 1080). Every bbox in the board catalog lives here.
 - **Mockup coordinates**: the actual pixel space of the user's mockup file,
   which may not match canvas dimensions (AI-generated mockups rarely hit exact
   target sizes). The pipeline scales canvas-space bboxes into mockup-space at

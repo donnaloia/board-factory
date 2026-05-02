@@ -1,8 +1,10 @@
-"""Pydantic schema for the board catalog YAML file.
+"""Pydantic schema for the board catalog.
 
 A catalog declares the entire structure of one board: where the board spaces are,
 what the feature panels look like, and how the centerpiece is positioned. The
-pipeline reads this file once and uses it for every subsequent step.
+web app persists this shape to SQLite; the pipeline consumes ``Catalog`` models
+built from that data (see ``app.pipeline_adapters``). ``Catalog.load(path)``
+remains for optional legacy YAML on disk.
 """
 
 from __future__ import annotations
@@ -117,6 +119,9 @@ class BoardSpaceRow(BaseModel):
         return self
 
 
+SpaceKind = Literal["standard", "event"]
+
+
 class BoardSpaceDesign(BaseModel):
     """One unique board space design that may be repeated at multiple positions.
 
@@ -127,6 +132,13 @@ class BoardSpaceDesign(BaseModel):
 
     id: str
     prompt: str
+    space_kind: SpaceKind = Field(
+        default="standard",
+        description=(
+            "Kind of space for generation/styling: standard perimeter track vs "
+            "event/special cells (e.g. different prompt context — muted, detailed)."
+        ),
+    )
     positions: list[str] = Field(
         ..., description="References into the layout, e.g. 'bottom_row.0' or 'left_col.5'."
     )
@@ -247,7 +259,13 @@ class Catalog(BaseModel):
         return self
 
     @classmethod
+    def from_dict(cls, data: dict) -> "Catalog":
+        """Build from a plain dict (e.g. loaded from the relational store)."""
+        return cls.model_validate(data)
+
+    @classmethod
     def load(cls, path: Path) -> "Catalog":
+        """Load from a YAML file on disk (legacy / tooling). Prefer ``from_dict``."""
         with open(path) as f:
             data = yaml.safe_load(f)
         return cls.model_validate(data)
