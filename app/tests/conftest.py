@@ -3,7 +3,7 @@
 Goals:
 
 * Run pipeline + app code against an isolated, on-disk repo root that
-  goes away at end-of-test - no leakage into ``boards/`` on the dev tree.
+  goes away at end-of-test - no leakage into ``data/boards/`` on the dev tree.
 * Give every test a SQLite engine pointing at the same temp tree, with the
   database schema brought up to head before the test starts (full Alembic chain).
 * Default the image provider to the offline ``mock`` so tests never reach
@@ -36,19 +36,31 @@ if str(_PIPELINE) not in sys.path:
 def isolated_repo(tmp_path, monkeypatch):
     """Point every BOARDFACTORY_* path at a throwaway tmp tree.
 
-    The pipeline reads ``BOARDFACTORY_REPO`` to find ``boards/<id>/``.
-    Tests must never write into the developer's real boards directory.
+    The pipeline reads ``BOARDFACTORY_REPO`` to find the per-board data
+    root (``data/boards/<id>/`` by default). Tests must never write into
+    the developer's real data directory.
     """
     repo = tmp_path / "repo"
-    (repo / "boards").mkdir(parents=True)
+    (repo / "data" / "boards").mkdir(parents=True)
     (repo / "workspace").mkdir(parents=True)
 
     monkeypatch.setenv("BOARDFACTORY_REPO", str(repo))
     monkeypatch.setenv("BOARDFACTORY_PROVIDER", "mock")
     monkeypatch.setenv("BOARDFACTORY_DB_PATH", str(repo / ".boardfactory.db"))
+    # Pin the data root explicitly so any earlier test's cached store
+    # singleton (or any module that captured BOARDFACTORY_REPO at import)
+    # cannot leak in.
+    monkeypatch.setenv("BOARDFACTORY_BOARDS_DIR", str(repo / "data" / "boards"))
     # Don't carry real keys into tests.
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("PIXELLAB_API_KEY", raising=False)
+
+    # Drop any cached BoardStore from a previous test before any code
+    # under test (or Alembic's env.py) has a chance to call ``get_store()``
+    # against the stale singleton.
+    from storage import board_store as _bs
+
+    _bs.reset_store()
 
     from alembic import command
     from alembic.config import Config
@@ -95,6 +107,12 @@ def isolated_repo(tmp_path, monkeypatch):
         mod = sys.modules.get(mod_name)
         if mod is not None:
             importlib.reload(mod)
+
+    # ``storage.board_store`` is _not_ reloaded — reloading would create
+    # a fresh ``_store`` module-level slot but other modules already hold
+    # a reference to the old module's ``get_store`` / ``reset_store``
+    # functions. We instead drop the singleton in-place via reset_store()
+    # at the start of the fixture.
 
     yield repo
 
@@ -154,11 +172,16 @@ def seeded_board(isolated_repo, board_id, test_user):
     bo.link_board_to_user(board_id, test_user.id)
 
     # Drop a tiny PNG into mockup/ so anything that needs the reference
-    # image can find one.
+    # image can find one. Routes through the BoardStore so the path is
+    # whatever the store resolves to (data/boards/<id>/... by default).
+    import io as _io
+
     from PIL import Image
 
-    mockup_dir = isolated_repo / "boards" / board_id / "mockup"
-    mockup_dir.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (1920, 1080), (32, 32, 40)).save(mockup_dir / "board.png")
+    from storage import board_store as bs
+
+    buf = _io.BytesIO()
+    Image.new("RGB", (1920, 1080), (32, 32, 40)).save(buf, format="PNG")
+    bs.get_store().write_bytes(board_id, "mockup/board.png", buf.getvalue())
 
     return info

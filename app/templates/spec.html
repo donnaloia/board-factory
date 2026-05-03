@@ -12,7 +12,7 @@
       <dt>Version</dt><dd>{{ summary.version }}</dd>
       <dt>Native</dt><dd>{{ summary.board_size[0] }} × {{ summary.board_size[1] }}</dd>
       <dt>Aspect</dt><dd>{{ summary.aspect }}</dd>
-      <dt>Source</dt><dd><code>boards/{{ board_id }}/catalog.yml</code></dd>
+      <dt>Source</dt><dd><code>board_games.body_json</code> (in DB)</dd>
     </dl>
   </header>
 
@@ -79,7 +79,7 @@
   {# ────────── DESIGN ENTRIES ────────── #}
   <section>
     <h2>Board space designs</h2>
-    <p class="muted">One row per design entry in <code>boards/{{ board_id }}/catalog.yml &rarr; board_spaces.designs</code>. Edit prompts there.</p>
+    <p class="muted">One row per design entry in <code>board_spaces.designs</code> on the catalog. Edit prompts in the side panel.</p>
     <table class="spec-table">
       <thead>
         <tr><th>ID</th><th>Kind</th><th>Size</th><th>Uses</th><th>Prompt</th></tr>

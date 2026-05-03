@@ -14,7 +14,7 @@ from itsdangerous import BadSignature, URLSafeSerializer
 from sqlalchemy import delete
 
 from storage.db import session_scope
-from storage.models.core import BrowserSessionRecord
+from models.core import BrowserSessionRecord
 
 
 COOKIE_NAME = "bf_session"

@@ -66,15 +66,16 @@ def test_rename_board(seeded_board, test_user):
 
 
 def test_delete_board_removes_disk_and_db(seeded_board, test_user, isolated_repo):
-    from boardfactory import boards as bf_boards
-
     from services import board_definition as bd
-    from services import boards as svc_boards
     from services import board_ownership as bo
+    from services import boards as svc_boards
+    from storage import board_store as bs
 
     bid = seeded_board.id
+    store = bs.get_store()
+    assert store.board_exists(bid)
     svc_boards.delete_board(test_user.id, bid)
-    assert not (isolated_repo / "boards" / bid).exists()
+    assert not store.board_exists(bid)
     assert bd.load_catalog_dict(bid) is None
     assert not bo.user_owns_board(test_user.id, bid)
     with pytest.raises(svc_boards.BoardNotFound):

@@ -6,11 +6,9 @@ wrappers around ``board_root`` / ``workspace_dir``.
 
 from __future__ import annotations
 
-import json
 import os
-import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import markdown as md
 from fastapi import HTTPException, Request
@@ -19,18 +17,15 @@ from fastapi.responses import JSONResponse, RedirectResponse
 import auth
 import cost_ledger
 import pipeline_adapters
-import spec_data
-from board_svg import CellStatus
 from boardfactory import boards as bf_boards
 from boardfactory import config as bf_config
 from boardfactory import frames as bf_frames
 from jobs import get_runner
+from storage.fs import workspace as fs_ws
 
 from services import board_definition as bd
 from services import board_ownership
 from services import catalog as svc_catalog
-from services import cells as svc_cells
-from services import jobs as svc_jobs
 
 REPO_ROOT = Path(os.environ.get("BOARDFACTORY_REPO", "/repo"))
 SPEC_PROSE_PATH = REPO_ROOT / "docs" / "spec_prose.md"
@@ -71,61 +66,6 @@ def load_board_catalog(board_id: str) -> dict[str, Any]:
         raise HTTPException(404, f"Catalog not found for board {board_id!r}")
 
 
-def save_board_catalog(board_id: str, data: dict[str, Any]) -> None:
-    svc_catalog.save_catalog(board_id, data)
-
-
-def generation_defaults_block() -> dict:
-    return svc_catalog._generation_defaults()  # type: ignore[attr-defined]
-
-
-def read_generation_from_catalog(catalog: dict) -> dict:
-    return svc_catalog.read_generation(catalog)
-
-
-def seed_cell_history_if_needed(board_id: str, category: str, asset_id: str) -> None:
-    svc_cells.seed_history_if_needed(board_id, category, asset_id)
-
-
-def workspace_cell_status(board_id: str, category: str, asset_id: str) -> CellStatus:
-    return svc_cells.cell_status(board_id, category, asset_id)
-
-
-def missing_space_ids(board_id: str, catalog: dict) -> list[str]:
-    return svc_cells.missing_space_ids(board_id, catalog)
-
-
-def missing_panel_ids(board_id: str, catalog: dict) -> list[str]:
-    return svc_cells.missing_panel_ids(board_id, catalog)
-
-
-def resolved_live_asset_path(board_id: str, category: str, asset_id: str) -> Path:
-    from services import asset_live
-
-    return asset_live.resolved_live_path(board_id, category, asset_id)
-
-
-def workspace_file_or_404(board_id: str, rel: str) -> Path:
-    from storage.fs import workspace as fs_ws
-
-    try:
-        return fs_ws.safe_workspace_relative(board_id, rel)
-    except fs_ws.PathTraversalError:
-        raise HTTPException(400, "Invalid path")
-
-
-def has_board_palette(board_id: str) -> bool:
-    from storage.fs import workspace as fs_ws
-
-    return fs_ws.has_palette(board_id)
-
-
-def mockup_present_for_board(board_id: str) -> tuple[bool, str]:
-    from services import boards as svc_boards
-
-    return svc_boards.mockup_present(board_id)
-
-
 def accepts_json(request: Request) -> bool:
     accept = request.headers.get("accept", "")
     return "application/json" in accept
@@ -142,8 +82,8 @@ def job_or_redirect_response(
 def editorial_template_context(board_id: str | None, request: Request | None = None) -> dict:
     project = "Board Factory"
     if board_id:
-        # Canonical title is ``board_games.project``. ``BoardInfo.project`` only
-        # reflects legacy ``catalog.yml`` on disk or defaults to the slug.
+        # Canonical title is the catalog's ``project`` field. ``BoardInfo.project``
+        # only reflects legacy ``catalog.yml`` on disk or defaults to the slug.
         row = bd.load_catalog_dict(board_id)
         if row is not None:
             project = str(row.get("project") or board_id)
@@ -155,10 +95,10 @@ def editorial_template_context(board_id: str | None, request: Request | None = N
     return {
         "board_id": board_id,
         "project": project,
-        "has_palette": has_board_palette(board_id) if board_id else False,
+        "has_palette": fs_ws.has_palette(board_id) if board_id else False,
         "cost": cost_ledger.summary(),
         "estimates": pipeline_cost_estimates() if board_id
-        else {"spaces": 0, "panels": 0, "centerpiece": 0, "refine": 0},
+        else {"spaces": 0, "panels": 0, "centerpiece": 0},
         "user": user.public_dict() if user else None,
     }
 
@@ -168,24 +108,46 @@ def pipeline_cost_estimates() -> dict:
         "spaces": pipeline_adapters.estimate_generate("spaces"),
         "panels": pipeline_adapters.estimate_generate("panels"),
         "centerpiece": pipeline_adapters.estimate_generate("centerpiece"),
-        "refine": pipeline_adapters.estimate_refine(),
     }
 
 
 def enqueue_pipeline_job(
     *, label: str, operation: str, target: str | None, cost_estimate: float, fn,
 ) -> str:
-    return svc_jobs.enqueue(
+    """Register a pipeline ``fn`` on the runner's worker pool. Returns the job id."""
+    job = get_runner().enqueue(
         label=label,
         operation=operation,
         target=target,
         cost_estimate=cost_estimate,
         fn=fn,
     )
+    return job.id
 
 
-def scoped_pipeline_callable(board_id: str, fn):
-    return svc_jobs.scoped(board_id, fn)
+def scoped_pipeline_callable(board_id: str, fn: Callable) -> Callable:
+    """Wrap ``fn`` so it executes inside ``config.scope_board(board_id)``.
+
+    ``scope_board`` takes the per-board write lock for the lifetime of the
+    job, serializing concurrent jobs that target the same board. Read-only
+    code paths (e.g. the side-panel ``/api/cell`` fetch) use
+    ``config.set_active_board`` instead so they never block on a job in
+    flight for the same board.
+
+    Also materializes the persisted style-lock palette to disk before the
+    pipeline reads it.
+    """
+    def wrapped(job, cancel):
+        with bf_config.scope_board(board_id):
+            try:
+                from services import workspace_palette as _wp
+
+                _wp.materialize_palette_to_disk(board_id)
+            except Exception:
+                pass
+            return fn(job, cancel)
+
+    return wrapped
 
 
 def user_provider_api_keys(request: Request) -> dict[str, str]:
@@ -233,9 +195,6 @@ def candidates_per_regen_count(category: str) -> int:
 
 def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -> dict:
     """JSON state for one cell: spec + live url + history list (with prompts)."""
-    from storage.fs import workspace as fs_ws
-
-    seed_cell_history_if_needed(board_id, category, asset_id)
     catalog = load_board_catalog(board_id)
 
     spec: dict = {}
@@ -286,7 +245,11 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
     else:
         raise HTTPException(400, f"Unknown category {category}")
 
-    with bf_config.scope_board(board_id):
+    # Read-only history listing — set the thread-local active board without
+    # taking the per-board write lock. Otherwise this fetch would block on
+    # any in-flight pipeline job for the same board, freezing the side panel
+    # while a single space generates.
+    with bf_config.set_active_board(board_id):
         from boardfactory import assets as bf_assets
 
         entries = bf_assets.list_history(category, asset_id)
@@ -304,7 +267,7 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
         for e in entries
     ]
 
-    live = resolved_live_asset_path(board_id, category, asset_id)
+    live = fs_ws.live_path(board_id, category, asset_id)
     ws = fs_ws.workspace_dir(board_id)
     live_url = None
     if live.exists():
@@ -322,8 +285,8 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
         if e.prompt is not None:
             active_prompt = e.prompt
             break
-        # Cleanup / refine sometimes promote with no stored prompt; newest-first
-        # history still has the last generation prompt on the next row.
+        # Cleanup sometimes promotes with no stored prompt; newest-first history
+        # still has the last generation prompt on the next row.
         for e2 in entries:
             if e2.prompt is not None:
                 active_prompt = e2.prompt
@@ -336,7 +299,8 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
         and bool(frame_block.get("enabled"))
         and bool(frame_block.get("apply_to_panels", True))
     )
-    with bf_config.scope_board(board_id):
+    # Read-only frame metadata — same reasoning as the history block above.
+    with bf_config.set_active_board(board_id):
         frame_present = bf_frames.has_house_frame()
         frame_meta = bf_frames.read_house_meta() if frame_present else None
     frame_locked = frame_enabled_for_cell and frame_present and live.exists()
@@ -346,7 +310,7 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
         all_panels = catalog.get("feature_panels", {}).get("panels", [])
         panel_sources: list[dict] = []
         for p in all_panels:
-            p_live = resolved_live_asset_path(board_id, "panels", p["id"])
+            p_live = fs_ws.live_path(board_id, "panels", p["id"])
             if p_live.exists():
                 panel_sources.append(
                     {

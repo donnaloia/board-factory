@@ -23,7 +23,7 @@
         </div>
         <div class="board-card-meta">
           <h2 class="board-card-title">{{ b.project }}</h2>
-          <p class="board-card-id">boards/{{ b.id }}/</p>
+          <p class="board-card-id">{{ b.id }}</p>
         </div>
       </a>
     </li>
@@ -37,7 +37,7 @@
         </div>
         <div class="board-card-meta">
           <h2 class="board-card-title">New Board</h2>
-          <p class="board-card-id" id="new-board-status">boards/something-fun</p>
+          <p class="board-card-id" id="new-board-status">something-fun</p>
         </div>
       </button>
     </li>
@@ -67,7 +67,7 @@
       trigger.disabled = false;
       card.classList.remove('is-creating');
       trigger.removeAttribute('aria-busy');
-      status.textContent = 'boards/something-fun';
+      status.textContent = 'something-fun';
       alert('Could not create board: ' + t);
       return;
     }

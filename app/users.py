@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session as SASession
 
 from storage.db import session_scope
 from storage.secret_crypto import decrypt_text, encrypt_text
-from storage.models.core import UserRecord, UserSecretRecord
+from models.core import UserRecord, UserSecretRecord
 
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")

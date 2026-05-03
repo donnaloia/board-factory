@@ -3,30 +3,48 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 
 from routes import deps
+from storage import board_store as bs
 from storage.fs import workspace as fs_ws
 
 router = APIRouter()
 
 
+def _serve(board_id: str, rel: str, *, no_store: bool = False) -> Response:
+    """Stream a board-relative file via the configured ``BoardStore``.
+
+    Local backend: ``FileResponse`` (sendfile, zero-copy).
+    Remote backend: 302 to a presigned URL when supported, else inline
+    ``Response(bytes)``.
+    """
+    store = bs.get_store()
+    if not store.exists(board_id, rel):
+        raise HTTPException(404)
+    signed = store.signed_get_url(board_id, rel)
+    if signed:
+        return RedirectResponse(signed, status_code=302)
+    if isinstance(store, bs.LocalBoardStore):
+        headers = {"Cache-Control": "no-store"} if no_store else {}
+        return FileResponse(store.local_path(board_id, rel), headers=headers)
+    headers = {"Cache-Control": "no-store"} if no_store else {}
+    return Response(content=store.read_bytes(board_id, rel), headers=headers)
+
+
 @router.get("/b/{board_id}/asset/{rest:path}")
 def asset(request: Request, board_id: str, rest: str):
     deps.ensure_owned_board(request, board_id)
-    target = deps.workspace_file_or_404(board_id, rest)
-    if not target.exists() or not target.is_file():
-        raise HTTPException(404)
-    return FileResponse(target, headers={"Cache-Control": "no-store"})
+    try:
+        fs_ws.safe_workspace_relative(board_id, rest)
+    except fs_ws.PathTraversalError:
+        raise HTTPException(400, "Invalid path")
+    return _serve(board_id, f"workspace/{rest}", no_store=True)
 
 
 @router.get("/b/{board_id}/mockup/{name}")
 def mockup(request: Request, board_id: str, name: str):
     deps.ensure_owned_board(request, board_id)
-    mockup_dir = (fs_ws.board_root(board_id) / "mockup").resolve()
-    target = (mockup_dir / name).resolve()
-    if not str(target).startswith(str(mockup_dir)):
+    if "/" in name or ".." in name or name.startswith("."):
         raise HTTPException(400, "Invalid path")
-    if not target.exists() or not target.is_file():
-        raise HTTPException(404)
-    return FileResponse(target)
+    return _serve(board_id, f"mockup/{name}")

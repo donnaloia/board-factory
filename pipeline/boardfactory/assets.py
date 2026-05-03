@@ -65,8 +65,6 @@ def _notify_asset_db(kind: str, **kwargs: Any) -> None:
 # and to decide whether to restore the prompt.
 OP_REGEN = "regen"          # provider call with a prompt
 OP_CLEAN = "clean"          # palette quantize + grid snap of the live image
-OP_REFINE = "refine"        # masked inpaint
-OP_LEGACY = "legacy"        # migrated from the classic approved/ flow
 
 
 # ────────────────────────── path helpers ──────────────────────────
@@ -76,26 +74,14 @@ def history_dir(category: str, asset_id: str) -> Path:
     return config.HISTORY_DIR / category / asset_id
 
 
-def physical_live_path(category: str, asset_id: str) -> Path:
-    """Fixed ``live/...`` path (legacy duplicate). Prefer ``live_path()`` for reads."""
+def live_path(category: str, asset_id: str) -> Path:
+    """Canonical on-disk path for a cell's live image (``live/<cat>/<id>.png``).
+
+    Tracked by git so a fresh clone reproduces the board grid.
+    """
     if category == "centerpiece":
         return config.LIVE_DIR / "centerpiece" / "centerpiece.png"
     return config.LIVE_DIR / category / f"{asset_id}.png"
-
-
-def live_path(category: str, asset_id: str) -> Path:
-    """Resolved path for the cell's live image (DB pointer → ``history/`` or ``live/``)."""
-    bid = config.active_board()
-    if bid:
-        try:
-            from services.asset_live import resolved_live_path
-
-            p = resolved_live_path(bid, category, asset_id)
-            if p.exists():
-                return p
-        except Exception:
-            pass
-    return physical_live_path(category, asset_id)
 
 
 def has_live(category: str, asset_id: str) -> bool:
@@ -189,48 +175,21 @@ def read_meta(category: str, asset_id: str, history_filename: str) -> dict:
 
 
 def promote(category: str, asset_id: str, history_filename: str) -> Path:
-    """Make a specific history file the live asset. Returns the live path.
+    """Copy a specific history file to ``live/<cat>/<id>.png``. Returns the live path.
 
     history_filename is just the basename (e.g. '1735012345__001.png').
     """
     src = history_dir(category, asset_id) / history_filename
     if not src.exists():
         raise FileNotFoundError(f"No history entry {src}")
-    try:
-        rel_hist = str(src.relative_to(config.WORKSPACE)).replace("\\", "/")
-    except ValueError:
-        rel_hist = f"history/{category}/{asset_id}/{history_filename}"
-    _notify_asset_db(
-        "promote",
-        category=category,
-        asset_id=asset_id,
-        basename=history_filename,
-        rel_path=rel_hist,
-    )
-    bid = config.active_board()
-    if bid:
-        try:
-            from services.asset_live import resolved_live_path
-
-            rp = resolved_live_path(bid, category, asset_id)
-            if rp.exists():
-                try:
-                    if rp.resolve() == src.resolve():
-                        return rp
-                except OSError:
-                    if rp == src:
-                        return rp
-        except Exception:
-            pass
-    dst = physical_live_path(category, asset_id)
+    dst = live_path(category, asset_id)
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
     return dst
 
 
 def clear_live(category: str, asset_id: str) -> None:
-    _notify_asset_db("clear_live", category=category, asset_id=asset_id)
-    p = physical_live_path(category, asset_id)
+    p = live_path(category, asset_id)
     if p.exists():
         p.unlink()
 
@@ -244,8 +203,8 @@ class HistoryEntry:
     timestamp_ms: int       # parsed from filename
     seq: int                # parsed from filename
     is_live: bool           # bytes match the current live file
-    operation: str          # OP_REGEN | OP_CLEAN | OP_REFINE | OP_LEGACY
-    prompt: str | None      # the prompt used (None for clean / refine)
+    operation: str          # OP_REGEN | OP_CLEAN
+    prompt: str | None      # the prompt used (None for clean)
 
 
 def list_history(category: str, asset_id: str) -> list[HistoryEntry]:
@@ -253,18 +212,8 @@ def list_history(category: str, asset_id: str) -> list[HistoryEntry]:
     d = history_dir(category, asset_id)
     if not d.exists():
         return []
-    pointer_rel: str | None = None
-    bid = config.active_board()
-    if bid:
-        try:
-            from services.asset_live import get_live_rel_path
-
-            pointer_rel = get_live_rel_path(bid, category, asset_id)
-        except Exception:
-            pointer_rel = None
-
     live_bytes: bytes | None = None
-    lp = physical_live_path(category, asset_id)
+    lp = live_path(category, asset_id)
     if lp.exists():
         try:
             live_bytes = lp.read_bytes()
@@ -281,15 +230,8 @@ def list_history(category: str, asset_id: str) -> list[HistoryEntry]:
             seq = int(seq_str)
         except ValueError:
             continue
-        entry_rel: str | None = None
-        try:
-            entry_rel = str(p.relative_to(config.WORKSPACE)).replace("\\", "/")
-        except ValueError:
-            entry_rel = None
         is_live = False
-        if pointer_rel and entry_rel:
-            is_live = pointer_rel == entry_rel
-        elif live_bytes is not None:
+        if live_bytes is not None:
             try:
                 is_live = p.read_bytes() == live_bytes
             except OSError:
@@ -300,59 +242,11 @@ def list_history(category: str, asset_id: str) -> list[HistoryEntry]:
             timestamp_ms=ts_ms,
             seq=seq,
             is_live=is_live,
-            operation=meta.get("operation", OP_LEGACY),
+            operation=meta.get("operation", OP_REGEN),
             prompt=meta.get("prompt"),
         ))
     entries.sort(key=lambda e: (e.timestamp_ms, e.seq), reverse=True)
     return entries
-
-
-# ────────────────────────── back-compat seeding ──────────────────────────
-
-
-def seed_from_legacy_approved(category: str, asset_id: str) -> Path | None:
-    """If we have an approved/<asset_id>.png from the classic pipeline but
-    no live/, copy it into both live/ and history/ so the web app sees it.
-
-    Returns the live path on success, None if nothing to migrate.
-    """
-    legacy: Path
-    approved = config.WORKSPACE / "approved"
-    if category == "centerpiece":
-        legacy = approved / "centerpiece.png"
-    else:
-        legacy = approved / category / f"{asset_id}.png"
-
-    if not legacy.exists():
-        return None
-    if has_live(category, asset_id):
-        return live_path(category, asset_id)
-
-    raw = legacy.read_bytes()
-    out = push_to_history(category, asset_id, raw, operation=OP_LEGACY, prompt=None)
-    promote(category, asset_id, out.name)
-    return live_path(category, asset_id)
-
-
-# ────────────────────────── one-board legacy purge ──────────────────────────
-
-
-def purge_legacy_dirs() -> list[str]:
-    """Delete the active board's legacy `candidates/`, `cleaned/`, `approved/`
-    directories. Caller must guarantee everything worth keeping has already
-    been seeded into live/ + history/.
-
-    Returns a list of human-readable directory names that were removed. Safe
-    to call repeatedly — missing dirs are silently skipped.
-    """
-    removed: list[str] = []
-    workspace = config.WORKSPACE
-    for name in ("candidates", "cleaned", "approved"):
-        d = workspace / name
-        if d.exists():
-            shutil.rmtree(d, ignore_errors=True)
-            removed.append(name)
-    return removed
 
 
 # ────────────────────────── re-cleanup (free, no provider) ──────────────────────────

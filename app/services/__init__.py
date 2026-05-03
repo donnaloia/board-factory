@@ -12,7 +12,6 @@ Modules (non-exhaustive):
   - ``board_definition`` — relational ``board_games`` ↔ pipeline ``Catalog`` dict
   - ``catalog``          — load/save catalog + ``generation`` block read/write
   - ``cells``            — per-cell assets, history, status
-  - ``jobs``             — enqueue glue around ``jobs.JobRunner``
   - ``job_runs``         — persisted job snapshots
-  - ``asset_index`` / ``asset_live`` / ``asset_meta`` / ``workspace_palette`` — asset + palette DB helpers
+  - ``asset_index`` / ``asset_meta`` / ``workspace_palette`` — asset + palette DB helpers
 """

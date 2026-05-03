@@ -7,7 +7,7 @@ import json
 from sqlalchemy import select
 
 from storage.db import session_scope
-from storage.models.core import AssetVersionRecord
+from models.core import AssetVersionRecord
 
 
 def read_meta_from_db(board_id: str, category: str, asset_id: str, history_filename: str) -> dict | None:

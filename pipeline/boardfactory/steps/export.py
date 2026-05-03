@@ -1,4 +1,4 @@
-"""Export live assets + manifest under ``boards/<id>/export/`` for engine use.
+"""Export live assets + manifest under ``<store-root>/<id>/export/`` for engine use.
 
 Outputs three things:
 

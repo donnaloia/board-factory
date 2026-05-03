@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 
 from storage.db import session_scope
-from storage.models.core import JobRunRecord
+from models.core import JobRunRecord
 
 if TYPE_CHECKING:
     from jobs import Job

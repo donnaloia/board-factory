@@ -1,6 +1,6 @@
 """Board Factory web application — multi-board operating room.
 
-Boards live at boards/<id>/ on disk, each with its own catalog, workspace,
+Boards live under data/boards/<id>/ on disk (resolved through the BoardStore),
 mockup, and exports. URLs are scoped: /b/<board_id>/... for everything
 board-specific. The root / is a board picker.
 
@@ -25,7 +25,6 @@ from routes import auth as routes_auth
 from routes import board as routes_board
 from routes import home as routes_home
 from routes import job_tray as routes_job_tray
-from routes import legacy as routes_legacy
 from routes import profile as routes_profile
 
 app = FastAPI(title="Board Factory")
@@ -100,7 +99,6 @@ def startup() -> None:
 app.include_router(routes_auth.router)
 app.include_router(routes_profile.router)
 app.include_router(routes_home.router)
-app.include_router(routes_legacy.router)
 app.include_router(routes_assets.router)
 app.include_router(routes_board.router)
 app.include_router(routes_job_tray.router)

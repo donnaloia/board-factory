@@ -6,6 +6,7 @@ import base64
 import io
 import os
 import time
+from functools import partial
 
 import httpx
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
@@ -25,7 +26,9 @@ from boardfactory.providers.pixel.pixellab import list_pixellab_presets
 from routes import deps
 from services import boards as svc_boards
 from services import catalog as svc_catalog
+from services import cells as svc_cells
 from services import mockup_prompt as mockup_prompt_svc
+from storage import board_store as bs
 from storage.fs import workspace as fs_ws
 
 router = APIRouter()
@@ -34,26 +37,20 @@ router = APIRouter()
 @router.get("/b/{board_id}/", response_class=HTMLResponse)
 def board_view(request: Request, board_id: str):
     deps.ensure_owned_board(request, board_id)
-    if not deps.has_board_palette(board_id):
+    if not fs_ws.has_palette(board_id):
         return RedirectResponse(f"/b/{board_id}/setup", status_code=303)
 
     catalog = deps.load_board_catalog(board_id)
-    space_status = {
-        d["id"]: deps.workspace_cell_status(board_id, "spaces", d["id"])
-        for d in catalog.get("board_spaces", {}).get("designs", [])
-    }
-    panel_status = {
-        p["id"]: deps.workspace_cell_status(board_id, "panels", p["id"])
-        for p in catalog.get("feature_panels", {}).get("panels", [])
-    }
-    cp_status = deps.workspace_cell_status(board_id, "centerpiece", "centerpiece")
-
-    n_designs = len(space_status)
-    n_panels = len(panel_status)
-    designs_done = sum(1 for s in space_status.values() if s.approved)
-    panels_done = sum(1 for s in panel_status.values() if s.approved)
-    missing_space_ids = deps.missing_space_ids(board_id, catalog)
-    missing_panel_ids = deps.missing_panel_ids(board_id, catalog)
+    stats = svc_cells.collect_board_stats(board_id, catalog)
+    space_status = stats.space_status
+    panel_status = stats.panel_status
+    cp_status = stats.centerpiece_status
+    n_designs = stats.designs_total
+    n_panels = stats.panels_total
+    designs_done = stats.designs_done
+    panels_done = stats.panels_done
+    missing_space_ids = stats.missing_space_ids
+    missing_panel_ids = stats.missing_panel_ids
     n_missing_designs = len(missing_space_ids)
     n_missing_panels = len(missing_panel_ids)
     generated_designs = n_designs - n_missing_designs
@@ -82,7 +79,9 @@ def board_view(request: Request, board_id: str):
     frame_overlay_url = None
     frame_block = catalog.get("frame", {}) or {}
     if frame_block.get("enabled") and frame_block.get("apply_to_panels", True):
-        with bf_config.scope_board(board_id):
+        # Read-only check — use set_active_board so the home page never
+        # queues behind an in-flight pipeline job for the same board.
+        with bf_config.set_active_board(board_id):
             if bf_frames.has_house_frame():
                 frame_overlay_url = f"/b/{board_id}/frame.png"
 
@@ -123,7 +122,7 @@ def board_view(request: Request, board_id: str):
                 else "Generate missing spaces & UI"
             ),
         },
-        "generation": deps.read_generation_from_catalog(catalog),
+        "generation": svc_catalog.read_generation(catalog),
     })
     return request.app.state.templates.TemplateResponse(request, "board.html", ctx)
 
@@ -131,7 +130,7 @@ def board_view(request: Request, board_id: str):
 @router.get("/b/{board_id}/setup", response_class=HTMLResponse)
 def setup_view(request: Request, board_id: str):
     deps.ensure_owned_board(request, board_id)
-    mockup_present, mockup_rel = deps.mockup_present_for_board(board_id)
+    mockup_present, mockup_rel = svc_boards.mockup_present(board_id)
     ctx = deps.editorial_template_context(board_id, request)
     ctx.update({
         "mockup_present": mockup_present,
@@ -147,7 +146,7 @@ async def action_upload_mockup(
     board_id: str,
     file: UploadFile = File(...),
 ):
-    """Accept a PNG/JPEG mockup upload and save it as boards/<id>/mockup/board.png.
+    """Accept a PNG/JPEG mockup upload and save it as <store-root>/<id>/mockup/board.png.
 
     Validates that the file is an image and checks the aspect ratio — a 16:9
     image (within 5% tolerance) is ideal but we accept anything and warn
@@ -175,11 +174,9 @@ async def action_upload_mockup(
     target = 16 / 9
     warn = abs(ratio - target) / target > 0.05
 
-    mockup_dir = fs_ws.board_root(board_id) / "mockup"
-    mockup_dir.mkdir(parents=True, exist_ok=True)
-    dest = mockup_dir / "board.png"
-
-    img.convert("RGB").save(dest, format="PNG")
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="PNG")
+    bs.get_store().write_bytes(board_id, "mockup/board.png", buf.getvalue())
 
     return JSONResponse({
         "ok": True,
@@ -221,7 +218,7 @@ async def action_generate_mockup(request: Request, board_id: str):
         )
 
     catalog = deps.load_board_catalog(board_id)
-    settings = deps.read_generation_from_catalog(catalog)
+    settings = svc_catalog.read_generation(catalog)
     oa_model = settings["openai"]["model"]
     oa_quality = settings["openai"]["quality"]
 
@@ -297,10 +294,9 @@ async def action_generate_mockup(request: Request, board_id: str):
         img = img.crop((0, y0, src_w, y0 + new_h))
     img = img.resize((1920, 1080), Image.LANCZOS)
 
-    mockup_dir = fs_ws.board_root(board_id) / "mockup"
-    mockup_dir.mkdir(parents=True, exist_ok=True)
-    dest = mockup_dir / "board.png"
-    img.save(dest, format="PNG")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    bs.get_store().write_bytes(board_id, "mockup/board.png", buf.getvalue())
 
     return JSONResponse({
         "ok": True,
@@ -329,8 +325,8 @@ def spec_view(request: Request, board_id: str):
         "svg_markup": render_spec_svg(catalog),
         "prose": prose,
         "cost": cost_ledger.summary(),
-        "has_palette": deps.has_board_palette(board_id),
-        "estimates": {"spaces": 0, "panels": 0, "centerpiece": 0, "refine": 0},
+        "has_palette": fs_ws.has_palette(board_id),
+        "estimates": {"spaces": 0, "panels": 0, "centerpiece": 0},
         "user": user.public_dict() if user else None,
     }
     return request.app.state.templates.TemplateResponse(request, "spec.html", ctx)
@@ -342,20 +338,27 @@ def frame_view(request: Request, board_id: str):
     deps.ensure_owned_board(request, board_id)
     catalog = deps.load_board_catalog(board_id)
 
-    with bf_config.scope_board(board_id):
+    # Read-only frame metadata for the setup page — set_active_board avoids
+    # blocking on the per-board write lock during long pipeline jobs.
+    with bf_config.set_active_board(board_id):
         has_frame = bf_frames.has_house_frame()
         meta = bf_frames.read_house_meta() if has_frame else None
 
     panels = catalog.get("feature_panels", {}).get("panels", [])
+    store = bs.get_store()
     candidates = []
     for p in panels:
-        live = deps.resolved_live_asset_path(board_id, "panels", p["id"])
-        if live.exists():
-            candidates.append({
-                "id": p["id"],
-                "size": [p["target_size"][0], p["target_size"][1]],
-                "url": f"/b/{board_id}/asset/{live.relative_to(fs_ws.workspace_dir(board_id)).as_posix()}?t={int(live.stat().st_mtime)}",
-            })
+        live_rel = fs_ws.live_rel("panels", p["id"])
+        if not store.exists(board_id, live_rel):
+            continue
+        ts_s = store.stat(board_id, live_rel).mtime_ms // 1000
+        # Asset route is rooted at /b/<id>/asset/<workspace-relative>.
+        url_rel = live_rel.removeprefix("workspace/")
+        candidates.append({
+            "id": p["id"],
+            "size": [p["target_size"][0], p["target_size"][1]],
+            "url": f"/b/{board_id}/asset/{url_rel}?t={ts_s}",
+        })
 
     ctx = deps.editorial_template_context(board_id, request)
     ctx.update({
@@ -372,7 +375,9 @@ def frame_view(request: Request, board_id: str):
 def frame_overlay(request: Request, board_id: str, w: int = 0, h: int = 0):
     """Compose the house frame at the requested size on demand. Cacheable."""
     deps.ensure_owned_board(request, board_id)
-    with bf_config.scope_board(board_id):
+    # Pure read of the house-frame slices; no writes. Use set_active_board
+    # so a pending pipeline job doesn't stall this overlay request.
+    with bf_config.set_active_board(board_id):
         loaded = bf_frames.load_house_frame()
     if loaded is None:
         raise HTTPException(404, "No house frame adopted on this board")
@@ -417,7 +422,7 @@ async def api_frame_adopt(
     src_size: tuple[int, int]
 
     if source_kind == "panel":
-        live = deps.resolved_live_asset_path(board_id, "panels", source_id)
+        live = fs_ws.live_path(board_id, "panels", source_id)
         if not live.exists():
             raise HTTPException(404, f"No live panel asset for {source_id}")
         src_img = Image.open(live).convert("RGBA")
@@ -461,7 +466,7 @@ async def api_frame_adopt(
         data.setdefault("frame", {})
         data["frame"]["enabled"] = True
         data["frame"]["apply_to_panels"] = True
-        deps.save_board_catalog(board_id, data)
+        svc_catalog.save_catalog(board_id, data)
 
     return JSONResponse({
         "ok": True,
@@ -478,7 +483,7 @@ async def api_frame_disable(request: Request, board_id: str):
     data = deps.load_board_catalog(board_id)
     data.setdefault("frame", {})
     data["frame"]["enabled"] = False
-    deps.save_board_catalog(board_id, data)
+    svc_catalog.save_catalog(board_id, data)
     return JSONResponse({"ok": True})
 
 
@@ -495,7 +500,7 @@ def api_frame_preview(request: Request, board_id: str, source_kind: str, source_
 
     catalog = deps.load_board_catalog(board_id)
     if source_kind == "panel":
-        live = deps.resolved_live_asset_path(board_id, "panels", source_id)
+        live = fs_ws.live_path(board_id, "panels", source_id)
         if not live.exists():
             raise HTTPException(404)
         src_img = Image.open(live).convert("RGBA")
@@ -527,20 +532,20 @@ def api_frame_preview(request: Request, board_id: str, source_kind: str, source_
 @router.get("/b/{board_id}/preview", response_class=HTMLResponse)
 def preview_view(request: Request, board_id: str):
     deps.ensure_owned_board(request, board_id)
-    preview_path = fs_ws.workspace_dir(board_id) / "preview" / "board_preview.png"
-    export_dir = fs_ws.export_dir(board_id)
-    manifest_path = export_dir / "board_manifest.json"
-    exported_count = 0
-    if export_dir.exists():
-        exported_count = sum(1 for _ in export_dir.rglob("*.png"))
+    store = bs.get_store()
+    preview_rel = "workspace/preview/board_preview.png"
+    preview_present = store.exists(board_id, preview_rel)
+    preview_url = None
+    if preview_present:
+        ts_s = store.stat(board_id, preview_rel).mtime_ms // 1000
+        preview_url = f"/b/{board_id}/asset/preview/board_preview.png?t={ts_s}"
+    manifest_present = store.exists(board_id, "export/board_manifest.json")
+    exported_count = sum(1 for f in store.list(board_id, "export") if f.endswith(".png"))
     ctx = deps.editorial_template_context(board_id, request)
     ctx.update({
-        "preview_present": preview_path.exists(),
-        "preview_url": (
-            f"/b/{board_id}/asset/preview/board_preview.png?t={int(preview_path.stat().st_mtime)}"
-            if preview_path.exists() else None
-        ),
-        "manifest_present": manifest_path.exists(),
+        "preview_present": preview_present,
+        "preview_url": preview_url,
+        "manifest_present": manifest_present,
         "exported_count": exported_count,
     })
     return request.app.state.templates.TemplateResponse(request, "preview.html", ctx)
@@ -556,15 +561,17 @@ def device_preview_view(request: Request, board_id: str):
     leaving the browser.
     """
     deps.ensure_owned_board(request, board_id)
-    preview_dir = fs_ws.workspace_dir(board_id) / "preview"
-    idle_path = preview_dir / "board_idle.png"
-    active_path = preview_dir / "board_active.png"
+    store = bs.get_store()
 
-    def _asset_url(name: str, p: Path) -> str:
-        return f"/b/{board_id}/asset/preview/{name}?t={int(p.stat().st_mtime)}"
+    def _asset_url(name: str) -> str | None:
+        rel = f"workspace/preview/{name}"
+        if not store.exists(board_id, rel):
+            return None
+        ts_s = store.stat(board_id, rel).mtime_ms // 1000
+        return f"/b/{board_id}/asset/preview/{name}?t={ts_s}"
 
-    idle_url = _asset_url("board_idle.png", idle_path) if idle_path.exists() else None
-    active_url = _asset_url("board_active.png", active_path) if active_path.exists() else None
+    idle_url = _asset_url("board_idle.png")
+    active_url = _asset_url("board_active.png")
 
     catalog = deps.load_board_catalog(board_id)
     bw, bh = catalog.get("board_size", [1920, 1080])
@@ -606,7 +613,9 @@ async def action_analyze(request: Request, board_id: str):
         label="Analyze mockup with GPT-4o",
         operation="analyze", target=board_id,
         cost_estimate=pipeline_adapters.ANALYZE_COST_USD,
-        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.analyze_adapter(openai_key)),
+        fn=deps.scoped_pipeline_callable(
+            board_id, partial(pipeline_adapters.analyze, openai_key=openai_key),
+        ),
     )
     return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/")
 
@@ -618,50 +627,7 @@ async def action_style(request: Request, board_id: str):
         label="Extract style from mockup",
         operation="style", target=board_id,
         cost_estimate=pipeline_adapters.estimate_style(),
-        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.style_adapter()),
-    )
-    return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/")
-
-
-@router.post("/b/{board_id}/actions/generate/{category}")
-async def action_generate(request: Request, board_id: str, category: str):
-    """Generate every cell in this category that doesn't have a live asset yet.
-
-    The button label distinguishes "Generate all X" from "Generate missing X"
-    based on whether anything is already live; both routes converge here so
-    the back-end behavior is identical: skip cells that already have art,
-    only spend on what's actually missing.
-    """
-    deps.ensure_owned_board(request, board_id)
-    if category not in ("spaces", "panels", "centerpiece"):
-        raise HTTPException(400, f"Unknown category {category}")
-    keys = deps.user_provider_api_keys(request)
-    job_id = deps.enqueue_pipeline_job(
-        label=f"Generate missing {category}",
-        operation=f"generate.{category}", target=board_id,
-        cost_estimate=pipeline_adapters.estimate_generate(category),
-        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.generate_missing_adapter(category, **keys)),
-    )
-    return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/")
-
-
-@router.post("/b/{board_id}/actions/generate-missing/spaces")
-async def action_generate_missing_spaces(request: Request, board_id: str):
-    """Alias for /actions/generate/spaces kept for the existing UI button.
-
-    Both routes funnel through generate_missing_adapter("spaces"), which
-    skips designs with a live asset and only spends on what's empty.
-    """
-    deps.ensure_owned_board(request, board_id)
-    catalog = deps.load_board_catalog(board_id)
-    missing_space_ids = deps.missing_space_ids(board_id, catalog)
-    count = len(missing_space_ids)
-    keys = deps.user_provider_api_keys(request)
-    job_id = deps.enqueue_pipeline_job(
-        label=f"Generate {count} missing space{'s' if count != 1 else ''}",
-        operation="generate.spaces", target=board_id,
-        cost_estimate=pipeline_adapters.estimate_generate_one("spaces") * count,
-        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.generate_missing_adapter("spaces", **keys)),
+        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.style),
     )
     return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/")
 
@@ -671,8 +637,8 @@ async def action_generate_missing_all(request: Request, board_id: str):
     """Generate every empty board space AND every empty UI panel in one job."""
     deps.ensure_owned_board(request, board_id)
     catalog = deps.load_board_catalog(board_id)
-    missing_spaces = deps.missing_space_ids(board_id, catalog)
-    missing_panels = deps.missing_panel_ids(board_id, catalog)
+    missing_spaces = svc_cells.missing_space_ids(board_id, catalog)
+    missing_panels = svc_cells.missing_panel_ids(board_id, catalog)
     total = len(missing_spaces) + len(missing_panels)
     keys = deps.user_provider_api_keys(request)
     job_id = deps.enqueue_pipeline_job(
@@ -681,7 +647,9 @@ async def action_generate_missing_all(request: Request, board_id: str):
         cost_estimate=pipeline_adapters.estimate_generate_all(
             len(missing_spaces), len(missing_panels)
         ),
-        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.generate_all_adapter(**keys)),
+        fn=deps.scoped_pipeline_callable(
+            board_id, partial(pipeline_adapters.generate_all, **keys),
+        ),
     )
     return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/")
 
@@ -693,7 +661,7 @@ async def action_states(request: Request, board_id: str):
         label="Build active states",
         operation="states", target=board_id,
         cost_estimate=0.0,
-        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.states_adapter()),
+        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.states),
     )
     return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/preview")
 
@@ -705,7 +673,7 @@ async def action_preview(request: Request, board_id: str):
         label="Composite preview",
         operation="preview", target=board_id,
         cost_estimate=0.0,
-        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.preview_adapter()),
+        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.preview),
     )
     return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/preview")
 
@@ -717,7 +685,7 @@ async def action_export(request: Request, board_id: str):
         label="Export approved assets",
         operation="export", target=board_id,
         cost_estimate=0.0,
-        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.export_adapter()),
+        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.export),
     )
     return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/preview")
 
@@ -737,9 +705,16 @@ async def action_regen_one(
         label=f"Regenerate {asset_id}",
         operation=f"regen.{category}", target=asset_id,
         cost_estimate=pipeline_adapters.estimate_generate_one(category, asset_id),
-        fn=deps.scoped_pipeline_callable(board_id,
-                      pipeline_adapters.generate_one_adapter(category, asset_id,
-                                                             prompt_override=p, **keys)),
+        fn=deps.scoped_pipeline_callable(
+            board_id,
+            partial(
+                pipeline_adapters.generate_one,
+                category=category,
+                asset_id=asset_id,
+                prompt_override=p,
+                **keys,
+            ),
+        ),
     )
     return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/")
 
@@ -754,7 +729,10 @@ async def action_clean_one(request: Request, board_id: str, category: str, asset
         label=f"Clean {asset_id}",
         operation=f"clean.{category}", target=asset_id,
         cost_estimate=0.0,
-        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.clean_one_adapter(category, asset_id)),
+        fn=deps.scoped_pipeline_callable(
+            board_id,
+            partial(pipeline_adapters.clean_one, category=category, asset_id=asset_id),
+        ),
     )
     return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/")
 
@@ -764,7 +742,7 @@ def api_get_generation(request: Request, board_id: str):
     """JSON for the generation settings modal (palette, provider, models)."""
     deps.ensure_owned_board(request, board_id)
     catalog = deps.load_board_catalog(board_id)
-    settings = deps.read_generation_from_catalog(catalog)
+    settings = svc_catalog.read_generation(catalog)
     return JSONResponse({
         "settings": settings,
         "options": {"pixellab_models": list_pixellab_presets()},

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from sqlalchemy import BigInteger, Boolean, ForeignKey, Float, Index, Integer, String, Text
+from sqlalchemy import BigInteger, ForeignKey, Float, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from storage.models.base import Base
+from models.base import Base
 
 
 class UserRecord(Base):
@@ -111,112 +111,23 @@ class CostEntryRecord(Base):
     usd: Mapped[float] = mapped_column(Float, nullable=False)
 
 
-class BoardCatalogRecord(Base):
-    """Legacy mirror of the full catalog JSON (kept in sync for transitional code)."""
-
-    __tablename__ = "board_catalogs"
-
-    board_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    body_json: Mapped[str] = mapped_column(Text, nullable=False)
-    updated_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
-
-
 class BoardGameRecord(Base):
-    """One row per board: global board spec (parent for normalized children)."""
+    """One row per board.
+
+    The catalog spec (project, board_size, style, centerpiece, board_spaces,
+    feature_panels, frame, generation) is a Pydantic-validated JSON blob in
+    ``body_json``. Style-lock palette state has its own columns because the
+    palette has a separate writer that materializes it to disk on job start.
+    """
 
     __tablename__ = "board_games"
 
     board_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    project: Mapped[str] = mapped_column(String(512), nullable=False)
-    board_size_w: Mapped[int] = mapped_column(Integer, nullable=False)
-    board_size_h: Mapped[int] = mapped_column(Integer, nullable=False)
-    style_reference_image: Mapped[str] = mapped_column(String(512), nullable=False)
-    style_prompt: Mapped[str] = mapped_column(Text, nullable=False)
-    cp_bbox_x1: Mapped[int] = mapped_column(Integer, nullable=False)
-    cp_bbox_y1: Mapped[int] = mapped_column(Integer, nullable=False)
-    cp_bbox_x2: Mapped[int] = mapped_column(Integer, nullable=False)
-    cp_bbox_y2: Mapped[int] = mapped_column(Integer, nullable=False)
-    cp_target_w: Mapped[int] = mapped_column(Integer, nullable=False)
-    cp_target_h: Mapped[int] = mapped_column(Integer, nullable=False)
-    cp_prompt: Mapped[str] = mapped_column(Text, nullable=False)
-    cp_needs_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    cp_active_kind: Mapped[str] = mapped_column(String(16), nullable=False, default="none")
-    generation_json: Mapped[str] = mapped_column(Text, nullable=False)
-    frame_json: Mapped[str] = mapped_column(Text, nullable=False)
+    body_json: Mapped[str] = mapped_column(Text, nullable=False)
     updated_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
     palette_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     palette_gpl_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     style_lock_updated_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-
-
-class BoardSpaceLayoutRowRecord(Base):
-    """One row of the ``board_spaces.layout`` map (e.g. top_row, bottom_row)."""
-
-    __tablename__ = "board_space_layout_rows"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    board_id: Mapped[str] = mapped_column(
-        String(128),
-        ForeignKey("board_games.board_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    row_key: Mapped[str] = mapped_column(String(64), nullable=False)
-    count: Mapped[int] = mapped_column(Integer, nullable=False)
-    start_x: Mapped[int] = mapped_column(Integer, nullable=False)
-    start_y: Mapped[int] = mapped_column(Integer, nullable=False)
-    spacing: Mapped[int] = mapped_column(Integer, nullable=False)
-    axis: Mapped[str] = mapped_column(String(1), nullable=False)
-    size_w: Mapped[int] = mapped_column(Integer, nullable=False)
-    size_h: Mapped[int] = mapped_column(Integer, nullable=False)
-
-    __table_args__ = (Index("ix_board_space_layout_board_row", "board_id", "row_key", unique=True),)
-
-
-class BoardSpaceDesignRecord(Base):
-    """One space design (id + prompt + position refs) for a board."""
-
-    __tablename__ = "board_space_designs"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    board_id: Mapped[str] = mapped_column(
-        String(128),
-        ForeignKey("board_games.board_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    design_id: Mapped[str] = mapped_column(String(256), nullable=False)
-    prompt: Mapped[str] = mapped_column(Text, nullable=False)
-    space_kind: Mapped[str] = mapped_column(String(16), nullable=False, default="standard")
-    positions_json: Mapped[str] = mapped_column(Text, nullable=False)
-
-    __table_args__ = (Index("ix_board_space_designs_board_design", "board_id", "design_id", unique=True),)
-
-
-class BoardFeaturePanelRecord(Base):
-    """One functional panel region for a board."""
-
-    __tablename__ = "board_feature_panels"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    board_id: Mapped[str] = mapped_column(
-        String(128),
-        ForeignKey("board_games.board_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    panel_id: Mapped[str] = mapped_column(String(256), nullable=False)
-    bbox_x1: Mapped[int] = mapped_column(Integer, nullable=False)
-    bbox_y1: Mapped[int] = mapped_column(Integer, nullable=False)
-    bbox_x2: Mapped[int] = mapped_column(Integer, nullable=False)
-    bbox_y2: Mapped[int] = mapped_column(Integer, nullable=False)
-    target_w: Mapped[int] = mapped_column(Integer, nullable=False)
-    target_h: Mapped[int] = mapped_column(Integer, nullable=False)
-    prompt: Mapped[str] = mapped_column(Text, nullable=False)
-    needs_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    active_kind: Mapped[str] = mapped_column(String(16), nullable=False, default="none")
-
-    __table_args__ = (Index("ix_board_feature_panels_board_panel", "board_id", "panel_id", unique=True),)
 
 
 class AssetVersionRecord(Base):
@@ -240,17 +151,3 @@ class AssetVersionRecord(Base):
     )
 
 
-class AssetLiveRecord(Base):
-    """DB-backed pointer to the on-disk image that is ``live`` for one cell."""
-
-    __tablename__ = "asset_live"
-
-    board_id: Mapped[str] = mapped_column(
-        String(128),
-        ForeignKey("board_games.board_id", ondelete="CASCADE"),
-        primary_key=True,
-    )
-    category: Mapped[str] = mapped_column(String(32), primary_key=True)
-    asset_id: Mapped[str] = mapped_column(String(256), primary_key=True)
-    live_rel_path: Mapped[str] = mapped_column(String(512), nullable=False)
-    updated_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)

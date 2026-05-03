@@ -1,35 +1,32 @@
 """Catalog use cases — relational DB as source of truth.
 
-``board_games`` (+ child tables) hold the canonical board spec. The pipeline
-loads a ``Catalog`` model from this layer via ``app.pipeline_adapters`` (no
-``catalog.yml`` required at runtime).
+The catalog spec is a single Pydantic-validated JSON blob in
+``board_games.body_json`` (see ``services.board_definition``). The pipeline
+loads a ``Catalog`` model from that blob via ``app.pipeline_adapters``; no
+``catalog.yml`` is required at runtime.
 
-Optional ``boards/<id>/catalog.yml`` on disk is still **imported once** when
-present and the relational row is missing (legacy checkouts). Use
+Optional ``<store-root>/<id>/catalog.yml`` on disk is still **imported once**
+when present and the relational row is missing (legacy checkouts). Use
 ``sync_disk_yaml_into_relational`` after editing that file by hand.
 
 If the board directory exists (pipeline ``get_board``) but there is still no
-catalog in the DB or YAML — e.g. Postgres was recreated while ``boards/`` was
-left on disk — we **seed the standard template** via
+catalog in the DB or YAML — e.g. Postgres was recreated while the data tree
+was left on disk — we **seed the standard template** via
 ``boardfactory.boards.default_catalog_dict`` once so the UI can load again.
 
 Public surface:
 
   - ``load_catalog`` / ``safe_load_catalog`` / ``save_catalog``
   - ``read_generation`` / ``read_generation_block`` / ``write_generation``
-  - ``materialize_catalog_yaml_for_pipeline`` (deprecated no-op)
   - ``sync_disk_yaml_into_relational``
 """
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
-from storage.db import session_scope
 from storage.fs import workspace as fs_ws
 from storage.fs import yaml_io as fs_yaml
-from storage.models.core import BoardCatalogRecord
 
 from services import board_definition as bd
 
@@ -107,7 +104,7 @@ def read_generation(catalog: dict) -> dict:
 
 
 def safe_load_catalog(board_id: str) -> dict[str, Any] | None:
-    """Prefer relational storage; migrate from YAML or legacy JSON blob if needed."""
+    """Prefer relational storage; migrate from a legacy ``catalog.yml`` if needed."""
     d = bd.load_catalog_dict(board_id)
     if d is not None:
         return d
@@ -117,13 +114,6 @@ def safe_load_catalog(board_id: str) -> dict[str, Any] | None:
     if yaml_blob is not None:
         bd.persist_catalog_dict(board_id, yaml_blob)
         return bd.load_catalog_dict(board_id)
-
-    with session_scope() as session:
-        row = session.get(BoardCatalogRecord, board_id)
-        if row is not None:
-            data = json.loads(row.body_json)
-            bd.persist_catalog_dict(board_id, data)
-            return bd.load_catalog_dict(board_id)
 
     # Board dirs on disk without DB rows (fresh Postgres, or never-persisted
     # skeleton) — same default template ``create_board`` + the UI normally persist.
@@ -148,14 +138,6 @@ def load_catalog(board_id: str) -> dict[str, Any]:
 def save_catalog(board_id: str, data: dict[str, Any]) -> None:
     """Validate and persist the catalog to relational tables only."""
     bd.persist_catalog_dict(board_id, data)
-
-
-def materialize_catalog_yaml_for_pipeline(board_id: str) -> None:
-    """Deprecated: pipeline jobs no longer materialize ``catalog.yml``.
-
-    Kept as a no-op so older callers can be removed incrementally.
-    """
-    del board_id
 
 
 def sync_disk_yaml_into_relational(board_id: str) -> None:

@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from boardfactory import boards as bf_boards
 
 from storage.db import session_scope
-from storage.models.core import OwnedBoardRecord, UserRecord
+from models.core import OwnedBoardRecord, UserRecord
 
 
 def _now_ms() -> int:

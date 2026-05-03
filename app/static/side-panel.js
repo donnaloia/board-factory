@@ -433,8 +433,6 @@
     const opLabel = ({
       regen: "generated",
       clean: "cleaned",
-      refine: "refined",
-      legacy: "imported",
     })[h.operation] || h.operation || "";
     const marker = h.is_live ? "live" : "restore →";
     return `

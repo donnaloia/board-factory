@@ -52,24 +52,10 @@ def _run_deferred_maintenance() -> None:
             print(f"[bootstrap] asset index backfill skipped: {exc}")
         try:
             from services import workspace_palette as _wpl  # noqa: PLC0415
-            from services.asset_live import migrate_live_pointers_for_catalog_boards  # noqa: PLC0415
 
             _wpl.migrate_palette_from_disk_all_boards()
-            migrate_live_pointers_for_catalog_boards()
         except Exception as exc:
             print(f"[bootstrap] workspace DB migration helpers skipped: {exc}")
-        try:
-            from storage.fs import workspace as _fs  # noqa: PLC0415
-
-            _fs.migrate_all_legacy_board_assets_to_export()
-        except Exception as exc:
-            print(f"[bootstrap] board_assets→export rename skipped: {exc}")
-        try:
-            from routes.startup import migrate_legacy_workspace_trees  # noqa: PLC0415
-
-            migrate_legacy_workspace_trees()
-        except Exception as exc:
-            print(f"[bootstrap] legacy workspace migrate skipped: {exc}")
     finally:
         logger.info(
             "bootstrap: deferred maintenance finished in %.2fs",
@@ -84,9 +70,6 @@ def apply() -> None:
     upgrade_schema_to_head()
     logger.info("bootstrap: Alembic finished in %.2fs", time.monotonic() - t_alembic)
 
-    import cost_ledger  # noqa: PLC0415 — after schema exists
-
-    cost_ledger.import_from_jsonl_if_needed()
     try:
         from services import board_ownership as _bo  # noqa: PLC0415
 

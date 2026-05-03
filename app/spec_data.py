@@ -1,9 +1,10 @@
 """Pure functions that derive the spec page's tables from a catalog dict.
 
 The spec page is a *generated* document — every number on it comes from
-`boards/<board-id>/catalog.yml`. This module turns the catalog into the structured rows
-the Jinja template iterates over: design summary, pixel-density rollup,
-battle-tile table, and a few high-level numbers for the header.
+the catalog row in the database (``board_games.body_json``). This module
+turns the catalog into the structured rows the Jinja template iterates
+over: design summary, pixel-density rollup, battle-tile table, and a few
+high-level numbers for the header.
 
 Keep this module side-effect free and dict-in-rows-out so it stays trivial
 to test and the rendering layer stays dumb.

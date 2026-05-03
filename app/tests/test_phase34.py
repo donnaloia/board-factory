@@ -2,26 +2,23 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from sqlalchemy import select
 
 from storage.db import session_scope
-from storage.models.core import AssetVersionRecord, BoardCatalogRecord, BoardGameRecord
+from models.core import AssetVersionRecord, BoardGameRecord
 
 
-def test_catalog_migrates_yaml_to_db(isolated_repo, seeded_board, board_id):
+def test_catalog_persists_to_board_games(isolated_repo, seeded_board, board_id):
+    import json
+
     from services import catalog as svc_catalog
 
     data = svc_catalog.load_catalog(board_id)
     assert data.get("project") == "Test Board"
     with session_scope() as session:
-        row = session.get(BoardCatalogRecord, board_id)
-        assert row is not None
-        assert "Test Board" in row.body_json
         bg = session.get(BoardGameRecord, board_id)
         assert bg is not None
-        assert bg.project == "Test Board"
+        assert json.loads(bg.body_json)["project"] == "Test Board"
 
 
 def test_yaml_disk_edit_requires_explicit_sync(isolated_repo, seeded_board, board_id):
@@ -34,7 +31,7 @@ def test_yaml_disk_edit_requires_explicit_sync(isolated_repo, seeded_board, boar
     fs_yaml.save_yaml_atomic(fs_ws.catalog_path(board_id), dict(data))
 
     svc_catalog.load_catalog(board_id)
-    ypath = Path(isolated_repo) / "boards" / board_id / "catalog.yml"
+    ypath = fs_ws.catalog_path(board_id)
     text = ypath.read_text()
     ypath.write_text(text.replace("Test Board", "Renamed Board"))
     # Relational row is still canonical until we explicitly re-import the file.
@@ -44,18 +41,17 @@ def test_yaml_disk_edit_requires_explicit_sync(isolated_repo, seeded_board, boar
 
 
 def test_save_catalog_updates_db(isolated_repo, seeded_board, board_id):
+    import json
+
     from services import catalog as svc_catalog
 
     cat = svc_catalog.load_catalog(board_id)
     cat["project"] = "Saved Via DB"
     svc_catalog.save_catalog(board_id, cat)
     with session_scope() as session:
-        row = session.get(BoardCatalogRecord, board_id)
-        assert row is not None
-        assert "Saved Via DB" in row.body_json
         bg = session.get(BoardGameRecord, board_id)
         assert bg is not None
-        assert bg.project == "Saved Via DB"
+        assert json.loads(bg.body_json)["project"] == "Saved Via DB"
 
 
 def test_asset_index_counts_history_push(isolated_repo, seeded_board, board_id):
@@ -80,12 +76,12 @@ def test_asset_index_counts_history_push(isolated_repo, seeded_board, board_id):
         bf_assets._asset_db_listeners.clear()
 
 
-def test_promote_persists_asset_live_pointer(isolated_repo, seeded_board, board_id):
+def test_promote_copies_history_to_live(isolated_repo, seeded_board, board_id):
     from boardfactory import assets as bf_assets
     from boardfactory import config as bf_config
 
     from services import asset_index
-    from services.asset_live import get_live_rel_path
+    from storage.fs import workspace as fs_ws
 
     bf_assets.register_asset_db_listener(asset_index.on_asset_event)
     try:
@@ -99,28 +95,32 @@ def test_promote_persists_asset_live_pointer(isolated_repo, seeded_board, board_
             )
             bf_assets.promote("spaces", "slot-a", out.name)
             meta = bf_assets.read_meta("spaces", "slot-a", out.name)
-        rel = get_live_rel_path(board_id, "spaces", "slot-a")
-        assert rel == f"history/spaces/slot-a/{out.name}"
+        live = fs_ws.live_path(board_id, "spaces", "slot-a")
+        assert live.exists()
+        history = fs_ws.history_dir(board_id, "spaces", "slot-a") / out.name
+        assert live.read_bytes() == history.read_bytes()
         assert meta.get("prompt") == "hello"
     finally:
         bf_assets._asset_db_listeners.clear()
 
 
 def test_asset_backfill_inserts_rows(isolated_repo, seeded_board, board_id):
-    from boardfactory import assets as bf_assets
-    from boardfactory import config as bf_config
-
-    hist_root = Path(isolated_repo) / "boards" / board_id / "workspace" / "history" / "panels" / "p1"
-    hist_root.mkdir(parents=True, exist_ok=True)
-    png = hist_root / "9000000000000__001.png"
-    png.write_bytes(b"\x89PNG\r\n\x1a\n")
-
     from services import asset_index
+    from storage import board_store as bs
+    from storage.fs import workspace as fs_ws
+
+    bs.get_store().write_bytes(
+        board_id,
+        "workspace/history/panels/p1/9000000000000__001.png",
+        b"\x89PNG\r\n\x1a\n",
+    )
+    # Sanity: the path the backfill scans matches what the store wrote.
+    assert (fs_ws.history_dir(board_id, "panels", "p1") / "9000000000000__001.png").exists()
 
     asset_index.backfill_board(board_id)
     with session_scope() as session:
         q = select(AssetVersionRecord).where(
             AssetVersionRecord.board_id == board_id,
-            AssetVersionRecord.basename == png.name,
+            AssetVersionRecord.basename == "9000000000000__001.png",
         )
         assert session.scalars(q).first() is not None
