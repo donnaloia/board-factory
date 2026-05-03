@@ -64,6 +64,7 @@ services:
       - ./app/users.py:/app/users.py
       - ./app/pixellab_status.py:/app/pixellab_status.py
       # ORM, filesystem helpers, Alembic — mounted live for development.
+      - ./app/models:/app/models
       - ./app/storage:/app/storage
       - ./app/services:/app/services
       - ./app/migrations:/app/migrations
