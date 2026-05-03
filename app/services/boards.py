@@ -52,17 +52,20 @@ class BoardSummary:
 
     id: str
     project: str
+    path_slug: str
     has_catalog: bool
     has_mockup: bool
     has_palette: bool
 
 
 def _summary(info: bf_boards.BoardInfo) -> BoardSummary:
+    ps = board_own.path_slug_for_board(info.id) or info.id
     d = bd.load_catalog_dict(info.id)
     if d is not None:
         return BoardSummary(
             id=info.id,
             project=str(d.get("project") or info.id),
+            path_slug=ps,
             has_catalog=True,
             has_mockup=info.has_mockup,
             has_palette=fs_ws.has_palette(info.id),
@@ -70,6 +73,7 @@ def _summary(info: bf_boards.BoardInfo) -> BoardSummary:
     return BoardSummary(
         id=info.id,
         project=info.project,
+        path_slug=ps,
         has_catalog=info.has_catalog,
         has_mockup=info.has_mockup,
         has_palette=fs_ws.has_palette(info.id),
@@ -114,7 +118,9 @@ def create_board(board_id: str, *, owner_user_id: str, project_name: str | None 
     pname = project_name or board_id
     bf_boards.create_board(board_id, project_name=pname)
     bd.persist_catalog_dict(board_id, bf_boards.default_catalog_dict(board_id, pname))
-    board_own.link_board_to_user(board_id, owner_user_id)
+    with session_scope() as session:
+        ps = board_own.allocate_path_slug(session, owner_user_id, pname or board_id)
+    board_own.link_board_to_user(board_id, owner_user_id, path_slug=ps)
     info = bf_boards.get_board(board_id)
     assert info is not None
     return _summary(info)

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response
 
 from routes import deps
@@ -10,6 +12,8 @@ from storage import board_store as bs
 from storage.fs import workspace as fs_ws
 
 router = APIRouter()
+
+NestedBoardId = Annotated[str, Depends(deps.require_nested_board)]
 
 
 def _serve(board_id: str, rel: str, *, no_store: bool = False) -> Response:
@@ -32,8 +36,17 @@ def _serve(board_id: str, rel: str, *, no_store: bool = False) -> Response:
     return Response(content=store.read_bytes(board_id, rel), headers=headers)
 
 
+@router.get("/users/{username}/board-games/{path_slug}/asset/{rest:path}")
+def asset_nested(request: Request, board_id: NestedBoardId, rest: str):
+    try:
+        fs_ws.safe_workspace_relative(board_id, rest)
+    except fs_ws.PathTraversalError:
+        raise HTTPException(400, "Invalid path")
+    return _serve(board_id, f"workspace/{rest}", no_store=True)
+
+
 @router.get("/b/{board_id}/asset/{rest:path}")
-def asset(request: Request, board_id: str, rest: str):
+def asset_legacy(request: Request, board_id: str, rest: str):
     deps.ensure_owned_board(request, board_id)
     try:
         fs_ws.safe_workspace_relative(board_id, rest)
@@ -42,8 +55,15 @@ def asset(request: Request, board_id: str, rest: str):
     return _serve(board_id, f"workspace/{rest}", no_store=True)
 
 
+@router.get("/users/{username}/board-games/{path_slug}/mockup/{name}")
+def mockup_nested(request: Request, board_id: NestedBoardId, name: str):
+    if "/" in name or ".." in name or name.startswith("."):
+        raise HTTPException(400, "Invalid path")
+    return _serve(board_id, f"mockup/{name}")
+
+
 @router.get("/b/{board_id}/mockup/{name}")
-def mockup(request: Request, board_id: str, name: str):
+def mockup_legacy(request: Request, board_id: str, name: str):
     deps.ensure_owned_board(request, board_id)
     if "/" in name or ".." in name or name.startswith("."):
         raise HTTPException(400, "Invalid path")

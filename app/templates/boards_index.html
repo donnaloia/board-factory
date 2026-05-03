@@ -16,9 +16,9 @@
     {% if boards %}
     {% for b in boards %}
     <li class="board-card">
-      <a class="board-card-link" href="/b/{{ b.id }}/">
+      <a class="board-card-link" href="/users/{{ user.username }}/board-games/{{ b.path_slug }}/">
         <div class="board-card-thumb"
-             {% if b.has_mockup %}style="background-image:url('/b/{{ b.id }}/mockup/board.png')"{% endif %}>
+             {% if b.has_mockup %}style="background-image:url('/users/{{ user.username }}/board-games/{{ b.path_slug }}/mockup/board.png')"{% endif %}>
           {% if not b.has_mockup %}<span class="thumb-empty">no mockup</span>{% endif %}
         </div>
         <div class="board-card-meta">
@@ -45,6 +45,11 @@
 </section>
 
 <script>
+window.addEventListener("pageshow", function (ev) {
+  if (ev.persisted) {
+    location.reload();
+  }
+});
 (function () {
   const card = document.getElementById('new-board-card');
   const trigger = document.getElementById('new-board-trigger');

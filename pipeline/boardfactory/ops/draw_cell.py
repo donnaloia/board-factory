@@ -29,6 +29,12 @@ from PIL import Image
 from .. import assets, config, frames
 from ..geometry import crop_region, detect_native_scale, grid_snap
 from ..palette import load_palette, quantize_to_palette
+from ..prompt_roles import (
+    centerpiece_role_phrase,
+    compose_prompt,
+    panel_role_phrase,
+    space_role_phrase,
+)
 from ..providers import PixelArtProvider
 from ..providers.pixel.pixellab import png_bytes
 from ..schemas import Catalog
@@ -117,11 +123,13 @@ def spec_for_space(
     size = catalog.board_spaces.design_size(design)
     style_prefix = catalog.style.prompt + ". " if catalog.style.prompt else ""
     base = prompt_override if prompt_override else design.prompt
+    role = space_role_phrase(design.space_kind)
+    full_prompt = compose_prompt(style_prefix, role, base)
     style_ref, palette = _read_style_assets()
     return DrawSpec(
         category="spaces",
         asset_id=design.id,
-        prompt=style_prefix + base,
+        prompt=full_prompt,
         base_prompt=base,
         size=size,
         candidates=config.SPACE_CANDIDATES,
@@ -156,6 +164,8 @@ def spec_for_panel(
 
     style_prefix = catalog.style.prompt + ". " if catalog.style.prompt else ""
     base = prompt_override if prompt_override else panel.prompt
+    role = panel_role_phrase()
+    full_prompt = compose_prompt(style_prefix, role, base)
     _, palette = _read_style_assets()
     target_size = panel.target_size
 
@@ -181,7 +191,7 @@ def spec_for_panel(
         return DrawSpec(
             category="panels",
             asset_id=panel.id,
-            prompt=style_prefix + base,
+            prompt=full_prompt,
             base_prompt=base,
             size=target_size,
             candidates=config.PANEL_CANDIDATES,
@@ -203,7 +213,7 @@ def spec_for_panel(
     return DrawSpec(
         category="panels",
         asset_id=panel.id,
-        prompt=style_prefix + base,
+        prompt=full_prompt,
         base_prompt=base,
         size=target_size,
         candidates=config.PANEL_CANDIDATES,
@@ -233,6 +243,8 @@ def spec_for_centerpiece(
     cp = catalog.centerpiece
     style_prefix = catalog.style.prompt + ". " if catalog.style.prompt else ""
     base = prompt_override if prompt_override else cp.prompt
+    role = centerpiece_role_phrase()
+    full_prompt = compose_prompt(style_prefix, role, base)
     style_ref, palette = _read_style_assets()
     target_size = cp.target_size
 
@@ -240,7 +252,7 @@ def spec_for_centerpiece(
         return DrawSpec(
             category="centerpiece",
             asset_id="centerpiece",
-            prompt=style_prefix + base,
+            prompt=full_prompt,
             base_prompt=base,
             size=target_size,
             candidates=config.CENTERPIECE_CANDIDATES,
@@ -261,7 +273,7 @@ def spec_for_centerpiece(
     return DrawSpec(
         category="centerpiece",
         asset_id="centerpiece",
-        prompt=style_prefix + base,
+        prompt=full_prompt,
         base_prompt=base,
         size=target_size,
         candidates=config.CENTERPIECE_CANDIDATES,

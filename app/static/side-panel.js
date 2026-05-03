@@ -26,7 +26,8 @@
 
   // Per-board URL prefix — every API and action call is scoped under here.
   const BOARD_ID = wrap.getAttribute("data-board-id");
-  const BPATH = `/b/${BOARD_ID}`;
+  const BOARD_BASE = wrap.getAttribute("data-board-base");
+  const BPATH = BOARD_BASE && BOARD_BASE.length ? BOARD_BASE : `/b/${BOARD_ID}`;
 
   // Inline SVG spinner strokes — slightly muted vs pure white on dark boards.
   const SPINNER_STROKE_TRACK = "rgba(118, 128, 145, 0.26)";
@@ -254,6 +255,18 @@
           <dt>Size</dt><dd>${sizeStr} px</dd>
           <dt>Uses</dt><dd>${usesStr}</dd>
           <dt>Category</dt><dd>${data.category}</dd>
+          ${spec.kind === "space"
+            ? (() => {
+                const sk = spec.space_kind || "standard";
+                return `<dt>Space kind</dt><dd class="space-kind-dd">
+                  <select data-space-kind aria-label="Space kind">
+                    <option value="standard" ${sk === "event" ? "" : "selected"}>Standard track</option>
+                    <option value="event" ${sk === "event" ? "selected" : ""}>Event / special</option>
+                  </select>
+                  <p class="muted space-kind-hint">Framing for generation — applies to every board cell that uses this design.</p>
+                </dd>`;
+              })()
+            : ""}
         </dl>
       </div>
 
@@ -480,6 +493,33 @@
       revert?.addEventListener("click", () => {
         editor.value = editor.getAttribute("data-catalog") || "";
         refreshDirtyState();
+      });
+    }
+
+    // ─── Perimeter space kind (catalog) ───────────────────────────────
+    const spaceKindEl = panel.querySelector("[data-space-kind]");
+    if (spaceKindEl && current.category === "spaces") {
+      spaceKindEl.addEventListener("change", async () => {
+        const value = spaceKindEl.value;
+        spaceKindEl.disabled = true;
+        try {
+          const res = await fetch(
+            `${BPATH}/api/cell/${current.category}/${current.asset_id}`,
+            {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json", Accept: "application/json" },
+              body: JSON.stringify({ space_kind: value }),
+            },
+          );
+          if (!res.ok) {
+            alert("Could not save space kind: " + (await res.text()).slice(0, 200));
+          }
+        } catch (err) {
+          alert("Network error: " + err);
+        } finally {
+          spaceKindEl.disabled = false;
+          await refreshPanel();
+        }
       });
     }
 

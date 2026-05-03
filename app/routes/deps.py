@@ -13,6 +13,7 @@ from typing import Any, Callable
 import markdown as md
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from sqlalchemy import select
 
 import auth
 import cost_ledger
@@ -21,6 +22,8 @@ from boardfactory import boards as bf_boards
 from boardfactory import config as bf_config
 from boardfactory import frames as bf_frames
 from jobs import get_runner
+from models.core import OwnedBoardRecord, UserRecord
+from storage.db import session_scope
 from storage.fs import workspace as fs_ws
 
 from services import board_definition as bd
@@ -49,6 +52,72 @@ def board_on_disk_or_404(board_id: str) -> bf_boards.BoardInfo:
     if info is None:
         raise HTTPException(404, f"Unknown board {board_id!r}")
     return info
+
+
+def board_url_parts(board_id: str) -> tuple[str, str] | None:
+    """Return ``(username, path_slug)`` for canonical board URLs, or ``None``."""
+    with session_scope() as session:
+        ob = session.get(OwnedBoardRecord, board_id)
+        if ob is None:
+            return None
+        ur = session.get(UserRecord, ob.user_id)
+        if ur is None:
+            return None
+        return (ur.username, ob.path_slug)
+
+
+def board_http_prefix(board_id: str) -> str:
+    """URL prefix for board-scoped HTTP paths (nested REST shape when possible)."""
+    parts = board_url_parts(board_id)
+    if parts:
+        u, p = parts
+        return f"/users/{u}/board-games/{p}"
+    return f"/b/{board_id}"
+
+
+def canonical_board_base_path(board_id: str) -> str:
+    """``/users/<username>/board-games/<slug>`` without trailing slash."""
+    parts = board_url_parts(board_id)
+    if parts is None:
+        raise HTTPException(404, "Unknown board")
+    u, p = parts
+    return f"/users/{u}/board-games/{p}"
+
+
+def redirect_legacy_board_get(request: Request, board_id: str, rest: str = "") -> RedirectResponse:
+    """307 from ``/b/<id>/…`` to canonical ``/users/<username>/board-games/<slug>/…``."""
+    ensure_owned_board(request, board_id)
+    base = canonical_board_base_path(board_id)
+    tail = (rest or "").strip("/")
+    dest = f"{base}/{tail}" if tail else f"{base}/"
+    q = request.url.query
+    if q:
+        dest = f"{dest}?{q}"
+    return RedirectResponse(dest, status_code=307)
+
+
+def resolve_owned_board_path(request: Request, username: str, path_slug: str) -> str:
+    """Resolve nested URL segments to ``board_id``; enforce URL matches logged-in user."""
+    un = (username or "").strip().lower()
+    ps = (path_slug or "").strip().lower()
+    user = auth.require_user(request)
+    if user.username != un:
+        raise HTTPException(404, "Unknown board")
+    with session_scope() as session:
+        row = session.scalar(
+            select(OwnedBoardRecord).where(
+                OwnedBoardRecord.user_id == user.id,
+                OwnedBoardRecord.path_slug == ps,
+            )
+        )
+    if row is None:
+        raise HTTPException(404, "Unknown board")
+    return row.board_id
+
+
+def require_nested_board(request: Request, username: str, path_slug: str) -> str:
+    """``Depends`` target for ``/users/{username}/board-games/{path_slug}/…`` routes."""
+    return resolve_owned_board_path(request, username, path_slug)
 
 
 def ensure_owned_board(request: Request, board_id: str) -> bf_boards.BoardInfo:
@@ -92,8 +161,15 @@ def editorial_template_context(board_id: str | None, request: Request | None = N
             if info:
                 project = info.project
     user = getattr(request.state, "user", None) if request is not None else None
+    board_base = None
+    if board_id:
+        parts = board_url_parts(board_id)
+        if parts:
+            un, ps = parts
+            board_base = f"/users/{un}/board-games/{ps}"
     return {
         "board_id": board_id,
+        "board_base": board_base,
         "project": project,
         "has_palette": fs_ws.has_palette(board_id) if board_id else False,
         "cost": cost_ledger.summary(),
@@ -196,6 +272,7 @@ def candidates_per_regen_count(category: str) -> int:
 def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -> dict:
     """JSON state for one cell: spec + live url + history list (with prompts)."""
     catalog = load_board_catalog(board_id)
+    bpath = board_http_prefix(board_id)
 
     spec: dict = {}
     if category == "spaces":
@@ -218,6 +295,7 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
             "uses": len(d.get("positions", [])),
             "size": size,
             "kind": "space",
+            "space_kind": d.get("space_kind") or "standard",
         }
     elif category == "panels":
         panels = catalog.get("feature_panels", {}).get("panels", [])
@@ -262,7 +340,7 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
             "is_live": e.is_live,
             "operation": e.operation,
             "prompt": e.prompt,
-            "url": f"/b/{board_id}/asset/history/{category}/{asset_id}/{e.filename}",
+            "url": f"{bpath}/asset/history/{category}/{asset_id}/{e.filename}",
         }
         for e in entries
     ]
@@ -272,7 +350,7 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
     live_url = None
     if live.exists():
         live_url = (
-            f"/b/{board_id}/asset/{live.relative_to(ws).as_posix()}"
+            f"{bpath}/asset/{live.relative_to(ws).as_posix()}"
             f"?t={int(live.stat().st_mtime)}"
         )
 
@@ -318,7 +396,7 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
                         "label": p["id"].replace("_", " "),
                         "size": list(p["target_size"]),
                         "url": (
-                            f"/b/{board_id}/asset/"
+                            f"{bpath}/asset/"
                             f"{p_live.relative_to(ws).as_posix()}"
                             f"?t={int(p_live.stat().st_mtime)}"
                         ),
@@ -335,7 +413,7 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
                 "label": f"{asset_id.replace('_', ' ')} (from mockup)",
                 "size": spec["size"],
                 "url": (
-                    f"/b/{board_id}/api/frame/preview.png"
+                    f"{bpath}/api/frame/preview.png"
                     f"?source_kind=mockup&source_id={asset_id}"
                     f"&ring_px=8&w={spec['size'][0]}&h={spec['size'][1]}"
                 ),
@@ -355,9 +433,9 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
             "default_ring_px": default_ring,
             "min_ring_px": 2,
             "max_ring_px": max_ring,
-            "preview_endpoint": f"/b/{board_id}/api/frame/preview.png",
-            "adopt_endpoint": f"/b/{board_id}/api/frame/adopt",
-            "disable_endpoint": f"/b/{board_id}/api/frame/disable",
+            "preview_endpoint": f"{bpath}/api/frame/preview.png",
+            "adopt_endpoint": f"{bpath}/api/frame/adopt",
+            "disable_endpoint": f"{bpath}/api/frame/disable",
         }
 
     return {
@@ -374,7 +452,7 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
         "candidates_per_regen": candidates_per_regen_count(category),
         "frame_locked": frame_locked,
         "frame_url": (
-            f"/b/{board_id}/frame.png?w={spec['size'][0]}&h={spec['size'][1]}"
+            f"{bpath}/frame.png?w={spec['size'][0]}&h={spec['size'][1]}"
             if frame_locked and spec.get("size")
             else None
         ),

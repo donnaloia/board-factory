@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlalchemy as sa
 from sqlalchemy import BigInteger, ForeignKey, Float, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -11,6 +12,7 @@ class UserRecord(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True, index=True)
+    username: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
     icon_glyph: Mapped[str] = mapped_column(String(8), nullable=False)
@@ -66,6 +68,7 @@ class OwnedBoardRecord(Base):
     """Maps a board directory (slug) to exactly one owning user.
 
     ``user_id`` is required at the application layer and is ``NOT NULL`` in the database.
+    ``path_slug`` is the URL segment under ``/users/<username>/board-games/<path_slug>/``.
     """
 
     __tablename__ = "owned_boards"
@@ -77,7 +80,12 @@ class OwnedBoardRecord(Base):
         nullable=False,
         index=True,
     )
+    path_slug: Mapped[str] = mapped_column(String(128), nullable=False)
     created_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    __table_args__ = (
+        sa.UniqueConstraint("user_id", "path_slug", name="uq_owned_boards_user_path_slug"),
+    )
 
 
 class JobRunRecord(Base):

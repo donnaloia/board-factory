@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import time
 
-from sqlalchemy import func, select
-
 from boardfactory import boards as bf_boards
+from sqlalchemy import func, select
 
 from storage.db import session_scope
 from models.core import OwnedBoardRecord, UserRecord
@@ -30,17 +29,58 @@ def user_owns_board(user_id: str, board_id: str) -> bool:
         return row is not None and row.user_id == user_id
 
 
-def link_board_to_user(board_id: str, user_id: str) -> None:
+def allocate_path_slug(session, user_id: str, desired_hint: str) -> str:
+    """Return a ``path_slug`` unique for ``user_id`` (URL segment under board-games/)."""
+    base = bf_boards.slugify(desired_hint)
+    cand = base
+    n = 0
+    while True:
+        clash = session.scalar(
+            select(OwnedBoardRecord).where(
+                OwnedBoardRecord.user_id == user_id,
+                OwnedBoardRecord.path_slug == cand,
+            )
+        )
+        if clash is None:
+            return cand[:128]
+        n += 1
+        cand = f"{base}-{n}"[:128]
+
+
+def link_board_to_user(
+    board_id: str,
+    user_id: str,
+    *,
+    path_slug: str | None = None,
+) -> None:
     require_nonblank_user_id(user_id)
     with session_scope() as session:
         row = session.get(OwnedBoardRecord, board_id)
         if row is None:
+            ps = (
+                path_slug
+                if path_slug is not None
+                else allocate_path_slug(session, user_id, board_id)
+            )
             session.add(
-                OwnedBoardRecord(board_id=board_id, user_id=user_id, created_ms=_now_ms())
+                OwnedBoardRecord(
+                    board_id=board_id,
+                    user_id=user_id,
+                    path_slug=ps,
+                    created_ms=_now_ms(),
+                )
             )
         else:
             row.user_id = user_id
             row.created_ms = _now_ms()
+            if path_slug is not None:
+                row.path_slug = path_slug
+
+
+def path_slug_for_board(board_id: str) -> str | None:
+    with session_scope() as session:
+        row = session.get(OwnedBoardRecord, board_id)
+        return row.path_slug if row else None
 
 
 def list_board_ids_for_user(user_id: str) -> list[str]:
@@ -57,10 +97,12 @@ def assign_all_unowned_disk_boards_to_user(user_id: str) -> None:
     with session_scope() as session:
         for info in bf_boards.list_boards():
             if session.get(OwnedBoardRecord, info.id) is None:
+                ps = allocate_path_slug(session, user_id, info.id)
                 session.add(
                     OwnedBoardRecord(
                         board_id=info.id,
                         user_id=user_id,
+                        path_slug=ps,
                         created_ms=_now_ms(),
                     )
                 )

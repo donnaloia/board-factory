@@ -2,6 +2,7 @@
 {% block title %}Preview · {{ project }}{% endblock %}
 
 {% block content %}
+{% set bb = board_base if board_base else '/b/' ~ board_id %}
 <section class="preview-stage" data-reload-on="preview,export,states">
   <span class="eyebrow">Preview &amp; export</span>
   <h1 class="display">Composited board</h1>
@@ -20,21 +21,21 @@
   {% endif %}
 
   <div class="preview-actions">
-    <form method="post" action="/b/{{ board_id }}/actions/states" data-action>
+    <form method="post" action="{{ bb }}/actions/states" data-action>
       <button type="submit" class="editorial-action">
         <span class="arrow">→</span>
         <span>Build active states</span>
         <span class="est">free · ~10s</span>
       </button>
     </form>
-    <form method="post" action="/b/{{ board_id }}/actions/preview" data-action>
+    <form method="post" action="{{ bb }}/actions/preview" data-action>
       <button type="submit" class="editorial-action primary">
         <span class="arrow">→</span>
         <span>Composite preview</span>
         <span class="est">free · ~5s</span>
       </button>
     </form>
-    <form method="post" action="/b/{{ board_id }}/actions/export" data-action>
+    <form method="post" action="{{ bb }}/actions/export" data-action>
       <button type="submit" class="editorial-action">
         <span class="arrow">→</span>
         <span>Export approved assets</span>

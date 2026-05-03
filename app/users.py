@@ -21,6 +21,7 @@ import bcrypt
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as SASession
 
+from boardfactory import boards as bf_boards
 from storage.db import session_scope
 from storage.secret_crypto import decrypt_text, encrypt_text
 from models.core import UserRecord, UserSecretRecord
@@ -41,6 +42,7 @@ DEFAULT_COLOR = "#c8995b"
 class User:
     id: str
     email: str
+    username: str
     password_hash: str
     display_name: str
     icon_glyph: str = DEFAULT_GLYPH
@@ -64,6 +66,19 @@ class User:
         return d
 
 
+def _allocate_username(session: SASession, email: str) -> str:
+    local = (email or "").split("@")[0]
+    base = bf_boards.slugify(local)
+    if not base or base == "untitled":
+        base = "user"
+    cand = base
+    n = 0
+    while session.scalar(select(UserRecord).where(UserRecord.username == cand)):
+        n += 1
+        cand = f"{base}-{n}"[:64]
+    return cand
+
+
 def _secret_map(session: SASession, user_id: str) -> dict[str, str]:
     rows = session.scalars(
         select(UserSecretRecord).where(UserSecretRecord.user_id == user_id)
@@ -79,6 +94,7 @@ def _row_to_user(session: SASession, rec: UserRecord) -> User:
     return User(
         id=rec.id,
         email=rec.email,
+        username=rec.username,
         password_hash=rec.password_hash,
         display_name=rec.display_name,
         icon_glyph=rec.icon_glyph or DEFAULT_GLYPH,
@@ -125,6 +141,17 @@ def find_by_email(email: str) -> User | None:
         return _row_to_user(session, rec)
 
 
+def find_by_username(username: str) -> User | None:
+    u = (username or "").strip().lower()
+    if not u:
+        return None
+    with session_scope() as session:
+        rec = session.scalar(select(UserRecord).where(UserRecord.username == u))
+        if rec is None:
+            return None
+        return _row_to_user(session, rec)
+
+
 def find_by_id(user_id: str) -> User | None:
     if not user_id:
         return None
@@ -163,10 +190,12 @@ def create_first_user(*, email: str, password: str, display_name: str | None = N
         now_ms = int(time.time() * 1000)
         dn = (display_name or em.split("@")[0]).strip()
         with session_scope() as session:
+            uname = _allocate_username(session, em)
             session.add(
                 UserRecord(
                     id=uid,
                     email=em,
+                    username=uname,
                     password_hash=hash_password(password),
                     display_name=dn,
                     icon_glyph=DEFAULT_GLYPH,
@@ -243,6 +272,7 @@ def change_password(user_id: str, *, old: str, new: str) -> None:
         tmp = User(
             id=rec.id,
             email=rec.email,
+            username=rec.username,
             password_hash=rec.password_hash,
             display_name=rec.display_name,
         )

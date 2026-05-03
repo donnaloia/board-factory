@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 from board_svg import CellStatus
 
+from routes import deps
 from services import asset_index
 from storage import board_store as bs
 from storage.fs import workspace as fs_ws
@@ -64,7 +65,8 @@ def cell_status(board_id: str, category: str, asset_id: str) -> CellStatus:
         # the browser invalidate cached versions when promote rewrites.
         rel = live_rel.removeprefix("workspace/")
         ts_ms = store.stat(board_id, live_rel).mtime_ms // 1000
-        live_url = f"/b/{board_id}/asset/{rel}?t={ts_ms}"
+        bpath = deps.board_http_prefix(board_id)
+        live_url = f"{bpath}/asset/{rel}?t={ts_ms}"
 
     return CellStatus(
         asset_id=asset_id,

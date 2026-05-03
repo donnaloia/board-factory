@@ -1077,6 +1077,18 @@ h3 { font-family: var(--sans);  font-weight: 500; font-size: 11px; margin: 0 0 1
 }
 .cell-meta dt { color: var(--ink-3); }
 .cell-meta dd { margin: 0; color: var(--ink); }
+.cell-meta .space-kind-dd select {
+  display: block;
+  max-width: 100%;
+  margin: 0.15rem 0 0.35rem;
+  padding: 0.25rem 0.4rem;
+  font: inherit;
+}
+.cell-meta .space-kind-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
 
 /* Live preview at the top of the panel */
 .cell-live {
