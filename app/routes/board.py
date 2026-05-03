@@ -28,6 +28,7 @@ from services import boards as svc_boards
 from services import catalog as svc_catalog
 from services import cells as svc_cells
 from services import mockup_prompt as mockup_prompt_svc
+from storage import board_store as bs
 from storage.fs import workspace as fs_ws
 
 router = APIRouter()
@@ -78,7 +79,9 @@ def board_view(request: Request, board_id: str):
     frame_overlay_url = None
     frame_block = catalog.get("frame", {}) or {}
     if frame_block.get("enabled") and frame_block.get("apply_to_panels", True):
-        with bf_config.scope_board(board_id):
+        # Read-only check — use set_active_board so the home page never
+        # queues behind an in-flight pipeline job for the same board.
+        with bf_config.set_active_board(board_id):
             if bf_frames.has_house_frame():
                 frame_overlay_url = f"/b/{board_id}/frame.png"
 
@@ -143,7 +146,7 @@ async def action_upload_mockup(
     board_id: str,
     file: UploadFile = File(...),
 ):
-    """Accept a PNG/JPEG mockup upload and save it as boards/<id>/mockup/board.png.
+    """Accept a PNG/JPEG mockup upload and save it as <store-root>/<id>/mockup/board.png.
 
     Validates that the file is an image and checks the aspect ratio — a 16:9
     image (within 5% tolerance) is ideal but we accept anything and warn
@@ -171,11 +174,9 @@ async def action_upload_mockup(
     target = 16 / 9
     warn = abs(ratio - target) / target > 0.05
 
-    mockup_dir = fs_ws.board_root(board_id) / "mockup"
-    mockup_dir.mkdir(parents=True, exist_ok=True)
-    dest = mockup_dir / "board.png"
-
-    img.convert("RGB").save(dest, format="PNG")
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="PNG")
+    bs.get_store().write_bytes(board_id, "mockup/board.png", buf.getvalue())
 
     return JSONResponse({
         "ok": True,
@@ -293,10 +294,9 @@ async def action_generate_mockup(request: Request, board_id: str):
         img = img.crop((0, y0, src_w, y0 + new_h))
     img = img.resize((1920, 1080), Image.LANCZOS)
 
-    mockup_dir = fs_ws.board_root(board_id) / "mockup"
-    mockup_dir.mkdir(parents=True, exist_ok=True)
-    dest = mockup_dir / "board.png"
-    img.save(dest, format="PNG")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    bs.get_store().write_bytes(board_id, "mockup/board.png", buf.getvalue())
 
     return JSONResponse({
         "ok": True,
@@ -326,7 +326,7 @@ def spec_view(request: Request, board_id: str):
         "prose": prose,
         "cost": cost_ledger.summary(),
         "has_palette": fs_ws.has_palette(board_id),
-        "estimates": {"spaces": 0, "panels": 0, "centerpiece": 0, "refine": 0},
+        "estimates": {"spaces": 0, "panels": 0, "centerpiece": 0},
         "user": user.public_dict() if user else None,
     }
     return request.app.state.templates.TemplateResponse(request, "spec.html", ctx)
@@ -338,20 +338,27 @@ def frame_view(request: Request, board_id: str):
     deps.ensure_owned_board(request, board_id)
     catalog = deps.load_board_catalog(board_id)
 
-    with bf_config.scope_board(board_id):
+    # Read-only frame metadata for the setup page — set_active_board avoids
+    # blocking on the per-board write lock during long pipeline jobs.
+    with bf_config.set_active_board(board_id):
         has_frame = bf_frames.has_house_frame()
         meta = bf_frames.read_house_meta() if has_frame else None
 
     panels = catalog.get("feature_panels", {}).get("panels", [])
+    store = bs.get_store()
     candidates = []
     for p in panels:
-        live = fs_ws.live_path(board_id, "panels", p["id"])
-        if live.exists():
-            candidates.append({
-                "id": p["id"],
-                "size": [p["target_size"][0], p["target_size"][1]],
-                "url": f"/b/{board_id}/asset/{live.relative_to(fs_ws.workspace_dir(board_id)).as_posix()}?t={int(live.stat().st_mtime)}",
-            })
+        live_rel = fs_ws.live_rel("panels", p["id"])
+        if not store.exists(board_id, live_rel):
+            continue
+        ts_s = store.stat(board_id, live_rel).mtime_ms // 1000
+        # Asset route is rooted at /b/<id>/asset/<workspace-relative>.
+        url_rel = live_rel.removeprefix("workspace/")
+        candidates.append({
+            "id": p["id"],
+            "size": [p["target_size"][0], p["target_size"][1]],
+            "url": f"/b/{board_id}/asset/{url_rel}?t={ts_s}",
+        })
 
     ctx = deps.editorial_template_context(board_id, request)
     ctx.update({
@@ -368,7 +375,9 @@ def frame_view(request: Request, board_id: str):
 def frame_overlay(request: Request, board_id: str, w: int = 0, h: int = 0):
     """Compose the house frame at the requested size on demand. Cacheable."""
     deps.ensure_owned_board(request, board_id)
-    with bf_config.scope_board(board_id):
+    # Pure read of the house-frame slices; no writes. Use set_active_board
+    # so a pending pipeline job doesn't stall this overlay request.
+    with bf_config.set_active_board(board_id):
         loaded = bf_frames.load_house_frame()
     if loaded is None:
         raise HTTPException(404, "No house frame adopted on this board")
@@ -523,20 +532,20 @@ def api_frame_preview(request: Request, board_id: str, source_kind: str, source_
 @router.get("/b/{board_id}/preview", response_class=HTMLResponse)
 def preview_view(request: Request, board_id: str):
     deps.ensure_owned_board(request, board_id)
-    preview_path = fs_ws.workspace_dir(board_id) / "preview" / "board_preview.png"
-    export_dir = fs_ws.export_dir(board_id)
-    manifest_path = export_dir / "board_manifest.json"
-    exported_count = 0
-    if export_dir.exists():
-        exported_count = sum(1 for _ in export_dir.rglob("*.png"))
+    store = bs.get_store()
+    preview_rel = "workspace/preview/board_preview.png"
+    preview_present = store.exists(board_id, preview_rel)
+    preview_url = None
+    if preview_present:
+        ts_s = store.stat(board_id, preview_rel).mtime_ms // 1000
+        preview_url = f"/b/{board_id}/asset/preview/board_preview.png?t={ts_s}"
+    manifest_present = store.exists(board_id, "export/board_manifest.json")
+    exported_count = sum(1 for f in store.list(board_id, "export") if f.endswith(".png"))
     ctx = deps.editorial_template_context(board_id, request)
     ctx.update({
-        "preview_present": preview_path.exists(),
-        "preview_url": (
-            f"/b/{board_id}/asset/preview/board_preview.png?t={int(preview_path.stat().st_mtime)}"
-            if preview_path.exists() else None
-        ),
-        "manifest_present": manifest_path.exists(),
+        "preview_present": preview_present,
+        "preview_url": preview_url,
+        "manifest_present": manifest_present,
         "exported_count": exported_count,
     })
     return request.app.state.templates.TemplateResponse(request, "preview.html", ctx)
@@ -552,15 +561,17 @@ def device_preview_view(request: Request, board_id: str):
     leaving the browser.
     """
     deps.ensure_owned_board(request, board_id)
-    preview_dir = fs_ws.workspace_dir(board_id) / "preview"
-    idle_path = preview_dir / "board_idle.png"
-    active_path = preview_dir / "board_active.png"
+    store = bs.get_store()
 
-    def _asset_url(name: str, p: Path) -> str:
-        return f"/b/{board_id}/asset/preview/{name}?t={int(p.stat().st_mtime)}"
+    def _asset_url(name: str) -> str | None:
+        rel = f"workspace/preview/{name}"
+        if not store.exists(board_id, rel):
+            return None
+        ts_s = store.stat(board_id, rel).mtime_ms // 1000
+        return f"/b/{board_id}/asset/preview/{name}?t={ts_s}"
 
-    idle_url = _asset_url("board_idle.png", idle_path) if idle_path.exists() else None
-    active_url = _asset_url("board_active.png", active_path) if active_path.exists() else None
+    idle_url = _asset_url("board_idle.png")
+    active_url = _asset_url("board_active.png")
 
     catalog = deps.load_board_catalog(board_id)
     bw, bh = catalog.get("board_size", [1920, 1080])

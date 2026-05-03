@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import time
-from pathlib import Path
+from pathlib import PurePosixPath
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
+from storage import board_store as bs
 from storage.db import session_scope
-from storage.fs import workspace as fs_ws
-from storage.models.core import AssetVersionRecord
+from models.core import AssetVersionRecord
 
 
 def on_asset_event(kind: str, board_id: str, **kw: object) -> None:
@@ -89,36 +88,43 @@ def count_for_cell(board_id: str, category: str, asset_id: str) -> int:
 
 def backfill_board(board_id: str) -> int:
     """Scan ``workspace/history`` and insert missing index rows. Returns rows attempted."""
-    ws = fs_ws.workspace_dir(board_id)
-    hist = ws / "history"
-    if not hist.exists():
+    store = bs.get_store()
+    files = store.list(board_id, "workspace/history")
+    if not files:
         return 0
     attempted = 0
-    for png in hist.rglob("*.png"):
-        attempted += 1
-        try:
-            rel = png.relative_to(ws).as_posix()
-        except ValueError:
+    for full_rel in files:
+        if not full_rel.endswith(".png"):
             continue
-        parts = Path(rel).parts
+        attempted += 1
+        # full_rel is e.g. "workspace/history/spaces/foo/<basename>.png"
+        # Strip "workspace/" so the rel stored in the index matches the
+        # convention used by push_to_history (workspace-relative).
+        ws_rel = full_rel[len("workspace/"):]
+        parts = PurePosixPath(ws_rel).parts
         if len(parts) < 4 or parts[0] != "history":
             continue
         category, asset_id = parts[1], parts[2]
-        basename = png.name
+        basename = parts[-1]
         try:
-            raw = png.read_bytes()
+            raw = store.read_bytes(board_id, full_rel)
             digest = hashlib.sha256(raw).hexdigest()
-        except OSError:
+        except (OSError, FileNotFoundError):
             digest = None
-        ts_ms = int(png.stat().st_mtime * 1000)
-        meta_path = png.with_suffix(".meta.json")
-        mj = None
-        if meta_path.exists():
+        try:
+            ts_ms = store.stat(board_id, full_rel).mtime_ms
+        except (OSError, FileNotFoundError):
+            ts_ms = int(time.time() * 1000)
+        meta_rel = full_rel[: -len(".png")] + ".meta.json"
+        mj: str | None = None
+        if store.exists(board_id, meta_rel):
             try:
-                mj = meta_path.read_text()
-            except OSError:
+                mj = store.read_bytes(board_id, meta_rel).decode("utf-8")
+            except (OSError, UnicodeDecodeError):
                 mj = None
-        _insert_version_row(board_id, category, asset_id, basename, rel, ts_ms, digest, mj)
+        _insert_version_row(
+            board_id, category, asset_id, basename, ws_rel, ts_ms, digest, mj,
+        )
     return attempted
 
 

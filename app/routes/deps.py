@@ -66,13 +66,6 @@ def load_board_catalog(board_id: str) -> dict[str, Any]:
         raise HTTPException(404, f"Catalog not found for board {board_id!r}")
 
 
-def workspace_file_or_404(board_id: str, rel: str) -> Path:
-    try:
-        return fs_ws.safe_workspace_relative(board_id, rel)
-    except fs_ws.PathTraversalError:
-        raise HTTPException(400, "Invalid path")
-
-
 def accepts_json(request: Request) -> bool:
     accept = request.headers.get("accept", "")
     return "application/json" in accept
@@ -105,7 +98,7 @@ def editorial_template_context(board_id: str | None, request: Request | None = N
         "has_palette": fs_ws.has_palette(board_id) if board_id else False,
         "cost": cost_ledger.summary(),
         "estimates": pipeline_cost_estimates() if board_id
-        else {"spaces": 0, "panels": 0, "centerpiece": 0, "refine": 0},
+        else {"spaces": 0, "panels": 0, "centerpiece": 0},
         "user": user.public_dict() if user else None,
     }
 
@@ -115,7 +108,6 @@ def pipeline_cost_estimates() -> dict:
         "spaces": pipeline_adapters.estimate_generate("spaces"),
         "panels": pipeline_adapters.estimate_generate("panels"),
         "centerpiece": pipeline_adapters.estimate_generate("centerpiece"),
-        "refine": pipeline_adapters.estimate_refine(),
     }
 
 
@@ -135,6 +127,12 @@ def enqueue_pipeline_job(
 
 def scoped_pipeline_callable(board_id: str, fn: Callable) -> Callable:
     """Wrap ``fn`` so it executes inside ``config.scope_board(board_id)``.
+
+    ``scope_board`` takes the per-board write lock for the lifetime of the
+    job, serializing concurrent jobs that target the same board. Read-only
+    code paths (e.g. the side-panel ``/api/cell`` fetch) use
+    ``config.set_active_board`` instead so they never block on a job in
+    flight for the same board.
 
     Also materializes the persisted style-lock palette to disk before the
     pipeline reads it.
@@ -247,7 +245,11 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
     else:
         raise HTTPException(400, f"Unknown category {category}")
 
-    with bf_config.scope_board(board_id):
+    # Read-only history listing — set the thread-local active board without
+    # taking the per-board write lock. Otherwise this fetch would block on
+    # any in-flight pipeline job for the same board, freezing the side panel
+    # while a single space generates.
+    with bf_config.set_active_board(board_id):
         from boardfactory import assets as bf_assets
 
         entries = bf_assets.list_history(category, asset_id)
@@ -283,8 +285,8 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
         if e.prompt is not None:
             active_prompt = e.prompt
             break
-        # Cleanup / refine sometimes promote with no stored prompt; newest-first
-        # history still has the last generation prompt on the next row.
+        # Cleanup sometimes promotes with no stored prompt; newest-first history
+        # still has the last generation prompt on the next row.
         for e2 in entries:
             if e2.prompt is not None:
                 active_prompt = e2.prompt
@@ -297,7 +299,8 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
         and bool(frame_block.get("enabled"))
         and bool(frame_block.get("apply_to_panels", True))
     )
-    with bf_config.scope_board(board_id):
+    # Read-only frame metadata — same reasoning as the history block above.
+    with bf_config.set_active_board(board_id):
         frame_present = bf_frames.has_house_frame()
         frame_meta = bf_frames.read_house_meta() if frame_present else None
     frame_locked = frame_enabled_for_cell and frame_present and live.exists()

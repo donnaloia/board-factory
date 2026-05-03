@@ -37,9 +37,10 @@ def test_pipeline_module_loads_under_isolated_repo(isolated_repo):
 
 def test_seeded_board_creates_catalog(seeded_board, isolated_repo):
     from services import board_definition as bd
+    from storage import board_store as bs
 
     assert bd.load_catalog_dict(seeded_board.id) is not None
-    assert (isolated_repo / "boards" / seeded_board.id / "mockup" / "board.png").exists()
+    assert bs.get_store().exists(seeded_board.id, "mockup/board.png")
 
 
 def test_config_has_no_legacy_cli_path_attrs(isolated_repo):

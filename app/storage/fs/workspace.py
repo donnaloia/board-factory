@@ -1,17 +1,25 @@
-"""Filesystem layout for board workspaces.
+"""Filesystem layout for board workspaces — thin wrappers over ``BoardStore``.
 
-Single source of truth for every path under ``boards/<id>/``. Routes and the
-service layer import these helpers instead of duplicating path math.
+Single source of truth for every path under ``<board-store-root>/<id>/``.
+Routes and the service layer import these helpers instead of duplicating
+path math. Internally each helper resolves paths through the configured
+``BoardStore`` so the same code works against local disk today and an
+object store later.
 
 Two design rules:
 
 1. **No HTTP types.** Functions raise ``ValueError`` / ``FileNotFoundError``
    on misuse so this module can be reused from CLI / tests / pipeline
    without dragging FastAPI in.
-2. **Resolve env at call time.** ``BOARDFACTORY_REPO`` is read on every
-   call rather than cached at import, which makes tests that monkey-patch
-   the env behave correctly. (The pipeline package still caches ``REPO_ROOT``
-   at import for backward compatibility.)
+
+2. **Resolve store at call time.** The ``BoardStore`` singleton is fetched
+   on every call (cheap — ``get_store()`` returns a cached instance) so
+   tests that swap the store via ``override_store`` see the change
+   immediately, without touching every caller.
+
+The functions returning ``Path`` work only against the local backend; for
+true backend-agnostic operations use the byte methods on the store
+directly (``store.read_bytes``, ``store.write_bytes``, …).
 """
 
 from __future__ import annotations
@@ -20,6 +28,8 @@ import json
 import os
 from pathlib import Path
 
+from storage.board_store import BoardStore, LocalBoardStore, get_store
+
 # ────────────────────────── repo / boards roots ──────────────────────────
 
 
@@ -27,55 +37,84 @@ def repo_root() -> Path:
     return Path(os.environ.get("BOARDFACTORY_REPO", "/repo"))
 
 
+def _local_store() -> LocalBoardStore:
+    """Return the configured store, asserting it's the local backend.
+
+    Helpers that return ``Path`` only make sense for ``LocalBoardStore``.
+    The bytes-shaped operations on the store itself work for any backend.
+    """
+    store: BoardStore = get_store()
+    if not isinstance(store, LocalBoardStore):
+        raise RuntimeError(
+            "storage.fs.workspace path helpers require a LocalBoardStore "
+            f"backend; got {type(store).__name__}. Use the bytes API on "
+            "the store directly for backend-agnostic operations."
+        )
+    return store
+
+
 def boards_dir() -> Path:
-    return repo_root() / "boards"
+    return _local_store()._root  # type: ignore[attr-defined]
 
 
 def board_root(board_id: str) -> Path:
-    return boards_dir() / board_id
+    return _local_store().board_root(board_id)
 
 
 def export_dir(board_id: str) -> Path:
     """Engine-ready tiles + ``board_manifest.json`` from the Export pipeline step."""
-    return board_root(board_id) / "export"
+    return _local_store().local_path(board_id, "export")
 
 
 def catalog_path(board_id: str) -> Path:
-    return board_root(board_id) / "catalog.yml"
+    return _local_store().local_path(board_id, "catalog.yml")
 
 
 def workspace_dir(board_id: str) -> Path:
-    return board_root(board_id) / "workspace"
+    return _local_store().local_path(board_id, "workspace")
 
 
 def style_dir(board_id: str) -> Path:
-    return workspace_dir(board_id) / "style"
+    return _local_store().local_path(board_id, "workspace/style")
 
 
 def palette_json_path(board_id: str) -> Path:
-    return style_dir(board_id) / "palette.json"
+    return _local_store().local_path(board_id, "workspace/style/palette.json")
 
 
 def mockup_dir(board_id: str) -> Path:
-    return board_root(board_id) / "mockup"
+    return _local_store().local_path(board_id, "mockup")
 
 
 def default_mockup_path(board_id: str) -> Path:
-    return mockup_dir(board_id) / "board.png"
+    return _local_store().local_path(board_id, "mockup/board.png")
 
 
 # ────────────────────────── per-cell paths ──────────────────────────
 
 
-def live_path(board_id: str, category: str, asset_id: str) -> Path:
-    """Promoted PNG for one cell. Centerpiece has a fixed filename."""
+def live_rel(category: str, asset_id: str) -> str:
+    """Forward-slash rel-path of the promoted PNG for one cell.
+
+    Centerpiece has a fixed filename (the catalog only ever has one).
+    Backend-agnostic — usable with ``store.read_bytes(board_id, live_rel(...))``.
+    """
     if category == "centerpiece":
-        return workspace_dir(board_id) / "live" / "centerpiece" / "centerpiece.png"
-    return workspace_dir(board_id) / "live" / category / f"{asset_id}.png"
+        return "workspace/live/centerpiece/centerpiece.png"
+    return f"workspace/live/{category}/{asset_id}.png"
+
+
+def live_path(board_id: str, category: str, asset_id: str) -> Path:
+    """Promoted PNG for one cell. Local-only; for S3 use ``live_rel`` + the store."""
+    return _local_store().local_path(board_id, live_rel(category, asset_id))
+
+
+def history_rel(category: str, asset_id: str) -> str:
+    return f"workspace/history/{category}/{asset_id}"
 
 
 def history_dir(board_id: str, category: str, asset_id: str) -> Path:
-    return workspace_dir(board_id) / "history" / category / asset_id
+    return _local_store().local_path(board_id, history_rel(category, asset_id))
 
 
 # ────────────────────────── safe path resolution ──────────────────────────
@@ -102,15 +141,16 @@ def safe_workspace_relative(board_id: str, rel: str) -> Path:
 
 
 def has_palette(board_id: str) -> bool:
-    return palette_json_path(board_id).exists()
+    return get_store().exists(board_id, "workspace/style/palette.json")
 
 
 def read_palette(board_id: str) -> list[tuple[int, int, int]] | None:
     """Return the cleanup palette as a list of RGB tuples, or ``None`` if absent."""
-    p = palette_json_path(board_id)
-    if not p.exists():
+    store = get_store()
+    if not store.exists(board_id, "workspace/style/palette.json"):
         return None
-    return [tuple(c) for c in json.loads(p.read_text())]
+    raw = store.read_bytes(board_id, "workspace/style/palette.json")
+    return [tuple(c) for c in json.loads(raw.decode("utf-8"))]
 
 
 def resolve_mockup_path(board_id: str, catalog: dict | None) -> Path:
@@ -118,14 +158,10 @@ def resolve_mockup_path(board_id: str, catalog: dict | None) -> Path:
 
     Falls back to the default ``mockup/board.png`` when the catalog is
     missing or doesn't override the reference. Existence is *not* checked
-    here - callers decide how to handle a missing file.
+    here - callers decide how to handle a missing file. Local-only.
     """
-    rel = "mockup/board.png"
-    if isinstance(catalog, dict):
-        style = catalog.get("style") or {}
-        if isinstance(style, dict) and isinstance(style.get("reference_image"), str):
-            rel = style["reference_image"]
-    return board_root(board_id) / rel
+    rel = mockup_relpath(catalog)
+    return _local_store().local_path(board_id, rel)
 
 
 def mockup_relpath(catalog: dict | None) -> str:
@@ -142,6 +178,7 @@ def mockup_relpath(catalog: dict | None) -> str:
 
 
 def list_history_pngs(board_id: str, category: str, asset_id: str) -> list[Path]:
+    """Sorted list of history PNGs for one cell. Local-only."""
     d = history_dir(board_id, category, asset_id)
     if not d.exists():
         return []

@@ -25,7 +25,6 @@ stay inside the worker functions so web boot stays cheap.
 from __future__ import annotations
 
 import threading
-from typing import Callable
 
 import cost_ledger
 from jobs import Job, JobProgressSink, check_cancel, get_runner
@@ -156,10 +155,6 @@ def estimate_generate_all(
         estimate_generate_one("spaces") * missing_space_count
         + estimate_generate_one("panels") * missing_panel_count
     )
-
-
-def estimate_refine() -> float:
-    return 0.022  # one inpaint call
 
 
 # ────────────────────────── per-cell + style + cleanup ──────────────────────────
@@ -448,84 +443,3 @@ def export(job: Job, cancel: threading.Event) -> float:
     do_export(catalog, _sink(job))
     check_cancel(cancel)
     return 0.0
-
-
-# ────────────────────────── centerpiece masked refine ──────────────────────────
-
-
-def refine(
-    job: Job,
-    cancel: threading.Event,
-    *,
-    prompt_hint: str,
-    mask_b64: str,
-) -> float:
-    """One centerpiece masked-inpaint call against the current live centerpiece.
-
-    Writes the result into ``workspace/refinements/`` as
-    ``centerpiece_vNN.png``. Refinements are reviewed in their own gallery
-    and adopted manually — they are intentionally NOT auto-promoted to
-    live (a refine is a suggestion, not a commit).
-    """
-    import base64
-    import io
-
-    from PIL import Image
-
-    from boardfactory import assets as bf_assets, config
-
-    live = bf_assets.live_path("centerpiece", "centerpiece")
-    if not live.exists():
-        raise RuntimeError(
-            "No live centerpiece yet — generate one before refining."
-        )
-
-    catalog = _load_catalog()
-    check_cancel(cancel)
-
-    full_prompt = ". ".join(p for p in [
-        catalog.style.prompt,
-        catalog.centerpiece.prompt,
-        prompt_hint,
-    ] if p)
-
-    src_bytes = live.read_bytes()
-    mask_bytes = base64.b64decode(mask_b64.split(",", 1)[-1])
-
-    src_img = Image.open(io.BytesIO(src_bytes)).convert("RGBA")
-    mask = (
-        Image.open(io.BytesIO(mask_bytes))
-        .convert("L")
-        .resize(src_img.size, Image.NEAREST)
-    )
-    mask = mask.point(lambda v: 255 if v > 32 else 0)
-    mask_buf = io.BytesIO()
-    mask.save(mask_buf, format="PNG")
-    mask_bytes = mask_buf.getvalue()
-
-    check_cancel(cancel)
-    sink = _sink(job)
-    sink.start("refine centerpiece", total=1)
-    sink.log(f"hint: {prompt_hint or '(none)'}")
-
-    from boardfactory.providers.factory import get_provider
-    from storage.fs import workspace as fs_ws
-
-    bid = config.active_board()
-    palette = fs_ws.read_palette(bid) if bid else None
-    provider = get_provider(settings=catalog.generation)
-    out_images = provider.inpaint(
-        full_prompt, src_bytes, mask_bytes, n=1, palette=palette
-    )
-    result_bytes = out_images[0]
-
-    config.REFINEMENTS_DIR.mkdir(parents=True, exist_ok=True)
-    n = len(list(config.REFINEMENTS_DIR.glob("centerpiece_v*.png"))) + 1
-    out = config.REFINEMENTS_DIR / f"centerpiece_v{n:02d}.png"
-    out.write_bytes(result_bytes)
-    sink.step(out.name)
-    sink.log(f"wrote refinement: {out.name}")
-
-    cost = estimate_refine()
-    cost_ledger.record("refine.centerpiece", None, 1, cost)
-    return cost

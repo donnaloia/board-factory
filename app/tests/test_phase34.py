@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from sqlalchemy import select
 
 from storage.db import session_scope
-from storage.models.core import AssetVersionRecord, BoardGameRecord
+from models.core import AssetVersionRecord, BoardGameRecord
 
 
 def test_catalog_persists_to_board_games(isolated_repo, seeded_board, board_id):
@@ -33,7 +31,7 @@ def test_yaml_disk_edit_requires_explicit_sync(isolated_repo, seeded_board, boar
     fs_yaml.save_yaml_atomic(fs_ws.catalog_path(board_id), dict(data))
 
     svc_catalog.load_catalog(board_id)
-    ypath = Path(isolated_repo) / "boards" / board_id / "catalog.yml"
+    ypath = fs_ws.catalog_path(board_id)
     text = ypath.read_text()
     ypath.write_text(text.replace("Test Board", "Renamed Board"))
     # Relational row is still canonical until we explicitly re-import the file.
@@ -107,20 +105,22 @@ def test_promote_copies_history_to_live(isolated_repo, seeded_board, board_id):
 
 
 def test_asset_backfill_inserts_rows(isolated_repo, seeded_board, board_id):
-    from boardfactory import assets as bf_assets
-    from boardfactory import config as bf_config
-
-    hist_root = Path(isolated_repo) / "boards" / board_id / "workspace" / "history" / "panels" / "p1"
-    hist_root.mkdir(parents=True, exist_ok=True)
-    png = hist_root / "9000000000000__001.png"
-    png.write_bytes(b"\x89PNG\r\n\x1a\n")
-
     from services import asset_index
+    from storage import board_store as bs
+    from storage.fs import workspace as fs_ws
+
+    bs.get_store().write_bytes(
+        board_id,
+        "workspace/history/panels/p1/9000000000000__001.png",
+        b"\x89PNG\r\n\x1a\n",
+    )
+    # Sanity: the path the backfill scans matches what the store wrote.
+    assert (fs_ws.history_dir(board_id, "panels", "p1") / "9000000000000__001.png").exists()
 
     asset_index.backfill_board(board_id)
     with session_scope() as session:
         q = select(AssetVersionRecord).where(
             AssetVersionRecord.board_id == board_id,
-            AssetVersionRecord.basename == png.name,
+            AssetVersionRecord.basename == "9000000000000__001.png",
         )
         assert session.scalars(q).first() is not None

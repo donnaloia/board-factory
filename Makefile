@@ -38,10 +38,9 @@ rebuild:
 	docker compose build board-factory && docker compose up -d --force-recreate board-factory
 
 clean:
-	rm -rf boards/*/workspace/style/* \
-	       boards/*/workspace/refinements/* \
-	       boards/*/workspace/preview/* \
-	       boards/*/workspace/logs/*
+	rm -rf data/boards/*/workspace/style/* \
+	       data/boards/*/workspace/preview/* \
+	       data/boards/*/workspace/logs/*
 
 # Run once after editing docker-compose.yml with your API keys.
 protect-keys:

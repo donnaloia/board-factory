@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from board_svg import CellStatus
 
 from services import asset_index
+from storage import board_store as bs
 from storage.fs import workspace as fs_ws
 
 
@@ -23,7 +24,7 @@ from storage.fs import workspace as fs_ws
 
 def has_generated_asset(board_id: str, category: str, asset_id: str) -> bool:
     """Truthy when the cell has a live PNG."""
-    return fs_ws.live_path(board_id, category, asset_id).exists()
+    return bs.get_store().exists(board_id, fs_ws.live_rel(category, asset_id))
 
 
 def missing_space_ids(board_id: str, catalog: dict) -> list[str]:
@@ -47,8 +48,9 @@ def missing_panel_ids(board_id: str, catalog: dict) -> list[str]:
 
 def cell_status(board_id: str, category: str, asset_id: str) -> CellStatus:
     """Status for one cell — live PNG presence, history count, asset URL."""
-    live = fs_ws.live_path(board_id, category, asset_id)
-    is_live = live.exists()
+    store = bs.get_store()
+    live_rel = fs_ws.live_rel(category, asset_id)
+    is_live = store.exists(board_id, live_rel)
 
     history_pngs = fs_ws.list_history_pngs(board_id, category, asset_id)
     fs_count = len(history_pngs)
@@ -57,8 +59,12 @@ def cell_status(board_id: str, category: str, asset_id: str) -> CellStatus:
 
     live_url = None
     if is_live:
-        rel = live.relative_to(fs_ws.workspace_dir(board_id))
-        live_url = f"/b/{board_id}/asset/{rel.as_posix()}?t={int(live.stat().st_mtime)}"
+        # Strip the leading "workspace/" so it matches the existing
+        # /b/<id>/asset/<workspace-relative> route. ``?t=<mtime>`` lets
+        # the browser invalidate cached versions when promote rewrites.
+        rel = live_rel.removeprefix("workspace/")
+        ts_ms = store.stat(board_id, live_rel).mtime_ms // 1000
+        live_url = f"/b/{board_id}/asset/{rel}?t={ts_ms}"
 
     return CellStatus(
         asset_id=asset_id,

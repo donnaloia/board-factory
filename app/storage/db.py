@@ -14,7 +14,7 @@ Notes:
 * **Single process-wide engine**, lazy-init. Tests use ``override_database_url``.
 * **SQLite:** foreign keys ON, WAL journal mode, ``check_same_thread=False``
   for FastAPI’s thread pool.
-* ORM models live in ``storage/models/``; import ``storage.db`` for the engine.
+* ORM models live in ``app/models/``; import ``storage.db`` for the engine.
 """
 
 from __future__ import annotations

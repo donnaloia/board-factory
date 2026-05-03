@@ -18,7 +18,7 @@ from typing import Any
 from boardfactory.schemas import Catalog
 
 from storage.db import session_scope
-from storage.models.core import BoardGameRecord
+from models.core import BoardGameRecord
 
 
 def _now_ms() -> int:

@@ -110,7 +110,7 @@ def test_space_kind_persists_on_space_design(seeded_board):
 
 
 def test_safe_load_catalog_seeds_default_for_disk_board_without_db(isolated_repo, test_user):
-    """Simulates Postgres wiped while ``boards/<id>/`` remains (no catalog.yml)."""
+    """Simulates Postgres wiped while the per-board data dir remains (no catalog.yml)."""
     from boardfactory import boards as bf_boards
 
     from services import board_definition as bd

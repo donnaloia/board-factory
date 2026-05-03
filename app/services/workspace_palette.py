@@ -4,25 +4,28 @@ from __future__ import annotations
 
 import time
 
+from storage import board_store as bs
 from storage.db import session_scope
-from storage.fs import workspace as fs_ws
-from storage.models.core import BoardGameRecord
+from models.core import BoardGameRecord
+
+
+_PALETTE_JSON_REL = "workspace/style/palette.json"
+_PALETTE_GPL_REL = "workspace/style/palette.gpl"
 
 
 def persist_palette_from_style_dir(board_id: str) -> None:
     """Read ``workspace/style/palette.{json,gpl}`` into the relational row."""
-    pj = fs_ws.palette_json_path(board_id)
-    gpl = fs_ws.style_dir(board_id) / "palette.gpl"
-    if not pj.exists():
+    store = bs.get_store()
+    if not store.exists(board_id, _PALETTE_JSON_REL):
         return
     try:
-        jtext = pj.read_text()
+        jtext = store.read_bytes(board_id, _PALETTE_JSON_REL).decode("utf-8")
     except OSError:
         return
-    gpl_text = None
-    if gpl.exists():
+    gpl_text: str | None = None
+    if store.exists(board_id, _PALETTE_GPL_REL):
         try:
-            gpl_text = gpl.read_text()
+            gpl_text = store.read_bytes(board_id, _PALETTE_GPL_REL).decode("utf-8")
         except OSError:
             gpl_text = None
     stamp = int(time.time() * 1000)
@@ -43,18 +46,16 @@ def materialize_palette_to_disk(board_id: str) -> bool:
             return False
         jtext = row.palette_json
         gpl_text = row.palette_gpl_text
-    style = fs_ws.style_dir(board_id)
-    style.mkdir(parents=True, exist_ok=True)
-    fs_ws.palette_json_path(board_id).write_text(jtext)
+    store = bs.get_store()
+    store.write_bytes(board_id, _PALETTE_JSON_REL, jtext.encode("utf-8"))
     if gpl_text:
-        (fs_ws.style_dir(board_id) / "palette.gpl").write_text(gpl_text)
+        store.write_bytes(board_id, _PALETTE_GPL_REL, gpl_text.encode("utf-8"))
     return True
 
 
 def migrate_palette_from_disk_for_board(board_id: str) -> bool:
     """One-shot: copy on-disk palette into DB when the row has no palette yet."""
-    pj = fs_ws.palette_json_path(board_id)
-    if not pj.exists():
+    if not bs.get_store().exists(board_id, _PALETTE_JSON_REL):
         return False
     with session_scope() as session:
         row = session.get(BoardGameRecord, board_id)

@@ -1,16 +1,17 @@
 """Catalog use cases — relational DB as source of truth.
 
-``board_games`` (+ child tables) hold the canonical board spec. The pipeline
-loads a ``Catalog`` model from this layer via ``app.pipeline_adapters`` (no
-``catalog.yml`` required at runtime).
+The catalog spec is a single Pydantic-validated JSON blob in
+``board_games.body_json`` (see ``services.board_definition``). The pipeline
+loads a ``Catalog`` model from that blob via ``app.pipeline_adapters``; no
+``catalog.yml`` is required at runtime.
 
-Optional ``boards/<id>/catalog.yml`` on disk is still **imported once** when
-present and the relational row is missing (legacy checkouts). Use
+Optional ``<store-root>/<id>/catalog.yml`` on disk is still **imported once**
+when present and the relational row is missing (legacy checkouts). Use
 ``sync_disk_yaml_into_relational`` after editing that file by hand.
 
 If the board directory exists (pipeline ``get_board``) but there is still no
-catalog in the DB or YAML — e.g. Postgres was recreated while ``boards/`` was
-left on disk — we **seed the standard template** via
+catalog in the DB or YAML — e.g. Postgres was recreated while the data tree
+was left on disk — we **seed the standard template** via
 ``boardfactory.boards.default_catalog_dict`` once so the UI can load again.
 
 Public surface:

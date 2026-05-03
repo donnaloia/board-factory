@@ -1,12 +1,14 @@
 """Multi-board registry — list, create boards on disk.
 
-Each board is a self-contained directory under ``boards/``. The id is the
-directory name (slug). The human-readable **project** title and full catalog
-spec live in the application database (see ``app.services.board_definition``);
+Each board is a self-contained directory under the configured per-board
+data root (``data/boards/`` by default; see ``boardfactory.config`` and
+the app's ``BoardStore``). The id is the directory name (slug). The
+human-readable **project** title and full catalog spec live in the
+application database (see ``app.services.board_definition``);
 ``catalog.yml`` under each board is optional legacy-only.
 
-The pipeline receives catalog data via ``Catalog`` objects built from that DB
-layer (``app.pipeline_adapters``), not by reading YAML on every run.
+The pipeline receives catalog data via ``Catalog`` objects built from that
+DB layer (``app.pipeline_adapters``), not by reading YAML on every run.
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from . import config
 class BoardInfo:
     id: str                # slug, e.g. "damnation"
     project: str           # display name when known (legacy: from catalog.yml on disk)
-    catalog_path: Path     # boards/<id>/catalog.yml (legacy path; may be absent)
+    catalog_path: Path     # <store-root>/<id>/catalog.yml (legacy; may be absent)
     has_catalog: bool      # True only if legacy catalog.yml exists on disk
     has_mockup: bool
 

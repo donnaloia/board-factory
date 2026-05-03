@@ -12,7 +12,7 @@ from threading import Lock
 from sqlalchemy import select
 
 from storage.db import session_scope
-from storage.models.core import CostEntryRecord
+from models.core import CostEntryRecord
 
 
 _lock = Lock()

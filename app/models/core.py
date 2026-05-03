@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import BigInteger, ForeignKey, Float, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from storage.models.base import Base
+from models.base import Base
 
 
 class UserRecord(Base):

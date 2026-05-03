@@ -65,8 +65,6 @@ def _notify_asset_db(kind: str, **kwargs: Any) -> None:
 # and to decide whether to restore the prompt.
 OP_REGEN = "regen"          # provider call with a prompt
 OP_CLEAN = "clean"          # palette quantize + grid snap of the live image
-OP_REFINE = "refine"        # masked inpaint
-OP_LEGACY = "legacy"        # migrated from the classic approved/ flow
 
 
 # ────────────────────────── path helpers ──────────────────────────
@@ -205,8 +203,8 @@ class HistoryEntry:
     timestamp_ms: int       # parsed from filename
     seq: int                # parsed from filename
     is_live: bool           # bytes match the current live file
-    operation: str          # OP_REGEN | OP_CLEAN | OP_REFINE | OP_LEGACY
-    prompt: str | None      # the prompt used (None for clean / refine)
+    operation: str          # OP_REGEN | OP_CLEAN
+    prompt: str | None      # the prompt used (None for clean)
 
 
 def list_history(category: str, asset_id: str) -> list[HistoryEntry]:
@@ -244,7 +242,7 @@ def list_history(category: str, asset_id: str) -> list[HistoryEntry]:
             timestamp_ms=ts_ms,
             seq=seq,
             is_live=is_live,
-            operation=meta.get("operation", OP_LEGACY),
+            operation=meta.get("operation", OP_REGEN),
             prompt=meta.get("prompt"),
         ))
     entries.sort(key=lambda e: (e.timestamp_ms, e.seq), reverse=True)

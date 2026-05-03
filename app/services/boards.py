@@ -12,7 +12,6 @@ Errors:
 
 from __future__ import annotations
 
-import shutil
 from dataclasses import dataclass
 
 from boardfactory import boards as bf_boards
@@ -21,9 +20,10 @@ from sqlalchemy import delete
 from services import board_definition as bd
 from services import board_ownership as board_own
 from services import catalog as svc_catalog
+from storage import board_store as bs
 from storage.db import session_scope
 from storage.fs import workspace as fs_ws
-from storage.models.core import (
+from models.core import (
     AssetVersionRecord,
     BoardGameRecord,
     OwnedBoardRecord,
@@ -121,8 +121,8 @@ def create_board(board_id: str, *, owner_user_id: str, project_name: str | None 
 
 
 def delete_board(user_id: str, board_id: str) -> None:
-    """Remove a board's Postgres rows (spec, asset index, ownership) and delete
-    ``boards/<id>/`` from disk when present.
+    """Remove a board's relational rows (spec, asset index, ownership) and
+    delete its data tree from the configured ``BoardStore``.
     """
     if not bf_boards.is_valid_id(board_id):
         raise InvalidBoardId(board_id)
@@ -136,9 +136,7 @@ def delete_board(user_id: str, board_id: str) -> None:
         session.execute(delete(OwnedBoardRecord).where(OwnedBoardRecord.board_id == board_id))
         session.execute(delete(BoardGameRecord).where(BoardGameRecord.board_id == board_id))
 
-    root = fs_ws.board_root(board_id)
-    if root.exists():
-        shutil.rmtree(root)
+    bs.get_store().delete_board(board_id)
 
 
 def rename_board(user_id: str, board_id: str, project_name: str) -> BoardSummary:
@@ -165,4 +163,4 @@ def mockup_present(board_id: str) -> tuple[bool, str]:
     if catalog is None:
         return (False, "mockup/board.png")
     rel = fs_ws.mockup_relpath(catalog)
-    return ((fs_ws.board_root(board_id) / rel).exists(), rel)
+    return (bs.get_store().exists(board_id, rel), rel)

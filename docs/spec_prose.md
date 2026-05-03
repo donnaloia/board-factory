@@ -2,9 +2,9 @@
 
 ## intro
 
-This document is the source of truth for the damnation board's geometry — every coordinate, dimension, and tile classification used by the Board Factory pipeline. The pipeline reads `boards/damnation/catalog.yml` and uses these dimensions for every step: style lock, generation, cleanup, composition, and export.
+This document is the source of truth for the damnation board's geometry — every coordinate, dimension, and tile classification used by the Board Factory pipeline. The pipeline reads the damnation board's **catalog row** from the database (`board_games.body_json`) and uses these dimensions for every step: style lock, generation, cleanup, composition, and export. A legacy `data/boards/damnation/catalog.yml` on disk is still imported once when the DB row is missing.
 
-**The catalog *is* the spec.** Every diagram, table, and number on this page is generated live from that catalog file. If you want to change the board, edit the catalog — this page will update automatically. There is no longer a way for the docs to drift.
+**The catalog *is* the spec.** Every diagram, table, and number on this page is generated live from the catalog. If you want to change the board, edit it in the web UI (or, for legacy clones, in the YAML and re-run the importer) — this page will update automatically. There is no longer a way for the docs to drift.
 
 ## battle-tiles
 
@@ -32,7 +32,7 @@ The mockup file (`mockup/board.png`) is a **stylistic reference**, not the dimen
 
 ### Coordinate spaces
 
-Every bbox in `boards/damnation/catalog.yml` lives in **canvas coordinates** (0–1920 × 0–1080). When the pipeline crops a reference region from the mockup for **panel** img2img conditioning, it reads the mockup file's actual dimensions at runtime and scales each bbox into the mockup's coordinate space using `canvas_to_mockup` in `geometry.py`. Both axes scale independently.
+Every bbox in the damnation catalog body lives in **canvas coordinates** (0–1920 × 0–1080). When the pipeline crops a reference region from the mockup for **panel** img2img conditioning, it reads the mockup file's actual dimensions at runtime and scales each bbox into the mockup's coordinate space using `canvas_to_mockup` in `geometry.py`. Both axes scale independently.
 
 Result: the same catalog works whether the mockup is 1024 × 583, 1920 × 1080, 1500 × 844, or anything in between, with no manual adjustment.
 

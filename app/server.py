@@ -1,6 +1,6 @@
 """Board Factory web application — multi-board operating room.
 
-Boards live at boards/<id>/ on disk, each with its own catalog, workspace,
+Boards live under data/boards/<id>/ on disk (resolved through the BoardStore),
 mockup, and exports. URLs are scoped: /b/<board_id>/... for everything
 board-specific. The root / is a board picker.
 

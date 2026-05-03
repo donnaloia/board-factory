@@ -24,7 +24,7 @@ This document describes the **inexpensive single-server** option discussed for B
 | Service / concern | What it is on this plan | Sizing (ballpark) | Est. cost (USD) |
 |-------------------|-------------------------|-------------------|-----------------|
 | **Compute (VPS)** | Single **Linux** VM: Docker engine runs **two** containers (app + Postgres) | **1–2 vCPU**, **2 GB RAM** (1 GB is possible if bursts are light; 2 GB is a safer default for Pillow + PG) | **~$8–$24 / month** (varies by provider and exact size) |
-| **Block / disk** | OS disk + **Postgres data** + **repo / board assets** (`boards/`, `workspace/`, etc.) on the same host | Budget **20–50 GB** initially; grow as assets grow | **~$2–$8 / month** (often bundled GB in the VPS plan; extra volumes priced per GB) |
+| **Block / disk** | OS disk + **Postgres data** + **repo / board assets** (`data/boards/`, etc.) on the same host | Budget **20–50 GB** initially; grow as assets grow | **~$2–$8 / month** (often bundled GB in the VPS plan; extra volumes priced per GB) |
 | **Egress** | Outbound traffic (HTML, PNGs, API responses to browsers) | Usually within **1 TB** included on many VPS plans | **$0** in bundle; **overage ~$0.01/GB** if applicable |
 | **PostgreSQL** | **Container** on the **same VM** as the app; **not** a separate cloud database SKU | Small instance; tune later if needed | **$0** extra platform fee (included in the VM) |
 | **Web application** | **Container**: FastAPI + uvicorn + pipeline library | Shares CPU/RAM with Postgres on the one VM | **$0** extra (same VM) |
