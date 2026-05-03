@@ -40,6 +40,7 @@ COPY app/pixellab_status.py    /app/
 COPY app/templates             /app/templates
 COPY app/static                /app/static
 
+COPY app/models                /app/models
 COPY app/storage               /app/storage
 COPY app/services              /app/services
 COPY app/migrations            /app/migrations
