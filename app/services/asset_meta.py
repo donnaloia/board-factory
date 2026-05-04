@@ -15,7 +15,7 @@ def read_meta_from_db(board_id: str, category: str, asset_id: str, history_filen
     with session_scope() as session:
         row = session.scalar(
             select(AssetVersionRecord).where(
-                AssetVersionRecord.board_id == board_id,
+                AssetVersionRecord.board_uuid == board_id,
                 AssetVersionRecord.rel_path == rel,
             )
         )

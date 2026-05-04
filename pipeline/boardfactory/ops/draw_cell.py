@@ -132,7 +132,7 @@ def spec_for_space(
         prompt=full_prompt,
         base_prompt=base,
         size=size,
-        candidates=config.SPACE_CANDIDATES,
+        candidates=config.space_candidates(),
         mode="txt2img",
         palette=palette,
         style_reference=style_ref,
@@ -194,7 +194,7 @@ def spec_for_panel(
             prompt=full_prompt,
             base_prompt=base,
             size=target_size,
-            candidates=config.PANEL_CANDIDATES,
+            candidates=config.panel_candidates(),
             mode="inpaint",
             palette=palette,
             style_reference=None,
@@ -216,7 +216,7 @@ def spec_for_panel(
         prompt=full_prompt,
         base_prompt=base,
         size=target_size,
-        candidates=config.PANEL_CANDIDATES,
+        candidates=config.panel_candidates(),
         mode="img2img",
         palette=palette,
         style_reference=None,
@@ -255,7 +255,7 @@ def spec_for_centerpiece(
             prompt=full_prompt,
             base_prompt=base,
             size=target_size,
-            candidates=config.CENTERPIECE_CANDIDATES,
+            candidates=config.centerpiece_candidates(),
             mode="txt2img",
             palette=palette,
             style_reference=style_ref,
@@ -276,7 +276,7 @@ def spec_for_centerpiece(
         prompt=full_prompt,
         base_prompt=base,
         size=target_size,
-        candidates=config.CENTERPIECE_CANDIDATES,
+        candidates=config.centerpiece_candidates(),
         mode="img2img",
         palette=palette,
         style_reference=None,
@@ -329,8 +329,6 @@ def draw_cell(
         f"provider={provider.name})"
     )
 
-    estimated = provider.cost_estimate(spec.size, spec.candidates)
-
     try:
         raws = _provider_call(spec, provider)
     except Exception as e:
@@ -338,6 +336,9 @@ def draw_cell(
         return DrawResult(
             spec=spec, history_filenames=[], promoted_filename=None, spent_usd=0.0,
         )
+
+    # Bill from images actually produced (providers may batch internally or cap per HTTP call).
+    spent_usd = provider.cost_estimate(spec.size, len(raws))
 
     new_basenames: list[str] = []
     extras = {
@@ -366,7 +367,7 @@ def draw_cell(
         spec=spec,
         history_filenames=new_basenames,
         promoted_filename=promoted,
-        spent_usd=estimated,
+        spent_usd=spent_usd,
     )
 
 

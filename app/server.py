@@ -91,6 +91,11 @@ def _configure_observability_logging() -> None:
 @app.on_event("startup")
 def startup() -> None:
     _configure_observability_logging()
+    from boardfactory import config as bf_config  # noqa: PLC0415
+    from services import board_paths as bp  # noqa: PLC0415
+
+    bf_config.set_board_root_resolver(bp.store_board_root)
+
     from storage import bootstrap  # noqa: PLC0415
 
     bootstrap.apply()

@@ -109,21 +109,21 @@ def test_space_kind_persists_on_space_design(seeded_board):
     assert corner2["space_kind"] == "event"
 
 
-def test_safe_load_catalog_seeds_default_for_disk_board_without_db(isolated_repo, test_user):
-    """Simulates Postgres wiped while the per-board data dir remains (no catalog.yml)."""
+def test_safe_load_catalog_seeds_default_for_disk_board_without_db(isolated_repo):
+    """Simulates DB wiped while the per-board data dir remains (no catalog.yml)."""
+    import uuid as uuid_mod
+
     from boardfactory import boards as bf_boards
 
     from services import board_definition as bd
-    from services import board_ownership as bo
     from services import catalog as svc_catalog
 
-    bid = "disk-only-board"
-    bf_boards.create_board(bid, project_name="IgnoredTitle")
-    bo.link_board_to_user(bid, test_user.id)
-    assert bd.load_catalog_dict(bid) is None
+    bu = str(uuid_mod.uuid4())
+    bf_boards.create_board(bu, project_name="IgnoredTitle")
+    assert bd.load_catalog_dict(bu) is None
 
-    data = svc_catalog.safe_load_catalog(bid)
+    data = svc_catalog.safe_load_catalog(bu)
     assert data is not None
-    assert data["project"] == bid
+    assert data["project"] == bu
     assert any(d["id"] == "corner_tl" for d in data["board_spaces"]["designs"])
-    assert bd.load_catalog_dict(bid) is not None
+    assert bd.load_catalog_dict(bu) is not None

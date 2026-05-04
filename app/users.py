@@ -5,6 +5,10 @@ encrypted at rest via Fernet (see ``storage.secret_crypto``). A default dev
 admin is inserted by Alembic migration ``0007_seed_dev_admin_user`` when the
 ``users`` table is empty (see README “Fresh clone”).
 
+Use :func:`register_user` for normal sign-up (any time). :func:`create_first_user`
+is only for the empty-DB setup path and tests; it refuses when a user already
+exists.
+
 PUBLIC_API unchanged for callers: ``User`` dataclass, ``find_by_email``, etc.
 """
 
@@ -177,15 +181,21 @@ def hash_password(plaintext: str) -> str:
     return bcrypt.hashpw(plaintext.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
-def create_first_user(*, email: str, password: str, display_name: str | None = None) -> User:
+def register_user(*, email: str, password: str, display_name: str | None = None) -> User:
+    """Create a new account if the email is not already registered.
+
+    Used by ``POST /register`` for ongoing sign-up. Idempotent rules: one row
+    per email; usernames are allocated uniquely from the email local-part.
+    """
     em = (email or "").strip().lower()
     if not _EMAIL_RE.match(em):
         raise ValueError("Invalid email address")
     if not password or len(password) < 8:
         raise ValueError("Password must be at least 8 characters")
     with _lock:
-        if not is_setup_required():
-            raise ValueError("Registration is closed — an account already exists.")
+        with session_scope() as session:
+            if session.scalar(select(UserRecord).where(UserRecord.email == em)):
+                raise ValueError("An account with this email already exists.")
         uid = uuid.uuid4().hex
         now_ms = int(time.time() * 1000)
         dn = (display_name or em.split("@")[0]).strip()
@@ -207,6 +217,14 @@ def create_first_user(*, email: str, password: str, display_name: str | None = N
         u = find_by_id(uid)
         assert u is not None
         return u
+
+
+def create_first_user(*, email: str, password: str, display_name: str | None = None) -> User:
+    """Only when the database has zero users (initial setup / tests)."""
+    with _lock:
+        if not is_setup_required():
+            raise ValueError("Registration is closed — an account already exists.")
+    return register_user(email=email, password=password, display_name=display_name)
 
 
 def update_profile(

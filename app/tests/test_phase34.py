@@ -120,7 +120,7 @@ def test_asset_backfill_inserts_rows(isolated_repo, seeded_board, board_id):
     asset_index.backfill_board(board_id)
     with session_scope() as session:
         q = select(AssetVersionRecord).where(
-            AssetVersionRecord.board_id == board_id,
+            AssetVersionRecord.board_uuid == board_id,
             AssetVersionRecord.basename == "9000000000000__001.png",
         )
         assert session.scalars(q).first() is not None

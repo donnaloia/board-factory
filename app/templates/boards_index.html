@@ -18,8 +18,8 @@
     <li class="board-card">
       <a class="board-card-link" href="/users/{{ user.username }}/board-games/{{ b.path_slug }}/">
         <div class="board-card-thumb"
-             {% if b.has_mockup %}style="background-image:url('/users/{{ user.username }}/board-games/{{ b.path_slug }}/mockup/board.png')"{% endif %}>
-          {% if not b.has_mockup %}<span class="thumb-empty">no mockup</span>{% endif %}
+             {% if b.board_preview_asset_rest %}style="background-image:url('/users/{{ user.username }}/board-games/{{ b.path_slug }}/asset/{{ b.board_preview_asset_rest }}')"{% elif b.mockup_thumb_name %}style="background-image:url('/users/{{ user.username }}/board-games/{{ b.path_slug }}/mockup/{{ b.mockup_thumb_name }}')"{% endif %}>
+          {% if not b.board_preview_asset_rest and not b.mockup_thumb_name %}<span class="thumb-empty">no mockup</span>{% endif %}
         </div>
         <div class="board-card-meta">
           <h2 class="board-card-title">{{ b.project }}</h2>

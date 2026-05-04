@@ -90,10 +90,15 @@ services:
       BOARDFACTORY_PROVIDER: openai            # pixellab | openai | mock
       BOARDFACTORY_PALETTE_SIZE: "24"
       BOARDFACTORY_SPACE_CANDIDATES: "3"
-      BOARDFACTORY_PANEL_CANDIDATES: "6"
-      BOARDFACTORY_CENTERPIECE_CANDIDATES: "12"
+      BOARDFACTORY_PANEL_CANDIDATES: "3"
+      BOARDFACTORY_CENTERPIECE_CANDIDATES: "3"
 
       BOARDFACTORY_REPO: /repo
+
+      # If the DB ``board_id`` was migrated but the folder under data/boards/ still
+      # has the old name, either add ``data/boards/.board_disk_map.json`` on the host
+      # (see data/boards/.board_disk_map.json.example) or set:
+      # BOARDFACTORY_BOARD_DISK_MAP: '{"demo-board":"untitled-board-mopxc3av"}'
 
       # Reload subprocess must resolve ``routes``, ``storage``, etc. CWD alone is
       # unreliable when uvicorn --reload respawns workers — match Makefile tests.

@@ -12,6 +12,9 @@ Modules (non-exhaustive):
   - ``board_definition`` — relational ``board_games`` ↔ pipeline ``Catalog`` dict
   - ``catalog``          — load/save catalog + ``generation`` block read/write
   - ``cells``            — per-cell assets, history, status
+  - ``asset_urls``       — millisecond ``?t=`` helpers for ``/asset/`` links (cache bust)
+  - ``live_source``      — read promotion-pointer JSON under ``workspace/meta/live_source``
+  - ``live_prompt``      — sidebar ``active_prompt`` from pointer + history metadata
   - ``job_runs``         — persisted job snapshots
   - ``asset_index`` / ``asset_meta`` / ``workspace_palette`` — asset + palette DB helpers
 """

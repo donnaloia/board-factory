@@ -43,11 +43,20 @@ from __future__ import annotations
 
 import os
 import threading
+from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 from threading import RLock
 
 REPO_ROOT = Path(os.environ.get("BOARDFACTORY_REPO", "/repo"))
+
+_board_root_resolver: Callable[[str], Path] | None = None
+
+
+def set_board_root_resolver(fn: Callable[[str], Path] | None) -> None:
+    """Register app wiring to resolve ``<boards>/<user_id>/<board_uuid>/`` paths."""
+    global _board_root_resolver
+    _board_root_resolver = fn
 
 
 def _boards_dir() -> Path:
@@ -66,6 +75,86 @@ def _boards_dir() -> Path:
     return REPO_ROOT / "data" / "boards"
 
 
+def _parse_board_disk_map_dict(data: object) -> dict[str, str]:
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, str] = {}
+    for k, v in data.items():
+        if isinstance(k, str) and isinstance(v, str) and k and v:
+            out[k] = v
+    return out
+
+
+def _board_disk_map_from_file() -> dict[str, str]:
+    import json
+    import logging
+
+    explicit = os.environ.get("BOARDFACTORY_BOARD_DISK_MAP_FILE", "").strip()
+    if explicit:
+        path = Path(explicit)
+    else:
+        path = _boards_dir() / ".board_disk_map.json"
+    if not path.is_file():
+        return {}
+    try:
+        raw = path.read_text(encoding="utf-8")
+        data = json.loads(raw)
+    except (OSError, json.JSONDecodeError) as e:
+        logging.getLogger(__name__).warning(
+            "Could not read %s: %s", path, e,
+        )
+        return {}
+    return _parse_board_disk_map_dict(data)
+
+
+def _board_disk_map_from_env() -> dict[str, str]:
+    import json
+    import logging
+
+    raw = os.environ.get("BOARDFACTORY_BOARD_DISK_MAP", "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        logging.getLogger(__name__).warning(
+            "BOARDFACTORY_BOARD_DISK_MAP is set but is not valid JSON: %s",
+            e,
+        )
+        return {}
+    return _parse_board_disk_map_dict(data)
+
+
+def board_disk_map() -> dict[str, str]:
+    """Map canonical board ids to on-disk directory names under ``BOARDS_DIR``.
+
+    **File** (optional): read ``<BOARDS_DIR>/.board_disk_map.json`` unless
+    ``BOARDFACTORY_BOARD_DISK_MAP_FILE`` points at another path. JSON object
+    e.g. ``{"demo-board": "untitled-board-mopxc3av"}`` — use this in Docker
+    when env is awkward; the file lives on the volume next to board folders.
+
+    **Env** (optional): ``BOARDFACTORY_BOARD_DISK_MAP`` with the same JSON
+    object. Merged on top of the file so env wins per key.
+
+    Remove mappings after renaming the on-disk folder to match ``board_id``.
+    """
+    merged = dict(_board_disk_map_from_file())
+    merged.update(_board_disk_map_from_env())
+    return merged
+
+
+def physical_board_dir_name(board_id: str) -> str:
+    """Directory basename under ``BOARDS_DIR`` for this canonical board id."""
+    m = board_disk_map()
+    if board_id in m:
+        return m[board_id]
+    bid_lower = board_id.lower()
+    for k, v in m.items():
+        if k.lower() == bid_lower:
+            return v
+    return board_id
+
+
 # Backward-compat: ``BOARDS_DIR`` is referenced as a module attribute by
 # older callers. Resolved lazily through PEP 562 ``__getattr__`` below so
 # environment changes (e.g. tests) take effect.
@@ -75,9 +164,32 @@ def _boards_dir() -> Path:
 
 
 PALETTE_SIZE = int(os.environ.get("BOARDFACTORY_PALETTE_SIZE", "24"))
-SPACE_CANDIDATES = int(os.environ.get("BOARDFACTORY_SPACE_CANDIDATES", "3"))
-PANEL_CANDIDATES = int(os.environ.get("BOARDFACTORY_PANEL_CANDIDATES", "6"))
-CENTERPIECE_CANDIDATES = int(os.environ.get("BOARDFACTORY_CENTERPIECE_CANDIDATES", "12"))
+
+
+def space_candidates() -> int:
+    """Images requested per perimeter-space regenerate (env; read at call time)."""
+    return int(os.environ.get("BOARDFACTORY_SPACE_CANDIDATES", "3"))
+
+
+def panel_candidates() -> int:
+    """Images requested per functional-panel regenerate."""
+    return int(os.environ.get("BOARDFACTORY_PANEL_CANDIDATES", "3"))
+
+
+def centerpiece_candidates() -> int:
+    """Images requested per centerpiece regenerate."""
+    return int(os.environ.get("BOARDFACTORY_CENTERPIECE_CANDIDATES", "3"))
+
+
+def regen_candidate_count(category: str) -> int:
+    """Images requested for one cell regenerate: ``spaces`` | ``panels`` | ``centerpiece``."""
+    if category == "spaces":
+        return space_candidates()
+    if category == "panels":
+        return panel_candidates()
+    if category == "centerpiece":
+        return centerpiece_candidates()
+    return 0
 
 PROJECT_NAME = os.environ.get("BOARDFACTORY_PROJECT_NAME", "my-board")
 PROVIDER_NAME = os.environ.get("BOARDFACTORY_PROVIDER", "pixellab").lower()
@@ -122,7 +234,9 @@ def board_root(board_id: str | None = None) -> Path:
             "No active board set. Call config.set_board(board_id) first, "
             "or pass board_id explicitly."
         )
-    return _boards_dir() / bid
+    if _board_root_resolver is not None:
+        return _board_root_resolver(bid)
+    return _boards_dir() / physical_board_dir_name(bid)
 
 
 # ────────────────────────── path properties ──────────────────────────

@@ -159,8 +159,8 @@ The pipeline is eight steps. You start jobs from the web app; the only steps tha
 | Category           | Strategy                                                           | Candidates    |
 | ------------------ | ------------------------------------------------------------------ | ------------- |
 | **Board spaces**   | Batch generation per unique design, conditioned on the style sheet | 3 per design  |
-| **Feature panels** | Per-panel img2img from the cropped mockup region                   | 6 per panel   |
-| **Centerpiece**    | Img2img from the cropped centerpiece region with high strength     | 12 candidates |
+| **Feature panels** | Per-panel img2img from the cropped mockup region                   | 3 per panel   |
+| **Centerpiece**    | Img2img from the cropped centerpiece region with high strength     | 3 candidates |
 
 
 ### 4. Pixel Cleanup

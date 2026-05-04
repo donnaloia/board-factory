@@ -56,7 +56,7 @@ def _insert_version_row(
     meta_json: str | None,
 ) -> None:
     stmt = sqlite_insert(AssetVersionRecord).values(
-        board_id=board_id,
+        board_uuid=board_id,
         category=category,
         asset_id=asset_id,
         basename=basename,
@@ -65,7 +65,7 @@ def _insert_version_row(
         ts_ms=ts_ms,
         meta_json=meta_json,
     )
-    stmt = stmt.on_conflict_do_nothing(index_elements=["board_id", "rel_path"])
+    stmt = stmt.on_conflict_do_nothing(index_elements=["board_uuid", "rel_path"])
     with session_scope() as session:
         session.execute(stmt)
 
@@ -77,7 +77,7 @@ def count_for_cell(board_id: str, category: str, asset_id: str) -> int:
                 select(func.count())
                 .select_from(AssetVersionRecord)
                 .where(
-                    AssetVersionRecord.board_id == board_id,
+                    AssetVersionRecord.board_uuid == board_id,
                     AssetVersionRecord.category == category,
                     AssetVersionRecord.asset_id == asset_id,
                 )

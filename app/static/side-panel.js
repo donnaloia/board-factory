@@ -3,7 +3,8 @@
 // Replaces the per-page experience with an inline side panel docked to the
 // right of the board. Clicking any cell on the SVG opens the panel for that
 // cell with: live preview, prompt + metadata, regenerate button, and a
-// chronological history strip the user can flip between.
+//   - Click a history thumbnail → select it (prompt + highlight track that version).
+//     Use "Restore to board" on a row to promote it back to live without selecting first.
 //
 // Selection model:
 //   - Click a cell → swap panel content to that cell (with a quick fade)
@@ -28,6 +29,30 @@
   const BOARD_ID = wrap.getAttribute("data-board-id");
   const BOARD_BASE = wrap.getAttribute("data-board-base");
   const BPATH = BOARD_BASE && BOARD_BASE.length ? BOARD_BASE : `/b/${BOARD_ID}`;
+
+  // Which history thumbnail is "selected" for the prompt editor / preview. Separate from
+  // what's live on the board — user picks a row to inspect its prompt; "Restore" promotes.
+  const selectionByCell = {};
+
+  function cellKey(category, assetId) {
+    return `${category}:${assetId}`;
+  }
+
+  function pickDefaultHistorySelection(data) {
+    return (
+      data.live_history_filename
+      || data.history.find(h => h.is_live)?.filename
+      || data.history[0]?.filename
+      || null
+    );
+  }
+
+  function promptForHistorySelection(data, filename) {
+    if (!filename) return data.active_prompt || "";
+    const row = data.history.find(h => h.filename === filename);
+    if (row && row.prompt != null) return row.prompt;
+    return data.active_prompt || "";
+  }
 
   // Inline SVG spinner strokes — slightly muted vs pure white on dark boards.
   const SPINNER_STROKE_TRACK = "rgba(118, 128, 145, 0.26)";
@@ -90,6 +115,7 @@
     panel.classList.add("is-open");
     panel.classList.add("is-swapping");
     panel.setAttribute("aria-hidden", "false");
+    resetCellPanelScroll();
     const openedKey = `${category}:${asset_id}`;
     refreshPanel().finally(() => {
       // Another cell may have been opened while this fetch was in flight.
@@ -130,6 +156,11 @@
     return (window.CSS && CSS.escape) ? CSS.escape(s) : s.replace(/"/g, '\\"');
   }
 
+  /** Side panel scroll container is `#cell-panel` (e.g. narrow viewports). Reset when swapping cells. */
+  function resetCellPanelScroll() {
+    panel.scrollTop = 0;
+  }
+
   // ─── Fetch + render ──────────────────────────────────────────────────
 
   async function refreshPanel() {
@@ -146,17 +177,27 @@
       if (!r.ok) {
         if (seq !== _panelFetchSeq) return null;
         panel.innerHTML = `<p class="muted">Could not load cell.</p>`;
+        resetCellPanelScroll();
         return null;
       }
       const data = await r.json();
       if (seq !== _panelFetchSeq) return null;
-      panel.innerHTML = renderPanel(data);
+      const ck = cellKey(current.category, current.asset_id);
+      let sel = selectionByCell[ck];
+      if (!sel || !data.history.some(h => h.filename === sel)) {
+        sel = pickDefaultHistorySelection(data);
+      }
+      selectionByCell[ck] = sel;
+      const displayPrompt = promptForHistorySelection(data, sel);
+      panel.innerHTML = renderPanel(data, displayPrompt, sel);
+      resetCellPanelScroll();
       wireActions(data);
       return data;
     } catch (e) {
       if (e && (e.name === "AbortError" || e.code === 20)) return null;
       if (seq !== _panelFetchSeq) return null;
       panel.innerHTML = `<p class="muted">Network error.</p>`;
+      resetCellPanelScroll();
       return null;
     }
   }
@@ -180,7 +221,7 @@
     return imgs.length > 0;
   }
 
-  function renderPanel(data) {
+  function renderPanel(data, displayPrompt, selectedFilename) {
     const spec = data.spec;
     const sizeStr = spec.size ? `${spec.size[0]} × ${spec.size[1]}` : "—";
     const usesStr = spec.uses === 1 ? "1 position" : `${spec.uses} positions`;
@@ -190,32 +231,37 @@
       centerpiece: "Marquee",
     })[spec.kind] || "Cell";
 
-    // Live preview — when a frame is locked, overlay the composed frame on
-    // top so what the user sees in the panel matches what's on the board.
-    // Append a timestamp bust so the browser always fetches the current live
-    // image even if the mtime-stamped URL matches a previously loaded one.
-    const liveSrc = data.live_url
-      ? `${data.live_url.split("?")[0]}?_=${Date.now()}`
+    // Large preview: selected history version when browsing; otherwise live asset.
+    const selEntry = selectedFilename
+      ? data.history.find(h => h.filename === selectedFilename)
       : null;
-    const liveBlock = data.has_live
-      ? `<div class="cell-live ${data.frame_locked ? 'with-frame' : ''}">
-           <img src="${liveSrc}" alt="">
-           ${data.frame_locked && data.frame_url
+    const cellImgSrc = selEntry
+      ? `${selEntry.url.split("?")[0]}?_=${Date.now()}`
+      : (data.live_url ? `${data.live_url.split("?")[0]}?_=${Date.now()}` : null);
+    const showFrameOverlay = Boolean(
+      cellImgSrc && data.frame_locked && data.frame_url
+        && (selEntry ? selEntry.is_live : data.has_live),
+    );
+
+    const liveBlock = cellImgSrc
+      ? `<div class="cell-live ${showFrameOverlay ? "with-frame" : ""}">
+           <img src="${cellImgSrc}" alt="">
+           ${showFrameOverlay
               ? `<img class="frame-overlay" src="${data.frame_url}" alt="" aria-hidden="true">`
-              : ''}
+              : ""}
          </div>`
       : `<div class="cell-live empty">no asset yet</div>`;
 
     const histBlock = data.history.length === 0
       ? `<p class="cell-history-empty">no history yet — generate to make some.</p>`
-      : `<div class="cell-history">${data.history.map(h => renderHistoryRow(h)).join("")}</div>`;
+      : `<div class="cell-history">${data.history.map(h => renderHistoryRow(h, selectedFilename)).join("")}</div>`;
 
     const cost = data.regen_estimate_usd > 0
-      ? `~$${data.regen_estimate_usd.toFixed(3)} · ${data.candidates_per_regen} candidates`
-      : `free · ${data.candidates_per_regen} candidates`;
+      ? `~$${data.regen_estimate_usd.toFixed(3)} · ${data.candidates_per_regen} variations`
+      : `free · ${data.candidates_per_regen} variations`;
 
-    // Whether the catalog prompt differs from the active (live's) prompt.
-    const promptInherited = (data.active_prompt || "") === (data.catalog_prompt || "");
+    // Compare displayed prompt (selected history row / live) vs catalog default.
+    const promptInherited = (displayPrompt || "") === (data.catalog_prompt || "");
 
     return `
       <div class="cell-panel-head">
@@ -239,10 +285,10 @@
         </h4>
         <textarea class="prompt-editor"
                   data-prompt-editor
-                  data-base="${escapeAttr(data.active_prompt || "")}"
+                  data-base="${escapeAttr(displayPrompt || "")}"
                   data-catalog="${escapeAttr(data.catalog_prompt || "")}"
                   spellcheck="false"
-                  rows="4">${escapeHtml(data.active_prompt || "")}</textarea>
+                  rows="4">${escapeHtml(displayPrompt || "")}</textarea>
         <div class="prompt-toolbar" data-prompt-toolbar hidden>
           <span class="prompt-hint">edited &mdash; will be used on next generate</span>
           <button type="button" class="quiet-action" data-prompt-revert>Revert</button>
@@ -437,7 +483,7 @@
     `;
   }
 
-  function renderHistoryRow(h) {
+  function renderHistoryRow(h, selectedFilename) {
     const date = new Date(h.ts_ms);
     const ts = date.toLocaleString(undefined, {
       month: "short", day: "numeric",
@@ -447,16 +493,26 @@
       regen: "generated",
       clean: "cleaned",
     })[h.operation] || h.operation || "";
-    const marker = h.is_live ? "live" : "restore →";
+    const marker = h.is_live ? "live on board" : "older version";
+    const isSel = selectedFilename && h.filename === selectedFilename;
+    const restoreBtn = !h.is_live
+      ? `<button type="button" class="history-restore-btn"
+              data-history-promote="${escapeAttr(h.filename)}"
+              aria-label="Restore this version to the board">Restore</button>`
+      : "";
     return `
-      <button type="button" class="history-row ${h.is_live ? "is-live" : ""}"
-              data-promote="${escapeAttr(h.filename)}">
-        <div class="thumb"><img src="${h.url}" alt=""></div>
-        <div class="meta-col">
-          <span class="ts">${ts}</span>
-          <span class="marker">${opLabel} · ${marker}</span>
-        </div>
-      </button>
+      <div class="history-row-wrap">
+        <button type="button"
+                class="history-row ${h.is_live ? "is-live" : ""} ${isSel ? "is-selected" : ""}"
+                data-history-select="${escapeAttr(h.filename)}">
+          <div class="thumb"><img src="${h.url}" alt=""></div>
+          <div class="meta-col">
+            <span class="ts">${ts}</span>
+            <span class="marker">${opLabel} · ${marker}</span>
+          </div>
+        </button>
+        ${restoreBtn}
+      </div>
     `;
   }
 
@@ -584,39 +640,29 @@
     // ─── Frame section: expand/collapse + live preview + adopt/disable ───
     wireFrame(data);
 
-    // ─── History row click: promote + restore that entry's prompt ───
-    // Prompts come from the JSON payload / refresh response — not HTML
-    // data-* attributes (long prompts and quoting break attribute round-trips).
-    const historyRows = data.history;
-    panel.querySelectorAll("[data-promote]").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const filename = btn.getAttribute("data-promote");
-        const entry = historyRows.find(h => h.filename === filename);
-        const editorImmediate = panel.querySelector("[data-prompt-editor]");
-        if (editorImmediate && entry?.prompt != null) {
-          editorImmediate.value = entry.prompt;
-          editorImmediate.setAttribute("data-base", entry.prompt);
-          editorImmediate.dispatchEvent(new Event("input"));
-        }
+    // ─── History: select row (prompt tracks that version); Restore promotes to live ───
+    panel.querySelectorAll("[data-history-select]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const fn = btn.getAttribute("data-history-select");
+        selectionByCell[cellKey(current.category, current.asset_id)] = fn;
+        refreshPanel();
+      });
+    });
 
+    panel.querySelectorAll("[data-history-promote]").forEach(btn => {
+      btn.addEventListener("click", async (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const filename = btn.getAttribute("data-history-promote");
         const fd = new FormData();
         fd.append("filename", filename);
         const r = await fetch(`${BPATH}/api/cell/${current.category}/${current.asset_id}/promote`,
                               { method: "POST", body: fd });
         if (r.ok) {
+          selectionByCell[cellKey(current.category, current.asset_id)] = filename;
           const fresh = await refreshPanel();
           const updated = updateCellImageOnBoard(current.category, current.asset_id, fresh?.live_url);
           if (!updated) refreshBoardSvg();
-          const newEditor = panel.querySelector("[data-prompt-editor]");
-          if (newEditor) {
-            const row = fresh?.history?.find(h => h.filename === filename);
-            const val = row?.prompt != null
-              ? row.prompt
-              : (fresh?.active_prompt ?? "");
-            newEditor.value = val;
-            newEditor.setAttribute("data-base", val);
-            newEditor.dispatchEvent(new Event("input"));
-          }
         }
       });
     });

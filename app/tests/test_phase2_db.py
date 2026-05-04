@@ -33,6 +33,31 @@ def test_session_cookie_roundtrip(isolated_repo):
     assert sessions.resolve(cookie) is None
 
 
+def test_register_user_second_account(isolated_repo):
+    import users
+
+    users.create_first_user(email="first@example.com", password="password99")
+    u2 = users.register_user(email="second@example.com", password="password99", display_name="Two")
+    assert users.find_by_email("second@example.com").id == u2.id
+    assert u2.username
+
+
+def test_register_user_rejects_duplicate_email(isolated_repo):
+    import users
+
+    users.create_first_user(email="same@example.com", password="password99")
+    with pytest.raises(ValueError, match="already exists"):
+        users.register_user(email="same@example.com", password="password99")
+
+
+def test_create_first_user_still_single_setup(isolated_repo):
+    import users
+
+    users.create_first_user(email="only@example.com", password="password99")
+    with pytest.raises(ValueError, match="closed"):
+        users.create_first_user(email="other@example.com", password="password99")
+
+
 def test_cost_ledger_summary(isolated_repo):
     import cost_ledger
 

@@ -23,6 +23,12 @@ import yaml
 from . import config
 
 
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
 @dataclass(frozen=True)
 class BoardInfo:
     id: str                # slug, e.g. "damnation"
@@ -56,6 +62,16 @@ def slugify(name: str) -> str:
 
 def is_valid_id(board_id: str) -> bool:
     return bool(_SLUG_OK.match(board_id))
+
+
+def is_board_uuid(board_id: str) -> bool:
+    """True if ``board_id`` is a UUID string (folder names after migration 0015)."""
+    return bool(_UUID_RE.match(board_id))
+
+
+def _user_dir_name(s: str) -> bool:
+    """Heuristic: app user ids are ``uuid.uuid4().hex`` (32 hex chars)."""
+    return len(s) == 32 and all(c in "0123456789abcdef" for c in s.lower())
 
 
 # ────────────────────────── default catalog (dict for DB persist) ──────────────────────────
@@ -223,43 +239,92 @@ def default_catalog_dict(board_id: str, project_name: str) -> dict[str, Any]:
 
 
 def list_boards() -> list[BoardInfo]:
-    """Return every board on disk, sorted alphabetically by id."""
-    if not config.BOARDS_DIR.exists():
+    """Return every board on disk, sorted alphabetically by id (canonical).
+
+    Supports ``<boards>/<user_id>/<board_uuid>/`` (current layout), explicit
+    disk aliases via ``board_disk_map``, and legacy flat ``<boards>/<slug>/``.
+    """
+    root_dir = config.BOARDS_DIR
+    if not root_dir.exists():
         return []
-    boards: list[BoardInfo] = []
-    for child in sorted(config.BOARDS_DIR.iterdir()):
-        if not child.is_dir():
+    alias = config.board_disk_map()
+    consumed_paths: set[Path] = set()
+    out: list[BoardInfo] = []
+
+    for canonical in sorted(alias.keys()):
+        physical = alias[canonical]
+        p = root_dir / physical
+        if p.is_dir() and (is_board_uuid(canonical) or is_valid_id(canonical)):
+            out.append(_load_board_info_at(canonical, p))
+            consumed_paths.add(p.resolve())
+
+    for user_dir in sorted(root_dir.iterdir()):
+        if not user_dir.is_dir():
             continue
-        if not is_valid_id(child.name):
+        if not _user_dir_name(user_dir.name):
             continue
-        boards.append(_load_board_info(child.name))
-    return boards
+        for board_dir in sorted(user_dir.iterdir()):
+            if not board_dir.is_dir():
+                continue
+            canonical = board_dir.name
+            if not (is_board_uuid(canonical) or is_valid_id(canonical)):
+                continue
+            physical_name = alias.get(canonical, canonical)
+            board_path = user_dir / physical_name
+            if not board_path.is_dir():
+                continue
+            rs = board_path.resolve()
+            if rs in consumed_paths:
+                continue
+            out.append(_load_board_info_at(canonical, board_path))
+            consumed_paths.add(rs)
+
+    for child in sorted(root_dir.iterdir()):
+        if not child.is_dir() or child.resolve() in consumed_paths:
+            continue
+        name = child.name
+        if not (is_board_uuid(name) or is_valid_id(name)):
+            continue
+        if _user_dir_name(name):
+            continue
+        if (child / "workspace").exists() or (child / "mockup").exists():
+            out.append(_load_board_info_at(name, child))
+            consumed_paths.add(child.resolve())
+
+    out.sort(key=lambda b: b.id)
+    return out
 
 
 def get_board(board_id: str) -> BoardInfo | None:
-    if not is_valid_id(board_id):
+    if not (is_board_uuid(board_id) or is_valid_id(board_id)):
         return None
-    root = config.BOARDS_DIR / board_id
+    try:
+        root = config.board_root(board_id)
+    except RuntimeError:
+        return None
     if not root.exists() or not root.is_dir():
         return None
-    return _load_board_info(board_id)
+    return _load_board_info_at(board_id, root)
 
 
 def _load_board_info(board_id: str) -> BoardInfo:
-    root = config.BOARDS_DIR / board_id
+    return _load_board_info_at(board_id, config.board_root(board_id))
+
+
+def _load_board_info_at(canonical_id: str, root: Path) -> BoardInfo:
     cat_path = root / "catalog.yml"
-    project = board_id
+    project = canonical_id
     legacy_yaml = cat_path.exists()
     if legacy_yaml:
         try:
             with cat_path.open() as f:
                 data = yaml.safe_load(f) or {}
-            project = data.get("project") or board_id
+            project = data.get("project") or canonical_id
         except Exception:
             pass
     has_mockup = (root / "mockup").exists() and any((root / "mockup").iterdir())
     return BoardInfo(
-        id=board_id,
+        id=canonical_id,
         project=project,
         catalog_path=cat_path,
         has_catalog=legacy_yaml,
@@ -284,12 +349,12 @@ def create_board(board_id: str, project_name: str | None = None) -> BoardInfo:
     Does **not** write ``catalog.yml`` or touch the database — the web app
     persists the initial catalog with ``persist_catalog_dict`` after this returns.
     """
-    if not is_valid_id(board_id):
+    if not (is_board_uuid(board_id) or is_valid_id(board_id)):
         raise ValueError(
-            f"Invalid board id {board_id!r}. Use lowercase letters, digits, "
-            f"hyphens or underscores only."
+            f"Invalid board id {board_id!r}. Use a UUID string or a slug "
+            f"(lowercase letters, digits, hyphens or underscores)."
         )
-    root = config.BOARDS_DIR / board_id
+    root = config.board_root(board_id)
     if root.exists():
         raise FileExistsError(f"Board {board_id!r} already exists at {root}")
 

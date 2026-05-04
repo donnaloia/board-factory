@@ -6,9 +6,10 @@ The middleware does two things:
      "open" allow-list redirects to /login when there's no user.
 
 Flow rules:
-  - When zero users exist on disk → / and any other route redirect to /register.
-  - When at least one user exists → /register is closed; redirect to /login.
-  - The /login form, /register form (when open), /forgot-password (always),
+  - When zero users exist → unauthenticated visitors go to /register (first account).
+  - When users exist → unauthenticated visitors go to /login; /register stays open
+    for additional accounts.
+  - The /login form, /register form, /forgot-password (always),
     /static/*, and /favicon.ico are anonymous.
 
 Why not FastAPI's built-in dependency?
@@ -62,8 +63,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         if user is None:
-            # Setup-required → push to /register (which itself enforces the
-            # "no existing user" precondition and rejects subsequent attempts).
+            # No users yet → offer registration first; otherwise login.
             target = "/register" if users.is_setup_required() else "/login"
             # Preserve original target as ?next=<path> (login template uses it).
             sep = "?" if "?" not in target else "&"

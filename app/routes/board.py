@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import io
 import os
-import time
 from functools import partial
 from typing import Annotated
 
@@ -24,6 +23,7 @@ from boardfactory import frames as bf_frames
 from boardfactory.providers.pixel.pixellab import list_pixellab_presets
 
 from routes import deps
+from services import asset_urls
 from services import boards as svc_boards
 from services import catalog as svc_catalog
 from services import cells as svc_cells
@@ -121,7 +121,7 @@ def board_view(request: Request, board_id: NestedBoardId):
             "label": (
                 "All assets generated" if n_missing_all == 0
                 else "Generate all spaces & UI" if n_generated_all == 0
-                else "Generate missing spaces & UI"
+                else "Generate missing spaces"
             ),
         },
         "generation": svc_catalog.read_generation(catalog),
@@ -182,12 +182,15 @@ def frame_view(request: Request, board_id: NestedBoardId):
         live_rel = fs_ws.live_rel("panels", p["id"])
         if not store.exists(board_id, live_rel):
             continue
-        ts_s = store.stat(board_id, live_rel).mtime_ms // 1000
         url_rel = live_rel.removeprefix("workspace/")
         candidates.append({
             "id": p["id"],
             "size": [p["target_size"][0], p["target_size"][1]],
-            "url": f"{bp}/asset/{url_rel}?t={ts_s}",
+            "url": asset_urls.board_asset_url(
+                http_prefix=bp,
+                asset_relpath=url_rel,
+                mtime_ms=store.stat(board_id, live_rel).mtime_ms,
+            ),
         })
 
     ctx = deps.editorial_template_context(board_id, request)
@@ -196,7 +199,7 @@ def frame_view(request: Request, board_id: NestedBoardId):
         "meta": meta.to_dict() if meta else None,
         "candidates": candidates,
         "frame_enabled": bool((catalog.get("frame") or {}).get("enabled")),
-        "frame_url": f"{bp}/frame.png?t={int(time.time())}" if has_frame else None,
+        "frame_url": f"{bp}/frame.png?t={asset_urls.wall_clock_ms()}" if has_frame else None,
     })
     return request.app.state.templates.TemplateResponse(request, "frame.html", ctx)
 
@@ -269,13 +272,16 @@ def api_frame_preview(
 @router.get("/users/{username}/board-games/{path_slug}/preview", response_class=HTMLResponse)
 def preview_view(request: Request, board_id: NestedBoardId):
     store = bs.get_store()
-    preview_rel = "workspace/preview/board_preview.png"
-    preview_present = store.exists(board_id, preview_rel)
+    preview_rel = svc_boards.composite_preview_workspace_rel(board_id)
+    preview_present = preview_rel is not None
     preview_url = None
     bp = _board_prefix(board_id)
-    if preview_present:
-        ts_s = store.stat(board_id, preview_rel).mtime_ms // 1000
-        preview_url = f"{bp}/asset/preview/board_preview.png?t={ts_s}"
+    if preview_rel is not None:
+        preview_url = asset_urls.board_asset_url(
+            http_prefix=bp,
+            asset_relpath=preview_rel.removeprefix("workspace/"),
+            mtime_ms=store.stat(board_id, preview_rel).mtime_ms,
+        )
     manifest_present = store.exists(board_id, "export/board_manifest.json")
     exported_count = sum(1 for f in store.list(board_id, "export") if f.endswith(".png"))
     ctx = deps.editorial_template_context(board_id, request)
@@ -298,8 +304,11 @@ def device_preview_view(request: Request, board_id: NestedBoardId):
         rel = f"workspace/preview/{name}"
         if not store.exists(board_id, rel):
             return None
-        ts_s = store.stat(board_id, rel).mtime_ms // 1000
-        return f"{bp}/asset/preview/{name}?t={ts_s}"
+        return asset_urls.board_asset_url(
+            http_prefix=bp,
+            asset_relpath=rel.removeprefix("workspace/"),
+            mtime_ms=store.stat(board_id, rel).mtime_ms,
+        )
 
     idle_url = _asset_url("board_idle.png")
     active_url = _asset_url("board_active.png")
@@ -410,7 +419,7 @@ async def _action_generate_mockup(request: Request, board_id: str) -> JSONRespon
 
     framing_suffix = (
         " — single unified 16:9 tabletop board illustration, even readable zones, "
-        "rich cohesive palette, ornate borders where helpful."
+        "rich cohesive palette; decorate borders only where they clarify zones."
     )
     full_prompt = mockup_prompt_svc.compose_mockup_image_prompt(
         prompt, catalog, framing_suffix=framing_suffix

@@ -34,8 +34,23 @@ def test_layout_context_counts():
     assert "700" in s and "1220" in s  # centerpiece bbox hint
 
 
+def test_default_catalog_twelve_panel_grid_labels():
+    from boardfactory.boards import default_catalog_dict
+
+    cat = default_catalog_dict("test-board", "Test")
+    s = mp.layout_context_for_mockup(cat)
+    assert "outer-left strip" in s
+    assert "inner-left strip" in s
+    assert "inner-right strip" in s
+    assert "outer-right strip" in s
+    assert "twelve" in s.lower() or "12" in s
+    assert "260×240" in s or ("260" in s and "240" in s)
+    assert "700" in s and "1220" in s
+    assert "Reserve the horizontal centerpiece band" in s or "x < 700" in s
+
+
 def test_layout_context_panel_left_right_split():
-    """Panels with bboxes split by board midpoint → left/right counts."""
+    """Two bbox panels far apart → clustered columns (grid paragraph, not half-board counts)."""
     cat = {
         "board_size": [1920, 1080],
         "board_spaces": {"layout": {}, "designs": []},
@@ -48,8 +63,9 @@ def test_layout_context_panel_left_right_split():
         "centerpiece": {},
     }
     s = mp.layout_context_for_mockup(cat)
-    assert "1 on the left half" in s
-    assert "1 on the right half" in s
+    assert "Functional UI panels" in s
+    assert "column 1 from the left" in s
+    assert "column 2 from the left" in s
 
 
 def test_compose_includes_style_when_present():

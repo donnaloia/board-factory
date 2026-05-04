@@ -121,11 +121,11 @@ def estimate_generate(category: str) -> float:
     from boardfactory import config
 
     if category == "spaces":
-        return float(config.SPACE_CANDIDATES) * 0.015 * 8       # designs vary, ~8 designs
+        return float(config.space_candidates()) * 0.015 * 8       # designs vary, ~8 designs
     if category == "panels":
-        return float(config.PANEL_CANDIDATES) * 0.015 * 12      # ~12 panels
+        return float(config.panel_candidates()) * 0.015 * 12      # ~12 panels
     if category == "centerpiece":
-        return float(config.CENTERPIECE_CANDIDATES) * 0.022     # higher per call
+        return float(config.centerpiece_candidates()) * 0.022     # higher per call
     return 0.0
 
 
@@ -134,11 +134,11 @@ def estimate_generate_one(category: str, target: str | None = None) -> float:
     from boardfactory import config
 
     if category == "centerpiece":
-        return float(config.CENTERPIECE_CANDIDATES) * 0.022
+        return float(config.centerpiece_candidates()) * 0.022
     if category == "panels":
-        return float(config.PANEL_CANDIDATES) * 0.015
+        return float(config.panel_candidates()) * 0.015
     if category == "spaces":
-        return float(config.SPACE_CANDIDATES) * 0.015
+        return float(config.space_candidates()) * 0.015
     return 0.0
 
 

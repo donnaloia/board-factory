@@ -13,7 +13,7 @@ from typing import Any, Callable
 import markdown as md
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 
 import auth
 import cost_ledger
@@ -26,9 +26,13 @@ from models.core import OwnedBoardRecord, UserRecord
 from storage.db import session_scope
 from storage.fs import workspace as fs_ws
 
+from services import asset_urls
 from services import board_definition as bd
+from services import live_source as live_source_svc
 from services import board_ownership
 from services import catalog as svc_catalog
+from services import live_prompt as live_prompt_svc
+from storage import board_store as bs
 
 REPO_ROOT = Path(os.environ.get("BOARDFACTORY_REPO", "/repo"))
 SPEC_PROSE_PATH = REPO_ROOT / "docs" / "spec_prose.md"
@@ -45,8 +49,31 @@ def safe_next(next_path: str | None) -> str:
     return next_path
 
 
+def _resolve_segment_to_canonical_uuid(user_id: str, segment: str) -> str:
+    """Return ``board_games.id`` (UUID string) for legacy ``/b/<slug>/`` URLs.
+
+    Nested routes already pass a UUID; slug-shaped segments resolve via
+    ``owned_boards.path_slug`` for this user.
+    """
+    s = (segment or "").strip()
+    if bf_boards.is_board_uuid(s):
+        return s
+    if not bf_boards.is_valid_id(s):
+        return s
+    with session_scope() as session:
+        row = session.scalar(
+            select(OwnedBoardRecord).where(
+                OwnedBoardRecord.user_id == user_id,
+                func.lower(OwnedBoardRecord.path_slug) == s.lower(),
+            )
+        )
+    if row is not None:
+        return row.board_uuid
+    return s
+
+
 def board_on_disk_or_404(board_id: str) -> bf_boards.BoardInfo:
-    if not bf_boards.is_valid_id(board_id):
+    if not (bf_boards.is_board_uuid(board_id) or bf_boards.is_valid_id(board_id)):
         raise HTTPException(400, "Invalid board id")
     info = bf_boards.get_board(board_id)
     if info is None:
@@ -55,7 +82,10 @@ def board_on_disk_or_404(board_id: str) -> bf_boards.BoardInfo:
 
 
 def board_url_parts(board_id: str) -> tuple[str, str] | None:
-    """Return ``(username, path_slug)`` for canonical board URLs, or ``None``."""
+    """Return ``(username, url_segment)`` for canonical board URLs, or ``None``.
+
+    The URL segment is ``owned_boards.path_slug`` (the slug chosen at creation).
+    """
     with session_scope() as session:
         ob = session.get(OwnedBoardRecord, board_id)
         if ob is None:
@@ -76,7 +106,7 @@ def board_http_prefix(board_id: str) -> str:
 
 
 def canonical_board_base_path(board_id: str) -> str:
-    """``/users/<username>/board-games/<slug>`` without trailing slash."""
+    """``/users/<username>/board-games/<board_id>`` without trailing slash."""
     parts = board_url_parts(board_id)
     if parts is None:
         raise HTTPException(404, "Unknown board")
@@ -86,8 +116,8 @@ def canonical_board_base_path(board_id: str) -> str:
 
 def redirect_legacy_board_get(request: Request, board_id: str, rest: str = "") -> RedirectResponse:
     """307 from ``/b/<id>/…`` to canonical ``/users/<username>/board-games/<slug>/…``."""
-    ensure_owned_board(request, board_id)
-    base = canonical_board_base_path(board_id)
+    info = ensure_owned_board(request, board_id)
+    base = canonical_board_base_path(info.id)
     tail = (rest or "").strip("/")
     dest = f"{base}/{tail}" if tail else f"{base}/"
     q = request.url.query
@@ -97,9 +127,13 @@ def redirect_legacy_board_get(request: Request, board_id: str, rest: str = "") -
 
 
 def resolve_owned_board_path(request: Request, username: str, path_slug: str) -> str:
-    """Resolve nested URL segments to ``board_id``; enforce URL matches logged-in user."""
+    """Resolve nested URL segments to ``board_id``; enforce URL matches logged-in user.
+
+    Accepts the canonical segment (``board_id``) or a legacy ``path_slug`` stored
+    when the board was created under the old title-based slug scheme.
+    """
     un = (username or "").strip().lower()
-    ps = (path_slug or "").strip().lower()
+    seg = (path_slug or "").strip().lower()
     user = auth.require_user(request)
     if user.username != un:
         raise HTTPException(404, "Unknown board")
@@ -107,12 +141,15 @@ def resolve_owned_board_path(request: Request, username: str, path_slug: str) ->
         row = session.scalar(
             select(OwnedBoardRecord).where(
                 OwnedBoardRecord.user_id == user.id,
-                OwnedBoardRecord.path_slug == ps,
+                or_(
+                    func.lower(OwnedBoardRecord.board_uuid) == seg,
+                    func.lower(OwnedBoardRecord.path_slug) == seg,
+                ),
             )
         )
     if row is None:
         raise HTTPException(404, "Unknown board")
-    return row.board_id
+    return row.board_uuid
 
 
 def require_nested_board(request: Request, username: str, path_slug: str) -> str:
@@ -121,9 +158,10 @@ def require_nested_board(request: Request, username: str, path_slug: str) -> str
 
 
 def ensure_owned_board(request: Request, board_id: str) -> bf_boards.BoardInfo:
-    info = board_on_disk_or_404(board_id)
     user = auth.require_user(request)
-    if not board_ownership.user_owns_board(user.id, board_id):
+    uid = _resolve_segment_to_canonical_uuid(user.id, board_id)
+    info = board_on_disk_or_404(uid)
+    if not board_ownership.user_owns_board(user.id, uid):
         raise HTTPException(404, f"Unknown board {board_id!r}")
     return info
 
@@ -260,13 +298,7 @@ def load_spec_prose_sections() -> dict[str, str]:
 
 
 def candidates_per_regen_count(category: str) -> int:
-    if category == "spaces":
-        return bf_config.SPACE_CANDIDATES
-    if category == "panels":
-        return bf_config.PANEL_CANDIDATES
-    if category == "centerpiece":
-        return bf_config.CENTERPIECE_CANDIDATES
-    return 0
+    return bf_config.regen_candidate_count(category)
 
 
 def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -> dict:
@@ -345,31 +377,26 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
         for e in entries
     ]
 
-    live = fs_ws.live_path(board_id, category, asset_id)
-    ws = fs_ws.workspace_dir(board_id)
+    live_rel = fs_ws.live_rel(category, asset_id)
+    store = bs.get_store()
     live_url = None
-    if live.exists():
-        live_url = (
-            f"{bpath}/asset/{live.relative_to(ws).as_posix()}"
-            f"?t={int(live.stat().st_mtime)}"
+    if store.exists(board_id, live_rel):
+        live_url = asset_urls.board_asset_url(
+            http_prefix=bpath,
+            asset_relpath=live_rel.removeprefix("workspace/"),
+            mtime_ms=store.stat(board_id, live_rel).mtime_ms,
         )
 
     catalog_prompt = spec.get("prompt", "") or ""
-    active_prompt = catalog_prompt
-    for e in entries:
-        if not e.is_live:
-            continue
-        # Normal case: live row came from a regen with metadata.
-        if e.prompt is not None:
-            active_prompt = e.prompt
-            break
-        # Cleanup sometimes promotes with no stored prompt; newest-first history
-        # still has the last generation prompt on the next row.
-        for e2 in entries:
-            if e2.prompt is not None:
-                active_prompt = e2.prompt
-                break
-        break
+    active_prompt = live_prompt_svc.resolve_active_prompt(
+        board_id,
+        category,
+        asset_id,
+        entries=entries,
+        catalog_prompt=catalog_prompt,
+    )
+    ptr = live_source_svc.read_live_source(board_id, category, asset_id)
+    live_history_filename = ptr.history_filename if ptr is not None else None
 
     frame_block = catalog.get("frame", {}) or {}
     frame_enabled_for_cell = (
@@ -381,28 +408,29 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
     with bf_config.set_active_board(board_id):
         frame_present = bf_frames.has_house_frame()
         frame_meta = bf_frames.read_house_meta() if frame_present else None
-    frame_locked = frame_enabled_for_cell and frame_present and live.exists()
+    frame_locked = frame_enabled_for_cell and frame_present and store.exists(board_id, live_rel)
 
     frame_payload: dict | None = None
     if category == "panels":
         all_panels = catalog.get("feature_panels", {}).get("panels", [])
         panel_sources: list[dict] = []
         for p in all_panels:
-            p_live = fs_ws.live_path(board_id, "panels", p["id"])
-            if p_live.exists():
-                panel_sources.append(
-                    {
-                        "id": p["id"],
-                        "label": p["id"].replace("_", " "),
-                        "size": list(p["target_size"]),
-                        "url": (
-                            f"{bpath}/asset/"
-                            f"{p_live.relative_to(ws).as_posix()}"
-                            f"?t={int(p_live.stat().st_mtime)}"
-                        ),
-                        "is_self": p["id"] == asset_id,
-                    }
-                )
+            prel = fs_ws.live_rel("panels", p["id"])
+            if not store.exists(board_id, prel):
+                continue
+            panel_sources.append(
+                {
+                    "id": p["id"],
+                    "label": p["id"].replace("_", " "),
+                    "size": list(p["target_size"]),
+                    "url": asset_urls.board_asset_url(
+                        http_prefix=bpath,
+                        asset_relpath=prel.removeprefix("workspace/"),
+                        mtime_ms=store.stat(board_id, prel).mtime_ms,
+                    ),
+                    "is_self": p["id"] == asset_id,
+                }
+            )
 
         mockup_source: dict | None = None
         ref_rel = (catalog.get("style") or {}).get("reference_image", "mockup/board.png")
@@ -444,10 +472,11 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
         "asset_id": asset_id,
         "spec": spec,
         "live_url": live_url,
-        "has_live": live.exists(),
+        "has_live": store.exists(board_id, live_rel),
         "history": history,
         "catalog_prompt": catalog_prompt,
         "active_prompt": active_prompt,
+        "live_history_filename": live_history_filename,
         "regen_estimate_usd": pipeline_adapters.estimate_regen_one(category, asset_id),
         "candidates_per_regen": candidates_per_regen_count(category),
         "frame_locked": frame_locked,

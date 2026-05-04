@@ -65,15 +65,18 @@ class BrowserSessionRecord(Base):
 
 
 class OwnedBoardRecord(Base):
-    """Maps a board directory (slug) to exactly one owning user.
+    """Maps a board UUID (PK of ``board_games``) to exactly one owning user.
 
-    ``user_id`` is required at the application layer and is ``NOT NULL`` in the database.
-    ``path_slug`` is the URL segment under ``/users/<username>/board-games/<path_slug>/``.
+    ``path_slug`` is the URL segment under ``/users/<name>/board-games/<slug>/``.
     """
 
     __tablename__ = "owned_boards"
 
-    board_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    board_uuid: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("board_games.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
     user_id: Mapped[str] = mapped_column(
         String(64),
         ForeignKey("users.id", ondelete="CASCADE"),
@@ -82,6 +85,7 @@ class OwnedBoardRecord(Base):
     )
     path_slug: Mapped[str] = mapped_column(String(128), nullable=False)
     created_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    list_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     __table_args__ = (
         sa.UniqueConstraint("user_id", "path_slug", name="uq_owned_boards_user_path_slug"),
@@ -130,7 +134,7 @@ class BoardGameRecord(Base):
 
     __tablename__ = "board_games"
 
-    board_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    board_uuid: Mapped[str] = mapped_column("id", String(36), primary_key=True)
     body_json: Mapped[str] = mapped_column(Text, nullable=False)
     updated_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
     palette_json: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -144,7 +148,11 @@ class AssetVersionRecord(Base):
     __tablename__ = "asset_versions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    board_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    board_uuid: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("board_games.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     category: Mapped[str] = mapped_column(String(32), nullable=False)
     asset_id: Mapped[str] = mapped_column(String(256), nullable=False)
     basename: Mapped[str] = mapped_column(String(512), nullable=False)
@@ -154,8 +162,8 @@ class AssetVersionRecord(Base):
     meta_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
-        Index("ix_asset_versions_board_cell", "board_id", "category", "asset_id"),
-        Index("ix_asset_versions_board_relpath", "board_id", "rel_path", unique=True),
+        Index("ix_asset_versions_board_cell", "board_uuid", "category", "asset_id"),
+        Index("ix_asset_versions_board_relpath", "board_uuid", "rel_path", unique=True),
     )
 
 

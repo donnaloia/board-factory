@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Set up your account · Board Factory</title>
+  <title>Create account · Board Factory</title>
   <link rel="stylesheet" href="/static/style.css?v={{ asset_v('style.css') }}">
   <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='4' fill='%23c8995b'/></svg>">
 </head>
@@ -15,8 +15,8 @@
       <span class="auth-mark-label">Board Factory</span>
     </div>
 
-    <h1 class="auth-title">Set up your account</h1>
-    <p class="auth-sub">First-run only. After this is created, registration is closed.</p>
+    <h1 class="auth-title">Create account</h1>
+    <p class="auth-sub">New users can register anytime. If this is the first account on an empty install, you’ll land here automatically.</p>
 
     {% if error %}<div class="auth-banner is-error">{{ error }}</div>{% endif %}
 
@@ -39,6 +39,9 @@
         <span>Create account</span>
       </button>
     </form>
+    <div class="auth-foot">
+      <a href="/login" class="auth-link">Already have an account? Sign in</a>
+    </div>
   </div>
 </main>
 </body>

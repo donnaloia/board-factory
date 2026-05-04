@@ -53,6 +53,10 @@ _STYLE_PREFIX = (
 )
 
 
+# OpenAI Images API allows at most 4 images per HTTP request for generations/edits.
+_MAX_IMAGES_PER_REQUEST = 4
+
+
 class OpenAIImageProvider(PixelArtProvider):
     """Wraps GPT Image models (gpt-image-2) behind the PixelArtProvider interface."""
 
@@ -91,17 +95,24 @@ class OpenAIImageProvider(PixelArtProvider):
         palette: list[tuple[int, int, int]] | None = None,
     ) -> list[bytes]:
         full_prompt = _STYLE_PREFIX + prompt if prompt else _STYLE_PREFIX.rstrip(". ,")
-        resp = self._json_post(
-            f"{_BASE_URL}/images/generations",
-            {
-                "model": self._model,
-                "prompt": full_prompt,
-                "n": min(n, 4),
-                "size": _GEN_SIZE,
-                "quality": self._quality,
-            },
-        )
-        return [self._to_target_size(raw, size) for raw in self._decode(resp)]
+        out: list[bytes] = []
+        while len(out) < n:
+            batch = min(n - len(out), _MAX_IMAGES_PER_REQUEST)
+            resp = self._json_post(
+                f"{_BASE_URL}/images/generations",
+                {
+                    "model": self._model,
+                    "prompt": full_prompt,
+                    "n": batch,
+                    "size": _GEN_SIZE,
+                    "quality": self._quality,
+                },
+            )
+            chunk = [self._to_target_size(raw, size) for raw in self._decode(resp)]
+            if not chunk:
+                break
+            out.extend(chunk)
+        return out[:n]
 
     def img2img(
         self,
@@ -113,19 +124,26 @@ class OpenAIImageProvider(PixelArtProvider):
         palette: list[tuple[int, int, int]] | None = None,
     ) -> list[bytes]:
         full_prompt = _STYLE_PREFIX + prompt if prompt else _STYLE_PREFIX.rstrip(". ,")
-        src_buf = self._to_api_size(source_image)
-        resp = self._multipart_post(
-            f"{_BASE_URL}/images/edits",
-            data={
-                "model": self._model,
-                "prompt": full_prompt,
-                "n": str(min(n, 4)),
-                "size": _GEN_SIZE,
-                "quality": self._quality,
-            },
-            files={"image": ("source.png", src_buf, "image/png")},
-        )
-        return [self._to_target_size(raw, size) for raw in self._decode(resp)]
+        out: list[bytes] = []
+        while len(out) < n:
+            batch = min(n - len(out), _MAX_IMAGES_PER_REQUEST)
+            src_buf = self._to_api_size(source_image)
+            resp = self._multipart_post(
+                f"{_BASE_URL}/images/edits",
+                data={
+                    "model": self._model,
+                    "prompt": full_prompt,
+                    "n": str(batch),
+                    "size": _GEN_SIZE,
+                    "quality": self._quality,
+                },
+                files={"image": ("source.png", src_buf, "image/png")},
+            )
+            chunk = [self._to_target_size(raw, size) for raw in self._decode(resp)]
+            if not chunk:
+                break
+            out.extend(chunk)
+        return out[:n]
 
     def inpaint(
         self,
@@ -140,24 +158,32 @@ class OpenAIImageProvider(PixelArtProvider):
         target_size = src_img.size
 
         full_prompt = _STYLE_PREFIX + prompt if prompt else _STYLE_PREFIX.rstrip(". ,")
-        src_buf  = self._to_api_size(source_image)
-        mask_buf = self._mask_to_api_size(mask_image)
-
-        resp = self._multipart_post(
-            f"{_BASE_URL}/images/edits",
-            data={
-                "model": self._model,
-                "prompt": full_prompt,
-                "n": str(min(n, 4)),
-                "size": _GEN_SIZE,
-                "quality": self._quality,
-            },
-            files={
-                "image": ("source.png", src_buf,  "image/png"),
-                "mask":  ("mask.png",   mask_buf, "image/png"),
-            },
-        )
-        return [self._to_target_size(raw, target_size) for raw in self._decode(resp)]
+        out: list[bytes] = []
+        while len(out) < n:
+            batch = min(n - len(out), _MAX_IMAGES_PER_REQUEST)
+            src_buf = self._to_api_size(source_image)
+            mask_buf = self._mask_to_api_size(mask_image)
+            resp = self._multipart_post(
+                f"{_BASE_URL}/images/edits",
+                data={
+                    "model": self._model,
+                    "prompt": full_prompt,
+                    "n": str(batch),
+                    "size": _GEN_SIZE,
+                    "quality": self._quality,
+                },
+                files={
+                    "image": ("source.png", src_buf, "image/png"),
+                    "mask": ("mask.png", mask_buf, "image/png"),
+                },
+            )
+            chunk = [
+                self._to_target_size(raw, target_size) for raw in self._decode(resp)
+            ]
+            if not chunk:
+                break
+            out.extend(chunk)
+        return out[:n]
 
     def cost_estimate(self, size: tuple[int, int], n: int) -> float:
         return _COST_MAP.get(self._quality, _COST_LOW) * n
