@@ -29,6 +29,12 @@ from PIL import Image
 from .. import assets, config, frames
 from ..geometry import crop_region, detect_native_scale, grid_snap
 from ..palette import load_palette, quantize_to_palette
+from ..prompt_roles import (
+    centerpiece_role_phrase,
+    compose_prompt,
+    panel_role_phrase,
+    space_role_phrase,
+)
 from ..providers import PixelArtProvider
 from ..providers.pixel.pixellab import png_bytes
 from ..schemas import Catalog
@@ -117,14 +123,16 @@ def spec_for_space(
     size = catalog.board_spaces.design_size(design)
     style_prefix = catalog.style.prompt + ". " if catalog.style.prompt else ""
     base = prompt_override if prompt_override else design.prompt
+    role = space_role_phrase(design.space_kind)
+    full_prompt = compose_prompt(style_prefix, role, base)
     style_ref, palette = _read_style_assets()
     return DrawSpec(
         category="spaces",
         asset_id=design.id,
-        prompt=style_prefix + base,
+        prompt=full_prompt,
         base_prompt=base,
         size=size,
-        candidates=config.SPACE_CANDIDATES,
+        candidates=config.space_candidates(),
         mode="txt2img",
         palette=palette,
         style_reference=style_ref,
@@ -156,6 +164,8 @@ def spec_for_panel(
 
     style_prefix = catalog.style.prompt + ". " if catalog.style.prompt else ""
     base = prompt_override if prompt_override else panel.prompt
+    role = panel_role_phrase()
+    full_prompt = compose_prompt(style_prefix, role, base)
     _, palette = _read_style_assets()
     target_size = panel.target_size
 
@@ -181,10 +191,10 @@ def spec_for_panel(
         return DrawSpec(
             category="panels",
             asset_id=panel.id,
-            prompt=style_prefix + base,
+            prompt=full_prompt,
             base_prompt=base,
             size=target_size,
-            candidates=config.PANEL_CANDIDATES,
+            candidates=config.panel_candidates(),
             mode="inpaint",
             palette=palette,
             style_reference=None,
@@ -203,10 +213,10 @@ def spec_for_panel(
     return DrawSpec(
         category="panels",
         asset_id=panel.id,
-        prompt=style_prefix + base,
+        prompt=full_prompt,
         base_prompt=base,
         size=target_size,
-        candidates=config.PANEL_CANDIDATES,
+        candidates=config.panel_candidates(),
         mode="img2img",
         palette=palette,
         style_reference=None,
@@ -233,6 +243,8 @@ def spec_for_centerpiece(
     cp = catalog.centerpiece
     style_prefix = catalog.style.prompt + ". " if catalog.style.prompt else ""
     base = prompt_override if prompt_override else cp.prompt
+    role = centerpiece_role_phrase()
+    full_prompt = compose_prompt(style_prefix, role, base)
     style_ref, palette = _read_style_assets()
     target_size = cp.target_size
 
@@ -240,10 +252,10 @@ def spec_for_centerpiece(
         return DrawSpec(
             category="centerpiece",
             asset_id="centerpiece",
-            prompt=style_prefix + base,
+            prompt=full_prompt,
             base_prompt=base,
             size=target_size,
-            candidates=config.CENTERPIECE_CANDIDATES,
+            candidates=config.centerpiece_candidates(),
             mode="txt2img",
             palette=palette,
             style_reference=style_ref,
@@ -261,10 +273,10 @@ def spec_for_centerpiece(
     return DrawSpec(
         category="centerpiece",
         asset_id="centerpiece",
-        prompt=style_prefix + base,
+        prompt=full_prompt,
         base_prompt=base,
         size=target_size,
-        candidates=config.CENTERPIECE_CANDIDATES,
+        candidates=config.centerpiece_candidates(),
         mode="img2img",
         palette=palette,
         style_reference=None,
@@ -317,8 +329,6 @@ def draw_cell(
         f"provider={provider.name})"
     )
 
-    estimated = provider.cost_estimate(spec.size, spec.candidates)
-
     try:
         raws = _provider_call(spec, provider)
     except Exception as e:
@@ -326,6 +336,9 @@ def draw_cell(
         return DrawResult(
             spec=spec, history_filenames=[], promoted_filename=None, spent_usd=0.0,
         )
+
+    # Bill from images actually produced (providers may batch internally or cap per HTTP call).
+    spent_usd = provider.cost_estimate(spec.size, len(raws))
 
     new_basenames: list[str] = []
     extras = {
@@ -354,7 +367,7 @@ def draw_cell(
         spec=spec,
         history_filenames=new_basenames,
         promoted_filename=promoted,
-        spent_usd=estimated,
+        spent_usd=spent_usd,
     )
 
 

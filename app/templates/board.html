@@ -8,6 +8,7 @@
 {% endblock %}
 
 {% block content %}
+{% set bb = board_base if board_base else '/b/' ~ board_id %}
 <section class="board-stage">
 
   <header class="board-head">
@@ -17,6 +18,7 @@
         class="display"
         id="board-title"
         data-board-id="{{ board_id }}"
+        data-board-base="{{ board_base or '' }}"
         data-original="{{ project }}"
         title="Click to rename"
       >{{ project }}</h1>
@@ -53,7 +55,7 @@
   #}
   <nav class="board-actions" aria-label="Board actions">
     {% if not has_palette %}
-    <form method="post" action="/b/{{ board_id }}/actions/style" data-action class="board-action-form">
+    <form method="post" action="{{ bb }}/actions/style" data-action class="board-action-form">
       <button type="submit" class="board-action is-primary">
         <span class="board-action-eyebrow">Setup</span>
         <span class="board-action-label">Extract style from mockup</span>
@@ -67,7 +69,7 @@
        is ghosted and shows where to add one.
     #}
     {% if has_openai_key %}
-    <form method="post" action="/b/{{ board_id }}/actions/analyze" data-action class="board-action-form">
+    <form method="post" action="{{ bb }}/actions/analyze" data-action class="board-action-form">
       <button type="submit" class="board-action is-primary">
         <span class="board-action-eyebrow">AI · GPT-4o</span>
         <span class="board-action-label">Analyze &amp; fill prompts</span>
@@ -87,7 +89,7 @@
        share a design id across multiple positions (e.g. seven copies of
        side_property) so cost is billed per design, not per position. #}
     {% if all_generation.missing %}
-    <form method="post" action="/b/{{ board_id }}/actions/generate-missing/all" data-action class="board-action-form">
+    <form method="post" action="{{ bb }}/actions/generate-missing/all" data-action class="board-action-form">
       <button type="submit" class="board-action">
         <span class="board-action-eyebrow">Generate</span>
         <span class="board-action-label">{{ all_generation.label }}</span>
@@ -110,7 +112,7 @@
     </span>
     {% endif %}
 
-    <form method="post" action="/b/{{ board_id }}/actions/preview" data-action class="board-action-form">
+    <form method="post" action="{{ bb }}/actions/preview" data-action class="board-action-form">
       <button type="submit" class="board-action">
         <span class="board-action-eyebrow">Composite</span>
         <span class="board-action-label">Assemble board preview</span>
@@ -118,7 +120,7 @@
       </button>
     </form>
 
-    <a href="/b/{{ board_id }}/device-preview" class="board-action board-action-link">
+    <a href="{{ bb }}/device-preview" class="board-action board-action-link">
       <span class="board-action-eyebrow">Preview</span>
       <span class="board-action-label">Device Preview</span>
       <span class="board-action-est">free &middot; instant</span>
@@ -144,6 +146,7 @@
     class="board-with-panel is-panel-closed"
     id="board-with-panel"
     data-board-id="{{ board_id }}"
+    data-board-base="{{ board_base or '' }}"
     data-reload-on="style,generate.spaces,generate.all,cleanup"
   >
     <div class="board-plate" id="board-plate">
@@ -156,7 +159,7 @@
 
   <footer class="board-foot">
     <p class="caption" style="margin: 0;">
-      16:9 native &middot; pixel-perfect &middot; see <a href="/b/{{ board_id }}/spec">tech spec</a> for geometry
+      16:9 native &middot; pixel-perfect &middot; see <a href="{{ bb }}/spec">tech spec</a> for geometry
     </p>
   </footer>
 

@@ -17,7 +17,9 @@
 
     {% block breadcrumb %}
     <nav class="section-path" aria-label="breadcrumb">
-      {% if board_id %}
+      {% if board_base %}
+      <a href="{{ board_base }}/" class="crumb">Board</a>
+      {% elif board_id %}
       <a href="/b/{{ board_id }}/" class="crumb">Board</a>
       {% else %}
       <span class="crumb">Boards</span>
@@ -51,7 +53,10 @@
         </div>
       </div>
 
-      {% if board_id %}
+      {% if board_base %}
+      <a class="header-link" href="{{ board_base }}/preview">Preview</a>
+      <a class="header-link" href="{{ board_base }}/spec" target="_blank" rel="noopener">Tech spec</a>
+      {% elif board_id %}
       <a class="header-link" href="/b/{{ board_id }}/preview">Preview</a>
       <a class="header-link" href="/b/{{ board_id }}/spec" target="_blank" rel="noopener">Tech spec</a>
       {% endif %}

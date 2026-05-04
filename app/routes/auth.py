@@ -67,8 +67,6 @@ def logout_submit(request: Request):
 
 @router.get("/register", response_class=HTMLResponse)
 def register_view(request: Request, error: str | None = None):
-    if not users.is_setup_required():
-        return RedirectResponse("/login?info=Registration+is+closed", status_code=303)
     return request.app.state.templates.TemplateResponse(
         request, "auth_register.html", {"error": error}
     )
@@ -81,10 +79,8 @@ def register_submit(
     password: str = Form(...),
     display_name: str = Form(default=""),
 ):
-    if not users.is_setup_required():
-        return RedirectResponse("/login?info=Registration+is+closed", status_code=303)
     try:
-        user = users.create_first_user(
+        user = users.register_user(
             email=email,
             password=password,
             display_name=display_name or None,

@@ -5,11 +5,11 @@ from __future__ import annotations
 import base64
 import io
 import os
-import time
 from functools import partial
+from typing import Annotated
 
 import httpx
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from PIL import Image
 
@@ -18,12 +18,12 @@ import cost_ledger
 import pipeline_adapters
 import spec_data
 from board_svg import render_board_svg, render_spec_svg
-from boardfactory import boards as bf_boards
 from boardfactory import config as bf_config
 from boardfactory import frames as bf_frames
 from boardfactory.providers.pixel.pixellab import list_pixellab_presets
 
 from routes import deps
+from services import asset_urls
 from services import boards as svc_boards
 from services import catalog as svc_catalog
 from services import cells as svc_cells
@@ -33,12 +33,23 @@ from storage.fs import workspace as fs_ws
 
 router = APIRouter()
 
+NestedBoardId = Annotated[str, Depends(deps.require_nested_board)]
 
-@router.get("/b/{board_id}/", response_class=HTMLResponse)
-def board_view(request: Request, board_id: str):
-    deps.ensure_owned_board(request, board_id)
+
+# ── helpers ───────────────────────────────────────────────────────────
+
+
+def _board_prefix(board_id: str) -> str:
+    return deps.board_http_prefix(board_id)
+
+
+# ═══ GET: canonical nested paths; legacy /b/… is 307 at end of this file ═══
+
+
+@router.get("/users/{username}/board-games/{path_slug}/", response_class=HTMLResponse)
+def board_view(request: Request, board_id: NestedBoardId):
     if not fs_ws.has_palette(board_id):
-        return RedirectResponse(f"/b/{board_id}/setup", status_code=303)
+        return RedirectResponse(f"{_board_prefix(board_id)}/setup", status_code=303)
 
     catalog = deps.load_board_catalog(board_id)
     stats = svc_cells.collect_board_stats(board_id, catalog)
@@ -55,11 +66,6 @@ def board_view(request: Request, board_id: str):
     n_missing_panels = len(missing_panel_ids)
     generated_designs = n_designs - n_missing_designs
 
-    # The board shows N positions; each design id can fill multiple positions
-    # (e.g. side_property occupies 7 squares with the same art). We bill per
-    # design (one provider call), but the user sees positions. Surface both
-    # so the action label reads in board-units while the cost line reads in
-    # billing-units.
     designs_list = catalog.get("board_spaces", {}).get("designs", [])
     total_positions = sum(len(d.get("positions", [])) for d in designs_list)
     missing_positions = sum(
@@ -68,8 +74,6 @@ def board_view(request: Request, board_id: str):
     )
     generated_positions = total_positions - missing_positions
 
-    per_space_cost = pipeline_adapters.estimate_generate_one("spaces")
-    per_panel_cost = pipeline_adapters.estimate_generate_one("panels")
     all_generate_estimate = pipeline_adapters.estimate_generate_all(
         n_missing_designs, n_missing_panels
     )
@@ -79,11 +83,9 @@ def board_view(request: Request, board_id: str):
     frame_overlay_url = None
     frame_block = catalog.get("frame", {}) or {}
     if frame_block.get("enabled") and frame_block.get("apply_to_panels", True):
-        # Read-only check — use set_active_board so the home page never
-        # queues behind an in-flight pipeline job for the same board.
         with bf_config.set_active_board(board_id):
             if bf_frames.has_house_frame():
-                frame_overlay_url = f"/b/{board_id}/frame.png"
+                frame_overlay_url = f"{_board_prefix(board_id)}/frame.png"
 
     svg_markup = render_board_svg(
         catalog, space_status, panel_status, cp_status,
@@ -119,7 +121,7 @@ def board_view(request: Request, board_id: str):
             "label": (
                 "All assets generated" if n_missing_all == 0
                 else "Generate all spaces & UI" if n_generated_all == 0
-                else "Generate missing spaces & UI"
+                else "Generate missing spaces"
             ),
         },
         "generation": svc_catalog.read_generation(catalog),
@@ -127,9 +129,8 @@ def board_view(request: Request, board_id: str):
     return request.app.state.templates.TemplateResponse(request, "board.html", ctx)
 
 
-@router.get("/b/{board_id}/setup", response_class=HTMLResponse)
-def setup_view(request: Request, board_id: str):
-    deps.ensure_owned_board(request, board_id)
+@router.get("/users/{username}/board-games/{path_slug}/setup", response_class=HTMLResponse)
+def setup_view(request: Request, board_id: NestedBoardId):
     mockup_present, mockup_rel = svc_boards.mockup_present(board_id)
     ctx = deps.editorial_template_context(board_id, request)
     ctx.update({
@@ -140,20 +141,214 @@ def setup_view(request: Request, board_id: str):
     return request.app.state.templates.TemplateResponse(request, "setup.html", ctx)
 
 
-@router.post("/b/{board_id}/actions/upload-mockup")
-async def action_upload_mockup(
-    request: Request,
-    board_id: str,
-    file: UploadFile = File(...),
+@router.get("/users/{username}/board-games/{path_slug}/spec", response_class=HTMLResponse)
+def spec_view(request: Request, board_id: NestedBoardId):
+    """Live tech spec from the board's catalog + the shared prose markdown."""
+    catalog = deps.load_board_catalog(board_id)
+    prose = deps.load_spec_prose_sections()
+    user = getattr(request.state, "user", None)
+    ctx = deps.editorial_template_context(board_id, request)
+    ctx.update({
+        "summary": spec_data.header_summary(catalog),
+        "density": spec_data.pixel_density_rows(catalog),
+        "designs": spec_data.design_table_rows(catalog),
+        "panels": spec_data.panel_table_rows(catalog),
+        "battles": spec_data.battle_table_rows(catalog),
+        "legend": spec_data.design_summary_by_kind(catalog),
+        "svg_markup": render_spec_svg(catalog),
+        "prose": prose,
+        "cost": cost_ledger.summary(),
+        "has_palette": fs_ws.has_palette(board_id),
+        "estimates": {"spaces": 0, "panels": 0, "centerpiece": 0},
+        "user": user.public_dict() if user else None,
+    })
+    return request.app.state.templates.TemplateResponse(request, "spec.html", ctx)
+
+
+@router.get("/users/{username}/board-games/{path_slug}/frame", response_class=HTMLResponse)
+def frame_view(request: Request, board_id: NestedBoardId):
+    """House-frame picker / library page."""
+    catalog = deps.load_board_catalog(board_id)
+
+    with bf_config.set_active_board(board_id):
+        has_frame = bf_frames.has_house_frame()
+        meta = bf_frames.read_house_meta() if has_frame else None
+
+    panels = catalog.get("feature_panels", {}).get("panels", [])
+    store = bs.get_store()
+    bp = _board_prefix(board_id)
+    candidates = []
+    for p in panels:
+        live_rel = fs_ws.live_rel("panels", p["id"])
+        if not store.exists(board_id, live_rel):
+            continue
+        url_rel = live_rel.removeprefix("workspace/")
+        candidates.append({
+            "id": p["id"],
+            "size": [p["target_size"][0], p["target_size"][1]],
+            "url": asset_urls.board_asset_url(
+                http_prefix=bp,
+                asset_relpath=url_rel,
+                mtime_ms=store.stat(board_id, live_rel).mtime_ms,
+            ),
+        })
+
+    ctx = deps.editorial_template_context(board_id, request)
+    ctx.update({
+        "has_frame": has_frame,
+        "meta": meta.to_dict() if meta else None,
+        "candidates": candidates,
+        "frame_enabled": bool((catalog.get("frame") or {}).get("enabled")),
+        "frame_url": f"{bp}/frame.png?t={asset_urls.wall_clock_ms()}" if has_frame else None,
+    })
+    return request.app.state.templates.TemplateResponse(request, "frame.html", ctx)
+
+
+@router.get("/users/{username}/board-games/{path_slug}/frame.png")
+def frame_overlay(request: Request, board_id: NestedBoardId, w: int = 0, h: int = 0):
+    """Compose the house frame at the requested size on demand. Cacheable."""
+    with bf_config.set_active_board(board_id):
+        loaded = bf_frames.load_house_frame()
+    if loaded is None:
+        raise HTTPException(404, "No house frame adopted on this board")
+
+    slice_, _meta = loaded
+    if w <= 0 or h <= 0:
+        target = (slice_.corner_tl.width + slice_.corner_tr.width + slice_.edge_top.width,
+                  slice_.corner_tl.height + slice_.corner_bl.height + slice_.edge_left.height)
+    else:
+        target = (w, h)
+    img = bf_frames.compose_frame(slice_, target)
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return StreamingResponse(
+        io.BytesIO(buf.getvalue()),
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@router.get("/users/{username}/board-games/{path_slug}/api/frame/preview.png")
+def api_frame_preview(
+    request: Request, board_id: NestedBoardId, source_kind: str, source_id: str,
+    ring_px: int, w: int = 260, h: int = 240,
 ):
-    """Accept a PNG/JPEG mockup upload and save it as <store-root>/<id>/mockup/board.png.
+    """Live preview: extract 9-slice + recompose at target size, no disk write."""
+    if ring_px < 2:
+        raise HTTPException(400, "ring_px must be at least 2")
 
-    Validates that the file is an image and checks the aspect ratio — a 16:9
-    image (within 5% tolerance) is ideal but we accept anything and warn
-    the user in the JSON response if it strays too far.
-    """
-    deps.ensure_owned_board(request, board_id)
+    catalog = deps.load_board_catalog(board_id)
+    if source_kind == "panel":
+        live = fs_ws.live_path(board_id, "panels", source_id)
+        if not live.exists():
+            raise HTTPException(404)
+        src_img = Image.open(live).convert("RGBA")
+    elif source_kind == "mockup":
+        panels = catalog.get("feature_panels", {}).get("panels", [])
+        p = next((x for x in panels if x["id"] == source_id), None)
+        if p is None:
+            raise HTTPException(404)
+        mockup_path = fs_ws.board_root(board_id) / catalog["style"]["reference_image"]
+        if not mockup_path.exists():
+            raise HTTPException(404)
+        bx1, by1, bx2, by2 = p["bbox"]
+        src_img = Image.open(mockup_path).convert("RGBA").crop((bx1, by1, bx2, by2))
+        src_img = src_img.resize(tuple(p["target_size"]), Image.NEAREST)
+    else:
+        raise HTTPException(400)
 
+    if ring_px * 2 >= min(src_img.size):
+        raise HTTPException(400, f"ring_px={ring_px} too thick for source")
+
+    slice_ = bf_frames.extract_9slice(src_img, ring_px)
+    composed = bf_frames.compose_frame(slice_, (w, h))
+    buf = io.BytesIO()
+    composed.save(buf, format="PNG")
+    return StreamingResponse(io.BytesIO(buf.getvalue()), media_type="image/png",
+                             headers={"Cache-Control": "no-store"})
+
+
+@router.get("/users/{username}/board-games/{path_slug}/preview", response_class=HTMLResponse)
+def preview_view(request: Request, board_id: NestedBoardId):
+    store = bs.get_store()
+    preview_rel = svc_boards.composite_preview_workspace_rel(board_id)
+    preview_present = preview_rel is not None
+    preview_url = None
+    bp = _board_prefix(board_id)
+    if preview_rel is not None:
+        preview_url = asset_urls.board_asset_url(
+            http_prefix=bp,
+            asset_relpath=preview_rel.removeprefix("workspace/"),
+            mtime_ms=store.stat(board_id, preview_rel).mtime_ms,
+        )
+    manifest_present = store.exists(board_id, "export/board_manifest.json")
+    exported_count = sum(1 for f in store.list(board_id, "export") if f.endswith(".png"))
+    ctx = deps.editorial_template_context(board_id, request)
+    ctx.update({
+        "preview_present": preview_present,
+        "preview_url": preview_url,
+        "manifest_present": manifest_present,
+        "exported_count": exported_count,
+    })
+    return request.app.state.templates.TemplateResponse(request, "preview.html", ctx)
+
+
+@router.get("/users/{username}/board-games/{path_slug}/device-preview", response_class=HTMLResponse)
+def device_preview_view(request: Request, board_id: NestedBoardId):
+    """Composited board inside device frame mockups."""
+    store = bs.get_store()
+    bp = _board_prefix(board_id)
+
+    def _asset_url(name: str) -> str | None:
+        rel = f"workspace/preview/{name}"
+        if not store.exists(board_id, rel):
+            return None
+        return asset_urls.board_asset_url(
+            http_prefix=bp,
+            asset_relpath=rel.removeprefix("workspace/"),
+            mtime_ms=store.stat(board_id, rel).mtime_ms,
+        )
+
+    idle_url = _asset_url("board_idle.png")
+    active_url = _asset_url("board_active.png")
+
+    catalog = deps.load_board_catalog(board_id)
+    bw, bh = catalog.get("board_size", [1920, 1080])
+
+    ctx = deps.editorial_template_context(board_id, request)
+    ctx.update({
+        "idle_url": idle_url,
+        "active_url": active_url,
+        "preview_present": bool(idle_url or active_url),
+        "board_w": bw,
+        "board_h": bh,
+    })
+    return request.app.state.templates.TemplateResponse(request, "device_preview.html", ctx)
+
+
+@router.get("/users/{username}/board-games/{path_slug}/api/generation")
+def api_get_generation(request: Request, board_id: NestedBoardId):
+    """JSON for the generation settings modal (palette, provider, models)."""
+    catalog = deps.load_board_catalog(board_id)
+    settings = svc_catalog.read_generation(catalog)
+    return JSONResponse({
+        "settings": settings,
+        "options": {"pixellab_models": list_pixellab_presets()},
+    })
+
+
+@router.get("/users/{username}/board-games/{path_slug}/api/cell/{category}/{asset_id}")
+def api_cell(request: Request, board_id: NestedBoardId, category: str, asset_id: str):
+    return JSONResponse(deps.build_cell_side_panel_payload(board_id, category, asset_id))
+
+
+# ═══ POST / PUT: nested (canonical) + legacy /b/… ═══
+
+
+async def _action_upload_mockup(
+    request: Request, board_id: str, file: UploadFile,
+) -> JSONResponse:
     content_type = (file.content_type or "").lower()
     if not content_type.startswith("image/"):
         raise HTTPException(400, "File must be an image (PNG or JPEG).")
@@ -177,31 +372,31 @@ async def action_upload_mockup(
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="PNG")
     bs.get_store().write_bytes(board_id, "mockup/board.png", buf.getvalue())
-
+    bp = _board_prefix(board_id)
     return JSONResponse({
         "ok": True,
         "size": [w, h],
         "warn_aspect": warn,
-        "redirect": f"/b/{board_id}/setup?mockup_ready=1",
+        "redirect": f"{bp}/setup?mockup_ready=1",
     })
 
 
-@router.post("/b/{board_id}/actions/generate-mockup")
-async def action_generate_mockup(request: Request, board_id: str):
-    """AI-generate a 1920×1080 mockup from a text prompt and save it.
+@router.post("/users/{username}/board-games/{path_slug}/actions/upload-mockup")
+async def action_upload_mockup_nested(
+    request: Request, board_id: NestedBoardId, file: UploadFile = File(...),
+):
+    return await _action_upload_mockup(request, board_id, file)
 
-    The composed prompt includes **derived layout context** from the board catalog
-    (board size, perimeter-space counts, feature-panel count, centerpiece intent)
-    plus an optional **style.prompt** snippet — see ``services.mockup_prompt``.
 
-    Synchronous (blocks until done) to keep the setup flow simple. We ask
-    OpenAI's Images API for the largest landscape size it supports
-    (1536×1024 ≈ 3:2), centre-crop to 16:9, and resize to 1920×1080 so the
-    result drops cleanly into the canvas-aware downstream pipeline.
-
-    Key resolution: user.openai_api_key → OPENAI_API_KEY env var.
-    """
+@router.post("/b/{board_id}/actions/upload-mockup")
+async def action_upload_mockup_legacy(
+    request: Request, board_id: str, file: UploadFile = File(...),
+):
     deps.ensure_owned_board(request, board_id)
+    return await _action_upload_mockup(request, board_id, file)
+
+
+async def _action_generate_mockup(request: Request, board_id: str) -> JSONResponse:
     body = await request.json()
     prompt = (body.get("prompt") or "").strip()
     if not prompt:
@@ -223,9 +418,8 @@ async def action_generate_mockup(request: Request, board_id: str):
     oa_quality = settings["openai"]["quality"]
 
     framing_suffix = (
-        " — top-down board game canvas, 16:9 layout, decorative border with "
-        "a clear central focal area, ornate framing for surrounding cells, "
-        "rich cohesive palette, no text or logos."
+        " — single unified 16:9 tabletop board illustration, even readable zones, "
+        "rich cohesive palette; decorate borders only where they clarify zones."
     )
     full_prompt = mockup_prompt_svc.compose_mockup_image_prompt(
         prompt, catalog, framing_suffix=framing_suffix
@@ -236,7 +430,7 @@ async def action_generate_mockup(request: Request, board_id: str):
             "Combined prompt is too long after adding layout hints; shorten your description.",
         )
 
-    api_size = "1536x1024"  # widest landscape OpenAI Images currently supports
+    api_size = "1536x1024"
     try:
         async with httpx.AsyncClient(timeout=180.0) as client:
             r = await client.post(
@@ -279,8 +473,6 @@ async def action_generate_mockup(request: Request, board_id: str):
     else:
         raise HTTPException(502, "OpenAI response did not include image data.")
 
-    # Centre-crop to 16:9 then resize to 1920×1080 so the rest of the
-    # pipeline can treat it identically to an uploaded reference.
     img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
     src_w, src_h = img.size
     target_ratio = 16 / 9
@@ -297,123 +489,33 @@ async def action_generate_mockup(request: Request, board_id: str):
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     bs.get_store().write_bytes(board_id, "mockup/board.png", buf.getvalue())
-
+    bp = _board_prefix(board_id)
     return JSONResponse({
         "ok": True,
         "size": [1920, 1080],
         "warn_aspect": False,
-        "redirect": f"/b/{board_id}/setup?mockup_ready=1",
+        "redirect": f"{bp}/setup?mockup_ready=1",
     })
 
 
-@router.get("/b/{board_id}/spec", response_class=HTMLResponse)
-def spec_view(request: Request, board_id: str):
-    """Live tech spec from the board's catalog + the shared prose markdown."""
+@router.post("/users/{username}/board-games/{path_slug}/actions/generate-mockup")
+async def action_generate_mockup_nested(request: Request, board_id: NestedBoardId):
+    return await _action_generate_mockup(request, board_id)
+
+
+@router.post("/b/{board_id}/actions/generate-mockup")
+async def action_generate_mockup_legacy(request: Request, board_id: str):
     deps.ensure_owned_board(request, board_id)
-    catalog = deps.load_board_catalog(board_id)
-    prose = deps.load_spec_prose_sections()
-    user = getattr(request.state, "user", None)
-    ctx = {
-        "board_id": board_id,
-        "project": catalog.get("project", board_id),
-        "summary": spec_data.header_summary(catalog),
-        "density": spec_data.pixel_density_rows(catalog),
-        "designs": spec_data.design_table_rows(catalog),
-        "panels": spec_data.panel_table_rows(catalog),
-        "battles": spec_data.battle_table_rows(catalog),
-        "legend": spec_data.design_summary_by_kind(catalog),
-        "svg_markup": render_spec_svg(catalog),
-        "prose": prose,
-        "cost": cost_ledger.summary(),
-        "has_palette": fs_ws.has_palette(board_id),
-        "estimates": {"spaces": 0, "panels": 0, "centerpiece": 0},
-        "user": user.public_dict() if user else None,
-    }
-    return request.app.state.templates.TemplateResponse(request, "spec.html", ctx)
+    return await _action_generate_mockup(request, board_id)
 
 
-@router.get("/b/{board_id}/frame", response_class=HTMLResponse)
-def frame_view(request: Request, board_id: str):
-    """House-frame picker / library page."""
-    deps.ensure_owned_board(request, board_id)
-    catalog = deps.load_board_catalog(board_id)
-
-    # Read-only frame metadata for the setup page — set_active_board avoids
-    # blocking on the per-board write lock during long pipeline jobs.
-    with bf_config.set_active_board(board_id):
-        has_frame = bf_frames.has_house_frame()
-        meta = bf_frames.read_house_meta() if has_frame else None
-
-    panels = catalog.get("feature_panels", {}).get("panels", [])
-    store = bs.get_store()
-    candidates = []
-    for p in panels:
-        live_rel = fs_ws.live_rel("panels", p["id"])
-        if not store.exists(board_id, live_rel):
-            continue
-        ts_s = store.stat(board_id, live_rel).mtime_ms // 1000
-        # Asset route is rooted at /b/<id>/asset/<workspace-relative>.
-        url_rel = live_rel.removeprefix("workspace/")
-        candidates.append({
-            "id": p["id"],
-            "size": [p["target_size"][0], p["target_size"][1]],
-            "url": f"/b/{board_id}/asset/{url_rel}?t={ts_s}",
-        })
-
-    ctx = deps.editorial_template_context(board_id, request)
-    ctx.update({
-        "has_frame": has_frame,
-        "meta": meta.to_dict() if meta else None,
-        "candidates": candidates,
-        "frame_enabled": bool((catalog.get("frame") or {}).get("enabled")),
-        "frame_url": f"/b/{board_id}/frame.png?t={int(time.time())}" if has_frame else None,
-    })
-    return request.app.state.templates.TemplateResponse(request, "frame.html", ctx)
-
-
-@router.get("/b/{board_id}/frame.png")
-def frame_overlay(request: Request, board_id: str, w: int = 0, h: int = 0):
-    """Compose the house frame at the requested size on demand. Cacheable."""
-    deps.ensure_owned_board(request, board_id)
-    # Pure read of the house-frame slices; no writes. Use set_active_board
-    # so a pending pipeline job doesn't stall this overlay request.
-    with bf_config.set_active_board(board_id):
-        loaded = bf_frames.load_house_frame()
-    if loaded is None:
-        raise HTTPException(404, "No house frame adopted on this board")
-
-    slice_, meta = loaded
-    if w <= 0 or h <= 0:
-        # Return the raw composed-at-source-size frame for previews.
-        target = (slice_.corner_tl.width + slice_.corner_tr.width + slice_.edge_top.width,
-                  slice_.corner_tl.height + slice_.corner_bl.height + slice_.edge_left.height)
-    else:
-        target = (w, h)
-    img = bf_frames.compose_frame(slice_, target)
-
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return StreamingResponse(
-        io.BytesIO(buf.getvalue()),
-        media_type="image/png",
-        headers={"Cache-Control": "public, max-age=300"},
-    )
-
-
-@router.post("/b/{board_id}/api/frame/adopt")
-async def api_frame_adopt(
+async def _api_frame_adopt(
     request: Request, board_id: str,
-    source_kind: str = Form(...),
-    source_id: str = Form(...),
-    ring_px: int = Form(...),
-    enable_after: bool = Form(default=True),
-):
-    """Adopt a 9-slice extracted from an existing panel asset as the house frame.
-
-    source_kind: 'panel'  → source_id = panel id, reads workspace/live/panels/<id>.png
-                 'mockup' → source_id = panel id whose bbox slice of the mockup is used
-    """
-    deps.ensure_owned_board(request, board_id)
+    source_kind: str,
+    source_id: str,
+    ring_px: int,
+    enable_after: bool,
+) -> JSONResponse:
     if ring_px < 2:
         raise HTTPException(400, "ring_px must be at least 2")
 
@@ -439,14 +541,12 @@ async def api_frame_adopt(
         bx1, by1, bx2, by2 = p["bbox"]
         mockup = Image.open(mockup_path).convert("RGBA")
         src_img = mockup.crop((bx1, by1, bx2, by2))
-        # Resize to the panel's target_size so ring_px is in target-asset pixels.
         tw, th = p["target_size"]
         src_img = src_img.resize((tw, th), Image.NEAREST)
         src_size = (tw, th)
     else:
         raise HTTPException(400, f"Unknown source_kind {source_kind!r}")
 
-    # Validate ring fits.
     if ring_px * 2 >= min(src_size):
         raise HTTPException(400, f"ring_px={ring_px} is too thick for source {src_size}")
 
@@ -461,7 +561,6 @@ async def api_frame_adopt(
         bf_frames.adopt_house_frame(slice_, meta)
 
     if enable_after:
-        # Flip the frame.enabled bit on so the compositor / SVG honor the new frame.
         data = deps.load_board_catalog(board_id)
         data.setdefault("frame", {})
         data["frame"]["enabled"] = True
@@ -476,10 +575,34 @@ async def api_frame_adopt(
     })
 
 
-@router.post("/b/{board_id}/api/frame/disable")
-async def api_frame_disable(request: Request, board_id: str):
-    """Turn off frame overlay without deleting the frame assets."""
+@router.post("/users/{username}/board-games/{path_slug}/api/frame/adopt")
+async def api_frame_adopt_nested(
+    request: Request, board_id: NestedBoardId,
+    source_kind: str = Form(...),
+    source_id: str = Form(...),
+    ring_px: int = Form(...),
+    enable_after: bool = Form(default=True),
+):
+    return await _api_frame_adopt(
+        request, board_id, source_kind, source_id, ring_px, enable_after,
+    )
+
+
+@router.post("/b/{board_id}/api/frame/adopt")
+async def api_frame_adopt_legacy(
+    request: Request, board_id: str,
+    source_kind: str = Form(...),
+    source_id: str = Form(...),
+    ring_px: int = Form(...),
+    enable_after: bool = Form(default=True),
+):
     deps.ensure_owned_board(request, board_id)
+    return await _api_frame_adopt(
+        request, board_id, source_kind, source_id, ring_px, enable_after,
+    )
+
+
+async def _api_frame_disable(request: Request, board_id: str) -> JSONResponse:
     data = deps.load_board_catalog(board_id)
     data.setdefault("frame", {})
     data["frame"]["enabled"] = False
@@ -487,120 +610,26 @@ async def api_frame_disable(request: Request, board_id: str):
     return JSONResponse({"ok": True})
 
 
-@router.get("/b/{board_id}/api/frame/preview.png")
-def api_frame_preview(request: Request, board_id: str, source_kind: str, source_id: str,
-                      ring_px: int, w: int = 260, h: int = 240):
-    """Live preview: extract 9-slice + recompose at target size, no disk write.
+@router.post("/users/{username}/board-games/{path_slug}/api/frame/disable")
+async def api_frame_disable_nested(request: Request, board_id: NestedBoardId):
+    return await _api_frame_disable(request, board_id)
 
-    Used by the picker UI's thickness slider for instant feedback.
-    """
+
+@router.post("/b/{board_id}/api/frame/disable")
+async def api_frame_disable_legacy(request: Request, board_id: str):
     deps.ensure_owned_board(request, board_id)
-    if ring_px < 2:
-        raise HTTPException(400, "ring_px must be at least 2")
-
-    catalog = deps.load_board_catalog(board_id)
-    if source_kind == "panel":
-        live = fs_ws.live_path(board_id, "panels", source_id)
-        if not live.exists():
-            raise HTTPException(404)
-        src_img = Image.open(live).convert("RGBA")
-    elif source_kind == "mockup":
-        panels = catalog.get("feature_panels", {}).get("panels", [])
-        p = next((x for x in panels if x["id"] == source_id), None)
-        if p is None:
-            raise HTTPException(404)
-        mockup_path = fs_ws.board_root(board_id) / catalog["style"]["reference_image"]
-        if not mockup_path.exists():
-            raise HTTPException(404)
-        bx1, by1, bx2, by2 = p["bbox"]
-        src_img = Image.open(mockup_path).convert("RGBA").crop((bx1, by1, bx2, by2))
-        src_img = src_img.resize(tuple(p["target_size"]), Image.NEAREST)
-    else:
-        raise HTTPException(400)
-
-    if ring_px * 2 >= min(src_img.size):
-        raise HTTPException(400, f"ring_px={ring_px} too thick for source")
-
-    slice_ = bf_frames.extract_9slice(src_img, ring_px)
-    composed = bf_frames.compose_frame(slice_, (w, h))
-    buf = io.BytesIO()
-    composed.save(buf, format="PNG")
-    return StreamingResponse(io.BytesIO(buf.getvalue()), media_type="image/png",
-                             headers={"Cache-Control": "no-store"})
+    return await _api_frame_disable(request, board_id)
 
 
-@router.get("/b/{board_id}/preview", response_class=HTMLResponse)
-def preview_view(request: Request, board_id: str):
-    deps.ensure_owned_board(request, board_id)
-    store = bs.get_store()
-    preview_rel = "workspace/preview/board_preview.png"
-    preview_present = store.exists(board_id, preview_rel)
-    preview_url = None
-    if preview_present:
-        ts_s = store.stat(board_id, preview_rel).mtime_ms // 1000
-        preview_url = f"/b/{board_id}/asset/preview/board_preview.png?t={ts_s}"
-    manifest_present = store.exists(board_id, "export/board_manifest.json")
-    exported_count = sum(1 for f in store.list(board_id, "export") if f.endswith(".png"))
-    ctx = deps.editorial_template_context(board_id, request)
-    ctx.update({
-        "preview_present": preview_present,
-        "preview_url": preview_url,
-        "manifest_present": manifest_present,
-        "exported_count": exported_count,
-    })
-    return request.app.state.templates.TemplateResponse(request, "preview.html", ctx)
+def _board_home_redirect(board_id: str) -> str:
+    return f"{_board_prefix(board_id)}/"
 
 
-@router.get("/b/{board_id}/device-preview", response_class=HTMLResponse)
-def device_preview_view(request: Request, board_id: str):
-    """Show the composited board inside renderings of physical screens.
-
-    Renders the same workspace/preview/board_*.png the compositor produces
-    inside CSS mockups of TV / desktop / laptop / Switch / Steam Deck so
-    the board can be sanity-checked at multiple form factors without
-    leaving the browser.
-    """
-    deps.ensure_owned_board(request, board_id)
-    store = bs.get_store()
-
-    def _asset_url(name: str) -> str | None:
-        rel = f"workspace/preview/{name}"
-        if not store.exists(board_id, rel):
-            return None
-        ts_s = store.stat(board_id, rel).mtime_ms // 1000
-        return f"/b/{board_id}/asset/preview/{name}?t={ts_s}"
-
-    idle_url = _asset_url("board_idle.png")
-    active_url = _asset_url("board_active.png")
-
-    catalog = deps.load_board_catalog(board_id)
-    bw, bh = catalog.get("board_size", [1920, 1080])
-
-    ctx = deps.editorial_template_context(board_id, request)
-    ctx.update({
-        "idle_url": idle_url,
-        "active_url": active_url,
-        "preview_present": bool(idle_url or active_url),
-        "board_w": bw,
-        "board_h": bh,
-    })
-    return request.app.state.templates.TemplateResponse(request, "device_preview.html", ctx)
+def _board_preview_redirect(board_id: str) -> str:
+    return f"{_board_prefix(board_id)}/preview"
 
 
-# ────────────────────────── routes: pipeline actions (board-scoped) ──────────────────────────
-
-
-@router.post("/b/{board_id}/actions/analyze")
-async def action_analyze(request: Request, board_id: str):
-    """Send the board mockup to GPT-4o vision and auto-fill every catalog prompt.
-
-    Key resolution (first found wins):
-      1. The requesting user's saved openai_api_key
-      2. OPENAI_API_KEY environment variable
-    If neither is set, returns 400 so the UI can surface a clear message.
-    """
-    deps.ensure_owned_board(request, board_id)
-
+async def _action_analyze(request: Request, board_id: str) -> JSONResponse | RedirectResponse:
     user = auth.current_user(request)
     openai_key = (user.openai_api_key if user else "") or os.environ.get("OPENAI_API_KEY", "")
     if not openai_key:
@@ -608,7 +637,6 @@ async def action_analyze(request: Request, board_id: str):
             400,
             "No OpenAI API key found. Save one in Account → Connections → OpenAI / ChatGPT."
         )
-
     job_id = deps.enqueue_pipeline_job(
         label="Analyze mockup with GPT-4o",
         operation="analyze", target=board_id,
@@ -617,25 +645,44 @@ async def action_analyze(request: Request, board_id: str):
             board_id, partial(pipeline_adapters.analyze, openai_key=openai_key),
         ),
     )
-    return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/")
+    return deps.job_or_redirect_response(request, job_id, redirect_to=_board_home_redirect(board_id))
 
 
-@router.post("/b/{board_id}/actions/style")
-async def action_style(request: Request, board_id: str):
+@router.post("/users/{username}/board-games/{path_slug}/actions/analyze")
+async def action_analyze_nested(request: Request, board_id: NestedBoardId):
+    return await _action_analyze(request, board_id)
+
+
+@router.post("/b/{board_id}/actions/analyze")
+async def action_analyze_legacy(request: Request, board_id: str):
     deps.ensure_owned_board(request, board_id)
+    return await _action_analyze(request, board_id)
+
+
+async def _action_style(request: Request, board_id: str) -> JSONResponse | RedirectResponse:
     job_id = deps.enqueue_pipeline_job(
         label="Extract style from mockup",
         operation="style", target=board_id,
         cost_estimate=pipeline_adapters.estimate_style(),
         fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.style),
     )
-    return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/")
+    return deps.job_or_redirect_response(request, job_id, redirect_to=_board_home_redirect(board_id))
 
 
-@router.post("/b/{board_id}/actions/generate-missing/all")
-async def action_generate_missing_all(request: Request, board_id: str):
-    """Generate every empty board space AND every empty UI panel in one job."""
+@router.post("/users/{username}/board-games/{path_slug}/actions/style")
+async def action_style_nested(request: Request, board_id: NestedBoardId):
+    return await _action_style(request, board_id)
+
+
+@router.post("/b/{board_id}/actions/style")
+async def action_style_legacy(request: Request, board_id: str):
     deps.ensure_owned_board(request, board_id)
+    return await _action_style(request, board_id)
+
+
+async def _action_generate_missing_all(
+    request: Request, board_id: str,
+) -> JSONResponse | RedirectResponse:
     catalog = deps.load_board_catalog(board_id)
     missing_spaces = svc_cells.missing_space_ids(board_id, catalog)
     missing_panels = svc_cells.missing_panel_ids(board_id, catalog)
@@ -651,52 +698,93 @@ async def action_generate_missing_all(request: Request, board_id: str):
             board_id, partial(pipeline_adapters.generate_all, **keys),
         ),
     )
-    return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/")
+    return deps.job_or_redirect_response(request, job_id, redirect_to=_board_home_redirect(board_id))
 
 
-@router.post("/b/{board_id}/actions/states")
-async def action_states(request: Request, board_id: str):
+@router.post("/users/{username}/board-games/{path_slug}/actions/generate-missing/all")
+async def action_generate_missing_all_nested(request: Request, board_id: NestedBoardId):
+    return await _action_generate_missing_all(request, board_id)
+
+
+@router.post("/b/{board_id}/actions/generate-missing/all")
+async def action_generate_missing_all_legacy(request: Request, board_id: str):
     deps.ensure_owned_board(request, board_id)
+    return await _action_generate_missing_all(request, board_id)
+
+
+async def _action_states(request: Request, board_id: str) -> JSONResponse | RedirectResponse:
     job_id = deps.enqueue_pipeline_job(
         label="Build active states",
         operation="states", target=board_id,
         cost_estimate=0.0,
         fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.states),
     )
-    return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/preview")
+    return deps.job_or_redirect_response(
+        request, job_id, redirect_to=_board_preview_redirect(board_id),
+    )
 
 
-@router.post("/b/{board_id}/actions/preview")
-async def action_preview(request: Request, board_id: str):
+@router.post("/users/{username}/board-games/{path_slug}/actions/states")
+async def action_states_nested(request: Request, board_id: NestedBoardId):
+    return await _action_states(request, board_id)
+
+
+@router.post("/b/{board_id}/actions/states")
+async def action_states_legacy(request: Request, board_id: str):
     deps.ensure_owned_board(request, board_id)
+    return await _action_states(request, board_id)
+
+
+async def _action_preview(request: Request, board_id: str) -> JSONResponse | RedirectResponse:
     job_id = deps.enqueue_pipeline_job(
         label="Composite preview",
         operation="preview", target=board_id,
         cost_estimate=0.0,
         fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.preview),
     )
-    return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/preview")
+    return deps.job_or_redirect_response(
+        request, job_id, redirect_to=_board_preview_redirect(board_id),
+    )
 
 
-@router.post("/b/{board_id}/actions/export")
-async def action_export(request: Request, board_id: str):
+@router.post("/users/{username}/board-games/{path_slug}/actions/preview")
+async def action_preview_nested(request: Request, board_id: NestedBoardId):
+    return await _action_preview(request, board_id)
+
+
+@router.post("/b/{board_id}/actions/preview")
+async def action_preview_legacy(request: Request, board_id: str):
     deps.ensure_owned_board(request, board_id)
+    return await _action_preview(request, board_id)
+
+
+async def _action_export(request: Request, board_id: str) -> JSONResponse | RedirectResponse:
     job_id = deps.enqueue_pipeline_job(
         label="Export approved assets",
         operation="export", target=board_id,
         cost_estimate=0.0,
         fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.export),
     )
-    return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/preview")
+    return deps.job_or_redirect_response(
+        request, job_id, redirect_to=_board_preview_redirect(board_id),
+    )
 
 
-@router.post("/b/{board_id}/actions/regen/{category}/{asset_id}")
-async def action_regen_one(
-    request: Request, board_id: str, category: str, asset_id: str,
-    prompt_override: str | None = Form(default=None),
-):
-    """Regenerate exactly one cell with optional prompt override."""
+@router.post("/users/{username}/board-games/{path_slug}/actions/export")
+async def action_export_nested(request: Request, board_id: NestedBoardId):
+    return await _action_export(request, board_id)
+
+
+@router.post("/b/{board_id}/actions/export")
+async def action_export_legacy(request: Request, board_id: str):
     deps.ensure_owned_board(request, board_id)
+    return await _action_export(request, board_id)
+
+
+async def _action_regen_one(
+    request: Request, board_id: str, category: str, asset_id: str,
+    prompt_override: str | None,
+) -> JSONResponse | RedirectResponse:
     if category not in ("spaces", "panels", "centerpiece"):
         raise HTTPException(400, f"Unknown category {category}")
     p = (prompt_override or "").strip() or None
@@ -716,13 +804,29 @@ async def action_regen_one(
             ),
         ),
     )
-    return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/")
+    return deps.job_or_redirect_response(request, job_id, redirect_to=_board_home_redirect(board_id))
 
 
-@router.post("/b/{board_id}/actions/clean/{category}/{asset_id}")
-async def action_clean_one(request: Request, board_id: str, category: str, asset_id: str):
-    """Re-clean the current live image for one cell. Free, fast."""
+@router.post("/users/{username}/board-games/{path_slug}/actions/regen/{category}/{asset_id}")
+async def action_regen_one_nested(
+    request: Request, board_id: NestedBoardId, category: str, asset_id: str,
+    prompt_override: str | None = Form(default=None),
+):
+    return await _action_regen_one(request, board_id, category, asset_id, prompt_override)
+
+
+@router.post("/b/{board_id}/actions/regen/{category}/{asset_id}")
+async def action_regen_one_legacy(
+    request: Request, board_id: str, category: str, asset_id: str,
+    prompt_override: str | None = Form(default=None),
+):
     deps.ensure_owned_board(request, board_id)
+    return await _action_regen_one(request, board_id, category, asset_id, prompt_override)
+
+
+async def _action_clean_one(
+    request: Request, board_id: str, category: str, asset_id: str,
+) -> JSONResponse | RedirectResponse:
     if category not in ("spaces", "panels", "centerpiece"):
         raise HTTPException(400, f"Unknown category {category}")
     job_id = deps.enqueue_pipeline_job(
@@ -734,25 +838,21 @@ async def action_clean_one(request: Request, board_id: str, category: str, asset
             partial(pipeline_adapters.clean_one, category=category, asset_id=asset_id),
         ),
     )
-    return deps.job_or_redirect_response(request, job_id, redirect_to=f"/b/{board_id}/")
+    return deps.job_or_redirect_response(request, job_id, redirect_to=_board_home_redirect(board_id))
 
 
-@router.get("/b/{board_id}/api/generation")
-def api_get_generation(request: Request, board_id: str):
-    """JSON for the generation settings modal (palette, provider, models)."""
+@router.post("/users/{username}/board-games/{path_slug}/actions/clean/{category}/{asset_id}")
+async def action_clean_one_nested(request: Request, board_id: NestedBoardId, category: str, asset_id: str):
+    return await _action_clean_one(request, board_id, category, asset_id)
+
+
+@router.post("/b/{board_id}/actions/clean/{category}/{asset_id}")
+async def action_clean_one_legacy(request: Request, board_id: str, category: str, asset_id: str):
     deps.ensure_owned_board(request, board_id)
-    catalog = deps.load_board_catalog(board_id)
-    settings = svc_catalog.read_generation(catalog)
-    return JSONResponse({
-        "settings": settings,
-        "options": {"pixellab_models": list_pixellab_presets()},
-    })
+    return await _action_clean_one(request, board_id, category, asset_id)
 
 
-@router.put("/b/{board_id}/api/generation")
-async def api_put_generation(request: Request, board_id: str):
-    """Persist generation block; marks the board as configured for the UI."""
-    deps.ensure_owned_board(request, board_id)
+async def _api_put_generation(request: Request, board_id: str) -> JSONResponse:
     body = await request.json()
     try:
         new_block = svc_catalog.write_generation(board_id, body)
@@ -761,16 +861,55 @@ async def api_put_generation(request: Request, board_id: str):
     return JSONResponse({"settings": new_block})
 
 
-@router.get("/b/{board_id}/api/cell/{category}/{asset_id}")
-def api_cell(request: Request, board_id: str, category: str, asset_id: str):
+@router.put("/users/{username}/board-games/{path_slug}/api/generation")
+async def api_put_generation_nested(request: Request, board_id: NestedBoardId):
+    return await _api_put_generation(request, board_id)
+
+
+@router.put("/b/{board_id}/api/generation")
+async def api_put_generation_legacy(request: Request, board_id: str):
     deps.ensure_owned_board(request, board_id)
+    return await _api_put_generation(request, board_id)
+
+
+async def _api_patch_cell(
+    request: Request, board_id: str, category: str, asset_id: str,
+) -> JSONResponse:
+    if category != "spaces":
+        raise HTTPException(400, "Only perimeter spaces support PATCH metadata.")
+    body = await request.json()
+    space_kind = body.get("space_kind")
+    if space_kind not in ("standard", "event"):
+        raise HTTPException(
+            400,
+            'JSON body must include "space_kind": "standard" or "event"',
+        )
+    data = deps.load_board_catalog(board_id)
+    designs = data.get("board_spaces", {}).get("designs", [])
+    entry = next((x for x in designs if x["id"] == asset_id), None)
+    if entry is None:
+        raise HTTPException(404, f"Unknown space design: {asset_id}")
+    entry["space_kind"] = space_kind
+    svc_catalog.save_catalog(board_id, data)
     return JSONResponse(deps.build_cell_side_panel_payload(board_id, category, asset_id))
 
 
-@router.post("/b/{board_id}/api/cell/{category}/{asset_id}/promote")
-def api_cell_promote(request: Request, board_id: str, category: str, asset_id: str,
-                     filename: str = Form(...)):
+@router.patch("/users/{username}/board-games/{path_slug}/api/cell/{category}/{asset_id}")
+async def api_patch_cell_nested(
+    request: Request, board_id: NestedBoardId, category: str, asset_id: str,
+):
+    return await _api_patch_cell(request, board_id, category, asset_id)
+
+
+@router.patch("/b/{board_id}/api/cell/{category}/{asset_id}")
+async def api_patch_cell_legacy(request: Request, board_id: str, category: str, asset_id: str):
     deps.ensure_owned_board(request, board_id)
+    return await _api_patch_cell(request, board_id, category, asset_id)
+
+
+def _api_cell_promote(
+    request: Request, board_id: str, category: str, asset_id: str, filename: str,
+) -> JSONResponse:
     with bf_config.scope_board(board_id):
         from boardfactory import assets as bf_assets
         try:
@@ -780,10 +919,24 @@ def api_cell_promote(request: Request, board_id: str, category: str, asset_id: s
     return JSONResponse(deps.build_cell_side_panel_payload(board_id, category, asset_id))
 
 
-@router.post("/b/{board_id}/api/rename")
-def api_rename_board(request: Request, board_id: str, project_name: str = Form(...)):
-    """Persist display title to relational catalog (slug / URL unchanged)."""
+@router.post("/users/{username}/board-games/{path_slug}/api/cell/{category}/{asset_id}/promote")
+def api_cell_promote_nested(
+    request: Request, board_id: NestedBoardId, category: str, asset_id: str,
+    filename: str = Form(...),
+):
+    return _api_cell_promote(request, board_id, category, asset_id, filename)
+
+
+@router.post("/b/{board_id}/api/cell/{category}/{asset_id}/promote")
+def api_cell_promote_legacy(
+    request: Request, board_id: str, category: str, asset_id: str,
+    filename: str = Form(...),
+):
     deps.ensure_owned_board(request, board_id)
+    return _api_cell_promote(request, board_id, category, asset_id, filename)
+
+
+def _api_rename_board(request: Request, board_id: str, project_name: str) -> JSONResponse:
     try:
         summary = svc_boards.rename_board(auth.require_user(request).id, board_id, project_name)
     except svc_boards.BoardNotFound:
@@ -794,3 +947,28 @@ def api_rename_board(request: Request, board_id: str, project_name: str = Form(.
         raise HTTPException(400, str(e)) from None
     return JSONResponse({"ok": True, "project": summary.project})
 
+
+@router.post("/users/{username}/board-games/{path_slug}/api/rename")
+def api_rename_board_nested(
+    request: Request, board_id: NestedBoardId, project_name: str = Form(...),
+):
+    return _api_rename_board(request, board_id, project_name)
+
+
+@router.post("/b/{board_id}/api/rename")
+def api_rename_board_legacy(request: Request, board_id: str, project_name: str = Form(...)):
+    deps.ensure_owned_board(request, board_id)
+    return _api_rename_board(request, board_id, project_name)
+
+
+# ═══ Legacy GET /b/… → 307 to canonical nested URL ═══
+
+
+@router.get("/b/{board_id}/")
+def legacy_get_board_root(request: Request, board_id: str):
+    return deps.redirect_legacy_board_get(request, board_id, "")
+
+
+@router.get("/b/{board_id}/{rest:path}")
+def legacy_get_board_rest(request: Request, board_id: str, rest: str):
+    return deps.redirect_legacy_board_get(request, board_id, rest)

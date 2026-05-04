@@ -87,7 +87,9 @@ def isolated_repo(tmp_path, monkeypatch):
         for stmt in (
             "DELETE FROM browser_sessions",
             "DELETE FROM user_secrets",
+            "DELETE FROM asset_versions",
             "DELETE FROM owned_boards",
+            "DELETE FROM board_games",
             "DELETE FROM users",
         ):
             conn.execute(sa.text(stmt))
@@ -107,6 +109,11 @@ def isolated_repo(tmp_path, monkeypatch):
         mod = sys.modules.get(mod_name)
         if mod is not None:
             importlib.reload(mod)
+
+    from boardfactory import config as _bf_config
+    from services import board_paths as _board_paths
+
+    _bf_config.set_board_root_resolver(_board_paths.store_board_root)
 
     # ``storage.board_store`` is _not_ reloaded — reloading would create
     # a fresh ``_store`` module-level slot but other modules already hold
@@ -137,8 +144,13 @@ def db_engine(isolated_repo):
 
 
 @pytest.fixture
-def board_id() -> str:
+def path_slug() -> str:
     return "test-board"
+
+
+@pytest.fixture
+def board_id(seeded_board):
+    return seeded_board.id
 
 
 @pytest.fixture
@@ -154,34 +166,28 @@ def test_user(isolated_repo):
 
 
 @pytest.fixture
-def seeded_board(isolated_repo, board_id, test_user):
-    """Create a minimal but valid board on disk and return its info.
-
-    Uses the pipeline's own ``boards.create_board`` helper so we exercise
-    the real catalog skeleton; the only post-hoc edits are filling prompts
-    so generation has something to send to the mock provider.
-    """
-    from boardfactory import boards as bf_boards
-
-    from services import board_ownership as bo
-
-    info = bf_boards.create_board(board_id, project_name="Test Board")
-    from services import board_definition as bd
-
-    bd.persist_catalog_dict(board_id, bf_boards.default_catalog_dict(board_id, "Test Board"))
-    bo.link_board_to_user(board_id, test_user.id)
-
-    # Drop a tiny PNG into mockup/ so anything that needs the reference
-    # image can find one. Routes through the BoardStore so the path is
-    # whatever the store resolves to (data/boards/<id>/... by default).
+def seeded_board(isolated_repo, path_slug, test_user):
+    """Create a minimal but valid board on disk and return ``BoardInfo``."""
     import io as _io
+    import uuid as _uuid
 
     from PIL import Image
 
+    from boardfactory import boards as bf_boards
+
+    from services import board_definition as bd
+    from services import board_ownership as bo
     from storage import board_store as bs
+
+    bu = str(_uuid.uuid4())
+    bd.persist_catalog_dict(bu, bf_boards.default_catalog_dict(bu, "Test Board"))
+    bo.link_board_to_user(bu, test_user.id, path_slug=path_slug)
+    bs.get_store().create_board_skeleton(bu)
 
     buf = _io.BytesIO()
     Image.new("RGB", (1920, 1080), (32, 32, 40)).save(buf, format="PNG")
-    bs.get_store().write_bytes(board_id, "mockup/board.png", buf.getvalue())
+    bs.get_store().write_bytes(bu, "mockup/board.png", buf.getvalue())
 
+    info = bf_boards.get_board(bu)
+    assert info is not None
     return info

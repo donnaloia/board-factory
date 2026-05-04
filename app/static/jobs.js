@@ -152,6 +152,21 @@
     pendingBroadcast.clear();
   }
 
+  /** When finishing on the setup page, navigate to the board editor (not just reload). */
+  function boardHomeUrlFromSetupPath(pathname) {
+    const p = pathname || "";
+    const nested =
+      /^\/users\/([^/]+)\/board-games\/([^/]+)\/setup\/?$/i.exec(p);
+    if (nested) {
+      return `/users/${nested[1]}/board-games/${nested[2]}/`;
+    }
+    const legacy = /^\/b\/([^/]+)\/setup\/?$/i.exec(p);
+    if (legacy) {
+      return `/b/${legacy[1]}/`;
+    }
+    return null;
+  }
+
   function onJobUpdate(j) {
     jobs.set(j.id, j);
     const terminal = j.status === "done" || j.status === "failed" || j.status === "killed";
@@ -163,11 +178,9 @@
       refreshCost();
       if (j.status === "done" && pageReloadOnSettle.has(j.operation)) {
         setTimeout(() => {
-          const setupMatch =
-            /^\/b\/([^/]+)\/setup\/?$/i.exec(window.location.pathname || "");
-          if (j.operation === "style" && setupMatch) {
-            const bid = setupMatch[1];
-            window.location.assign(`/b/${bid}/?t=${Date.now()}`);
+          const boardHome = boardHomeUrlFromSetupPath(window.location.pathname);
+          if (j.operation === "style" && boardHome) {
+            window.location.assign(`${boardHome}?t=${Date.now()}`);
             return;
           }
           window.location.reload();

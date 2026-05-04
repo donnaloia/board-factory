@@ -21,7 +21,7 @@ def test_cell_status_no_live_no_history(seeded_board, isolated_repo):
     assert status.candidates == 0
 
 
-def test_cell_status_with_live_png(seeded_board, isolated_repo):
+def test_cell_status_with_live_png(seeded_board, path_slug, test_user, isolated_repo):
     from services import cells as svc_cells
     from storage.fs import workspace as fs_ws
 
@@ -30,7 +30,7 @@ def test_cell_status_with_live_png(seeded_board, isolated_repo):
     status = svc_cells.cell_status(seeded_board.id, "spaces", "corner_tl")
     assert status.approved is True
     assert status.approved_url is not None
-    assert "/b/test-board/asset/live/spaces/corner_tl.png" in status.approved_url
+    assert f"/users/{test_user.username}/board-games/{path_slug}/asset/live/spaces/corner_tl.png" in status.approved_url
 
 
 def test_missing_ids_excludes_cells_with_live(seeded_board, isolated_repo):

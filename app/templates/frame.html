@@ -3,13 +3,18 @@
 
 {% block breadcrumb %}
 <nav class="section-path" aria-label="breadcrumb">
+  {% if board_base %}
+  <a href="{{ board_base }}/" class="crumb">Board</a>
+  {% else %}
   <a href="/b/{{ board_id }}/" class="crumb">Board</a>
+  {% endif %}
   <span class="sep">/</span>
   <span class="here">Frame</span>
 </nav>
 {% endblock %}
 
 {% block content %}
+{% set bb = board_base if board_base else '/b/' ~ board_id %}
 <section class="frame-stage">
 
   <header class="frame-head">
@@ -33,7 +38,7 @@
         <span class="caption">at source size</span>
       </div>
       <div class="frame-preview-tile">
-        <img src="/b/{{ board_id }}/frame.png?w=260&h=240&t={{ meta.created_ms }}"
+        <img src="{{ bb }}/frame.png?w=260&h=240&t={{ meta.created_ms }}"
              alt="current frame at typical panel size">
         <span class="caption">at 260 &times; 240 (typical panel)</span>
       </div>
@@ -45,7 +50,7 @@
       </dl>
     </div>
     {% if frame_enabled %}
-    <form method="post" action="/b/{{ board_id }}/api/frame/disable" data-ajax-form>
+    <form method="post" action="{{ bb }}/api/frame/disable" data-ajax-form>
       <button type="submit" class="quiet-action">Disable on board</button>
     </form>
     {% endif %}
@@ -112,6 +117,7 @@
 <script>
 (function () {
   const boardId = {{ board_id | tojson }};
+  const boardBase = {{ (board_base or ('/b/' ~ board_id)) | tojson }};
   const sourceGrid = document.querySelector("[data-source-grid]");
   const editor = document.querySelector("[data-picker-editor]");
   const selectedIdEl = document.querySelector("[data-selected-id]");
@@ -156,7 +162,7 @@
         sourceGrid.innerHTML = items.map(p => `
           <button type="button" class="source-card" data-source-id="${p.id}" data-w="${p.w}" data-h="${p.h}">
             <div class="source-thumb">
-              <img src="/b/${boardId}/api/frame/preview.png?source_kind=mockup&source_id=${p.id}&ring_px=14&w=${p.w}&h=${p.h}" alt="">
+              <img src="${boardBase}/api/frame/preview.png?source_kind=mockup&source_id=${p.id}&ring_px=14&w=${p.w}&h=${p.h}" alt="">
             </div>
             <span class="source-id">${p.id}</span>
             <span class="source-size">${p.w} &times; ${p.h} (from mockup)</span>
@@ -191,7 +197,7 @@
     if (!currentSourceId) return;
     const ring = slider.value;
     ringVal.textContent = `${ring} px`;
-    previewImg.src = `/b/${boardId}/api/frame/preview.png?source_kind=${currentSourceKind}&source_id=${encodeURIComponent(currentSourceId)}&ring_px=${ring}&w=260&h=240&t=${Date.now()}`;
+    previewImg.src = `${boardBase}/api/frame/preview.png?source_kind=${currentSourceKind}&source_id=${encodeURIComponent(currentSourceId)}&ring_px=${ring}&w=260&h=240&t=${Date.now()}`;
   }
   slider.addEventListener("input", refreshPreview);
 
@@ -204,7 +210,7 @@
     fd.append("ring_px", slider.value);
     fd.append("enable_after", "true");
     try {
-      const r = await fetch(`/b/${boardId}/api/frame/adopt`, { method: "POST", body: fd });
+      const r = await fetch(`${boardBase}/api/frame/adopt`, { method: "POST", body: fd });
       if (!r.ok) {
         alert("Could not adopt frame: " + (await r.text()));
         adoptBtn.removeAttribute("disabled");

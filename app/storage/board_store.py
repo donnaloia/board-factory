@@ -133,8 +133,10 @@ class LocalBoardStore:
     # ── per-board path resolution ──
 
     def board_root(self, board_id: str) -> Path:
-        """Absolute path to ``<root>/<board_id>/``. Local-only escape hatch."""
-        return self._root / board_id
+        """Absolute path to this board's directory. Local-only escape hatch."""
+        from boardfactory import config as bf_config
+
+        return bf_config.board_root(board_id)
 
     def local_path(self, board_id: str, rel: str = "") -> Path:
         """Resolve ``rel`` to an absolute on-disk path under the board root.
@@ -230,7 +232,11 @@ class LocalBoardStore:
     # ── board lifecycle ──
 
     def board_exists(self, board_id: str) -> bool:
-        return self.board_root(board_id).is_dir()
+        try:
+            root = self.board_root(board_id)
+        except RuntimeError:
+            return False
+        return root.is_dir()
 
     def list_board_ids(self) -> list[str]:
         if not self._root.exists():

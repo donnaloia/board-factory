@@ -5,6 +5,10 @@ encrypted at rest via Fernet (see ``storage.secret_crypto``). A default dev
 admin is inserted by Alembic migration ``0007_seed_dev_admin_user`` when the
 ``users`` table is empty (see README “Fresh clone”).
 
+Use :func:`register_user` for normal sign-up (any time). :func:`create_first_user`
+is only for the empty-DB setup path and tests; it refuses when a user already
+exists.
+
 PUBLIC_API unchanged for callers: ``User`` dataclass, ``find_by_email``, etc.
 """
 
@@ -21,6 +25,7 @@ import bcrypt
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as SASession
 
+from boardfactory import boards as bf_boards
 from storage.db import session_scope
 from storage.secret_crypto import decrypt_text, encrypt_text
 from models.core import UserRecord, UserSecretRecord
@@ -41,6 +46,7 @@ DEFAULT_COLOR = "#c8995b"
 class User:
     id: str
     email: str
+    username: str
     password_hash: str
     display_name: str
     icon_glyph: str = DEFAULT_GLYPH
@@ -64,6 +70,19 @@ class User:
         return d
 
 
+def _allocate_username(session: SASession, email: str) -> str:
+    local = (email or "").split("@")[0]
+    base = bf_boards.slugify(local)
+    if not base or base == "untitled":
+        base = "user"
+    cand = base
+    n = 0
+    while session.scalar(select(UserRecord).where(UserRecord.username == cand)):
+        n += 1
+        cand = f"{base}-{n}"[:64]
+    return cand
+
+
 def _secret_map(session: SASession, user_id: str) -> dict[str, str]:
     rows = session.scalars(
         select(UserSecretRecord).where(UserSecretRecord.user_id == user_id)
@@ -79,6 +98,7 @@ def _row_to_user(session: SASession, rec: UserRecord) -> User:
     return User(
         id=rec.id,
         email=rec.email,
+        username=rec.username,
         password_hash=rec.password_hash,
         display_name=rec.display_name,
         icon_glyph=rec.icon_glyph or DEFAULT_GLYPH,
@@ -125,6 +145,17 @@ def find_by_email(email: str) -> User | None:
         return _row_to_user(session, rec)
 
 
+def find_by_username(username: str) -> User | None:
+    u = (username or "").strip().lower()
+    if not u:
+        return None
+    with session_scope() as session:
+        rec = session.scalar(select(UserRecord).where(UserRecord.username == u))
+        if rec is None:
+            return None
+        return _row_to_user(session, rec)
+
+
 def find_by_id(user_id: str) -> User | None:
     if not user_id:
         return None
@@ -150,23 +181,31 @@ def hash_password(plaintext: str) -> str:
     return bcrypt.hashpw(plaintext.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
-def create_first_user(*, email: str, password: str, display_name: str | None = None) -> User:
+def register_user(*, email: str, password: str, display_name: str | None = None) -> User:
+    """Create a new account if the email is not already registered.
+
+    Used by ``POST /register`` for ongoing sign-up. Idempotent rules: one row
+    per email; usernames are allocated uniquely from the email local-part.
+    """
     em = (email or "").strip().lower()
     if not _EMAIL_RE.match(em):
         raise ValueError("Invalid email address")
     if not password or len(password) < 8:
         raise ValueError("Password must be at least 8 characters")
     with _lock:
-        if not is_setup_required():
-            raise ValueError("Registration is closed — an account already exists.")
+        with session_scope() as session:
+            if session.scalar(select(UserRecord).where(UserRecord.email == em)):
+                raise ValueError("An account with this email already exists.")
         uid = uuid.uuid4().hex
         now_ms = int(time.time() * 1000)
         dn = (display_name or em.split("@")[0]).strip()
         with session_scope() as session:
+            uname = _allocate_username(session, em)
             session.add(
                 UserRecord(
                     id=uid,
                     email=em,
+                    username=uname,
                     password_hash=hash_password(password),
                     display_name=dn,
                     icon_glyph=DEFAULT_GLYPH,
@@ -178,6 +217,14 @@ def create_first_user(*, email: str, password: str, display_name: str | None = N
         u = find_by_id(uid)
         assert u is not None
         return u
+
+
+def create_first_user(*, email: str, password: str, display_name: str | None = None) -> User:
+    """Only when the database has zero users (initial setup / tests)."""
+    with _lock:
+        if not is_setup_required():
+            raise ValueError("Registration is closed — an account already exists.")
+    return register_user(email=email, password=password, display_name=display_name)
 
 
 def update_profile(
@@ -243,6 +290,7 @@ def change_password(user_id: str, *, old: str, new: str) -> None:
         tmp = User(
             id=rec.id,
             email=rec.email,
+            username=rec.username,
             password_hash=rec.password_hash,
             display_name=rec.display_name,
         )

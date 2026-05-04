@@ -2,6 +2,7 @@
 {% block title %}Setup · {{ project }}{% endblock %}
 
 {% block content %}
+{% set bb = board_base if board_base else '/b/' ~ board_id %}
 <section class="setup-stage" data-reload-on="style">
   <span class="eyebrow">First run</span>
   <h1 class="display-xl">{{ project }}</h1>
@@ -20,7 +21,7 @@
     </p>
     {% endif %}
     <div class="mockup-preview">
-      <img src="/b/{{ board_id }}/mockup/{{ mockup_rel.split('/')[-1] }}" alt="reference mockup">
+      <img src="{{ bb }}/mockup/{{ mockup_rel.split('/')[-1] }}" alt="reference mockup">
     </div>
 
     <div class="setup-mockup-foot">
@@ -29,7 +30,7 @@
       <input type="file" id="mockup-file-replace" accept="image/png,image/jpeg" class="upload-file-hidden">
     </div>
 
-    <form method="post" action="/b/{{ board_id }}/actions/style" data-action>
+    <form method="post" action="{{ bb }}/actions/style" data-action>
       <button type="submit" class="editorial-action primary">
         <span class="arrow">→</span>
         <span>Extract style from mockup</span>
@@ -39,7 +40,7 @@
 
   {% else %}
     {# ── No mockup yet: tabbed start card ── #}
-    <div class="setup-card" id="setup-card" data-board-id="{{ board_id }}">
+    <div class="setup-card" id="setup-card" data-board-id="{{ board_id }}" data-board-base="{{ board_base or '' }}">
       <div class="setup-tabs" role="tablist">
         <button class="setup-tab is-active" data-tab="generate" role="tab" aria-selected="true">
           Generate
@@ -146,6 +147,7 @@
   const card = document.getElementById("setup-card");
   if (!card) return;
   const boardId = card.getAttribute("data-board-id");
+  const boardBase = card.getAttribute("data-board-base") || ("/b/" + boardId);
 
   // ── Tab switching ──────────────────────────────────────────────────
   card.querySelectorAll(".setup-tab").forEach((tab) => {
@@ -165,7 +167,7 @@
   });
 
   // ── Upload tab: existing XHR flow ─────────────────────────────────
-  const UPLOAD_URL = "/b/" + boardId + "/actions/upload-mockup";
+  const UPLOAD_URL = boardBase + "/actions/upload-mockup";
 
   function uploadFile(file) {
     if (!file) return;
@@ -257,7 +259,7 @@
       if (genProg) genProg.hidden = false;
 
       try {
-        const res = await fetch("/b/" + boardId + "/actions/generate-mockup", {
+        const res = await fetch(boardBase + "/actions/generate-mockup", {
           method: "POST",
           headers: { "Content-Type": "application/json", "Accept": "application/json" },
           body: JSON.stringify({ prompt }),

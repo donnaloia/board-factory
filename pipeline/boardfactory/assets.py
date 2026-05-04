@@ -6,8 +6,9 @@ treats each cell on the board as a single asset slot with two pieces of
 state on disk:
 
 - workspace/live/<category>/<asset_id>.png      ← what's currently shown
-- workspace/history/<category>/<asset_id>/      ← every version ever made
-                              <ts>__<seq>.png
+- ``workspace/history/…``        — every version ever made
+- ``workspace/meta/live_source/`` — JSON pointer: which history file was last
+  promoted to live (sidebar ``active_prompt``; see ``live_source``)
 
 Generation auto-promotes the newest output as live; the user can scroll
 the history strip to flip back to any prior version (just copies that
@@ -29,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from . import config
+from .live_source import record_promoted_history_file
 
 
 _asset_db_listeners: list[Callable[..., None]] = []
@@ -185,6 +187,7 @@ def promote(category: str, asset_id: str, history_filename: str) -> Path:
     dst = live_path(category, asset_id)
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
+    record_promoted_history_file(category, asset_id, history_filename)
     return dst
 
 

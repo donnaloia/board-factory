@@ -10,6 +10,10 @@
   if (!initial) return;
   const boardId = initial.getAttribute("data-board-id");
   if (!boardId) return;
+  const boardBase =
+    initial.getAttribute("data-board-base") && initial.getAttribute("data-board-base").length
+      ? initial.getAttribute("data-board-base")
+      : `/b/${boardId}`;
 
   bind(initial);
 
@@ -50,6 +54,7 @@
       restored.className = "display";
       restored.title = "Click to rename";
       restored.setAttribute("data-board-id", boardId);
+      restored.setAttribute("data-board-base", boardBase);
       restored.setAttribute("data-original", newTitle);
       restored.textContent = newTitle;
       input.replaceWith(restored);
@@ -74,7 +79,7 @@
       try {
         const fd = new FormData();
         fd.append("project_name", next);
-        const r = await fetch(`/b/${boardId}/api/rename`, { method: "POST", body: fd });
+        const r = await fetch(`${boardBase}/api/rename`, { method: "POST", body: fd });
         if (!r.ok) {
           alert("Could not rename: " + (await r.text()));
           finish(currentText);

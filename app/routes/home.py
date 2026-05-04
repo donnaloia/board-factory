@@ -13,6 +13,15 @@ from services import boards as svc_boards
 router = APIRouter()
 
 
+def _boards_list_response(request: Request, ctx: dict) -> HTMLResponse:
+    """HTML for the picker; mark non-cacheable so lists stay fresh after renames, etc."""
+    resp = request.app.state.templates.TemplateResponse(
+        request, "boards_index.html", ctx
+    )
+    resp.headers["Cache-Control"] = "private, no-store, must-revalidate"
+    return resp
+
+
 @router.get("/", response_class=HTMLResponse)
 def root(request: Request):
     user = auth.require_user(request)
@@ -20,16 +29,15 @@ def root(request: Request):
     if not boards:
         ctx = deps.editorial_template_context(None, request)
         ctx.update({"boards": [], "has_any_board": False})
-        return request.app.state.templates.TemplateResponse(
-            request, "boards_index.html", ctx
-        )
+        return _boards_list_response(request, ctx)
 
     if len(boards) == 1:
-        return RedirectResponse(f"/b/{boards[0].id}/", status_code=303)
+        base = deps.canonical_board_base_path(boards[0].id)
+        return RedirectResponse(f"{base}/", status_code=303)
 
     ctx = deps.editorial_template_context(None, request)
     ctx.update({"boards": boards, "has_any_board": True})
-    return request.app.state.templates.TemplateResponse(request, "boards_index.html", ctx)
+    return _boards_list_response(request, ctx)
 
 
 @router.post("/api/boards")
@@ -50,7 +58,8 @@ async def api_create_board(
         raise HTTPException(400, "Invalid board id")
     except svc_boards.BoardExists:
         raise HTTPException(409, f"Board {bid!r} already exists")
-    return JSONResponse({"id": summary.id, "url": f"/b/{summary.id}/"})
+    base = deps.canonical_board_base_path(summary.id)
+    return JSONResponse({"id": summary.id, "url": f"{base}/"})
 
 
 @router.delete("/api/boards/{board_id}")

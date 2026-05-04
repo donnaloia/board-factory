@@ -14,7 +14,9 @@ from dataclasses import dataclass
 
 from board_svg import CellStatus
 
+from routes import deps
 from services import asset_index
+from services import asset_urls
 from storage import board_store as bs
 from storage.fs import workspace as fs_ws
 
@@ -60,11 +62,15 @@ def cell_status(board_id: str, category: str, asset_id: str) -> CellStatus:
     live_url = None
     if is_live:
         # Strip the leading "workspace/" so it matches the existing
-        # /b/<id>/asset/<workspace-relative> route. ``?t=<mtime>`` lets
-        # the browser invalidate cached versions when promote rewrites.
+        # /b/<id>/asset/<workspace-relative> route. ``?t=<mtime_ms>`` must use
+        # full milliseconds — see ``services.asset_urls``.
         rel = live_rel.removeprefix("workspace/")
-        ts_ms = store.stat(board_id, live_rel).mtime_ms // 1000
-        live_url = f"/b/{board_id}/asset/{rel}?t={ts_ms}"
+        bpath = deps.board_http_prefix(board_id)
+        live_url = asset_urls.board_asset_url(
+            http_prefix=bpath,
+            asset_relpath=rel,
+            mtime_ms=store.stat(board_id, live_rel).mtime_ms,
+        )
 
     return CellStatus(
         asset_id=asset_id,

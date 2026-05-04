@@ -48,7 +48,7 @@ def persist_catalog_dict(board_id: str, data: dict[str, Any]) -> dict[str, Any]:
         if row is None:
             session.add(
                 BoardGameRecord(
-                    board_id=board_id,
+                    board_uuid=board_id,
                     body_json=body_json,
                     updated_ms=stamp,
                 )
