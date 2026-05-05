@@ -13,23 +13,21 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from PIL import Image
 
-import auth
-import cost_ledger
-import pipeline_adapters
-import spec_data
-from board_svg import render_board_svg, render_spec_svg
+from auth.middleware import current_user, require_user
+from jobs import cost_ledger, pipeline_adapters
+from views import spec_data
+from views.board_svg import render_board_svg, render_spec_svg
 from boardfactory import config as bf_config
 from boardfactory import frames as bf_frames
 from boardfactory.providers.pixel.pixellab import list_pixellab_presets
 
 from routes import deps
-from services import asset_urls
-from services import boards as svc_boards
-from services import catalog as svc_catalog
-from services import cells as svc_cells
-from services import mockup_prompt as mockup_prompt_svc
-from storage import board_store as bs
-from storage.fs import workspace as fs_ws
+from boards import services as svc_boards
+from cells import services as svc_cells
+from assets import services as asset_urls
+from prompts import mockup as mockup_prompt_svc
+from infrastructure import board_store as bs
+from infrastructure.files import workspace as fs_ws
 
 router = APIRouter()
 
@@ -124,7 +122,7 @@ def board_view(request: Request, board_id: NestedBoardId):
                 else "Generate missing spaces"
             ),
         },
-        "generation": svc_catalog.read_generation(catalog),
+        "generation": svc_boards.read_generation(catalog),
     })
     return request.app.state.templates.TemplateResponse(request, "board.html", ctx)
 
@@ -331,16 +329,11 @@ def device_preview_view(request: Request, board_id: NestedBoardId):
 def api_get_generation(request: Request, board_id: NestedBoardId):
     """JSON for the generation settings modal (palette, provider, models)."""
     catalog = deps.load_board_catalog(board_id)
-    settings = svc_catalog.read_generation(catalog)
+    settings = svc_boards.read_generation(catalog)
     return JSONResponse({
         "settings": settings,
         "options": {"pixellab_models": list_pixellab_presets()},
     })
-
-
-@router.get("/users/{username}/board-games/{path_slug}/api/cell/{category}/{asset_id}")
-def api_cell(request: Request, board_id: NestedBoardId, category: str, asset_id: str):
-    return JSONResponse(deps.build_cell_side_panel_payload(board_id, category, asset_id))
 
 
 # ═══ POST / PUT: nested (canonical) + legacy /b/… ═══
@@ -404,7 +397,7 @@ async def _action_generate_mockup(request: Request, board_id: str) -> JSONRespon
     if len(prompt) > 4000:
         raise HTTPException(400, "Prompt is too long (max 4000 chars).")
 
-    user = auth.current_user(request)
+    user = current_user(request)
     openai_key = (user.openai_api_key if user else "") or os.environ.get("OPENAI_API_KEY", "")
     if not openai_key:
         raise HTTPException(
@@ -413,7 +406,7 @@ async def _action_generate_mockup(request: Request, board_id: str) -> JSONRespon
         )
 
     catalog = deps.load_board_catalog(board_id)
-    settings = svc_catalog.read_generation(catalog)
+    settings = svc_boards.read_generation(catalog)
     oa_model = settings["openai"]["model"]
     oa_quality = settings["openai"]["quality"]
 
@@ -565,7 +558,7 @@ async def _api_frame_adopt(
         data.setdefault("frame", {})
         data["frame"]["enabled"] = True
         data["frame"]["apply_to_panels"] = True
-        svc_catalog.save_catalog(board_id, data)
+        svc_boards.save_catalog(board_id, data)
 
     return JSONResponse({
         "ok": True,
@@ -606,7 +599,7 @@ async def _api_frame_disable(request: Request, board_id: str) -> JSONResponse:
     data = deps.load_board_catalog(board_id)
     data.setdefault("frame", {})
     data["frame"]["enabled"] = False
-    svc_catalog.save_catalog(board_id, data)
+    svc_boards.save_catalog(board_id, data)
     return JSONResponse({"ok": True})
 
 
@@ -630,7 +623,7 @@ def _board_preview_redirect(board_id: str) -> str:
 
 
 async def _action_analyze(request: Request, board_id: str) -> JSONResponse | RedirectResponse:
-    user = auth.current_user(request)
+    user = current_user(request)
     openai_key = (user.openai_api_key if user else "") or os.environ.get("OPENAI_API_KEY", "")
     if not openai_key:
         raise HTTPException(
@@ -855,8 +848,8 @@ async def action_clean_one_legacy(request: Request, board_id: str, category: str
 async def _api_put_generation(request: Request, board_id: str) -> JSONResponse:
     body = await request.json()
     try:
-        new_block = svc_catalog.write_generation(board_id, body)
-    except svc_catalog.GenerationValidationError as e:
+        new_block = svc_boards.write_generation(board_id, body)
+    except svc_boards.GenerationValidationError as e:
         raise HTTPException(400, str(e)) from None
     return JSONResponse({"settings": new_block})
 
@@ -872,73 +865,9 @@ async def api_put_generation_legacy(request: Request, board_id: str):
     return await _api_put_generation(request, board_id)
 
 
-async def _api_patch_cell(
-    request: Request, board_id: str, category: str, asset_id: str,
-) -> JSONResponse:
-    if category != "spaces":
-        raise HTTPException(400, "Only perimeter spaces support PATCH metadata.")
-    body = await request.json()
-    space_kind = body.get("space_kind")
-    if space_kind not in ("standard", "event"):
-        raise HTTPException(
-            400,
-            'JSON body must include "space_kind": "standard" or "event"',
-        )
-    data = deps.load_board_catalog(board_id)
-    designs = data.get("board_spaces", {}).get("designs", [])
-    entry = next((x for x in designs if x["id"] == asset_id), None)
-    if entry is None:
-        raise HTTPException(404, f"Unknown space design: {asset_id}")
-    entry["space_kind"] = space_kind
-    svc_catalog.save_catalog(board_id, data)
-    return JSONResponse(deps.build_cell_side_panel_payload(board_id, category, asset_id))
-
-
-@router.patch("/users/{username}/board-games/{path_slug}/api/cell/{category}/{asset_id}")
-async def api_patch_cell_nested(
-    request: Request, board_id: NestedBoardId, category: str, asset_id: str,
-):
-    return await _api_patch_cell(request, board_id, category, asset_id)
-
-
-@router.patch("/b/{board_id}/api/cell/{category}/{asset_id}")
-async def api_patch_cell_legacy(request: Request, board_id: str, category: str, asset_id: str):
-    deps.ensure_owned_board(request, board_id)
-    return await _api_patch_cell(request, board_id, category, asset_id)
-
-
-def _api_cell_promote(
-    request: Request, board_id: str, category: str, asset_id: str, filename: str,
-) -> JSONResponse:
-    with bf_config.scope_board(board_id):
-        from boardfactory import assets as bf_assets
-        try:
-            bf_assets.promote(category, asset_id, filename)
-        except FileNotFoundError as e:
-            raise HTTPException(404, str(e))
-    return JSONResponse(deps.build_cell_side_panel_payload(board_id, category, asset_id))
-
-
-@router.post("/users/{username}/board-games/{path_slug}/api/cell/{category}/{asset_id}/promote")
-def api_cell_promote_nested(
-    request: Request, board_id: NestedBoardId, category: str, asset_id: str,
-    filename: str = Form(...),
-):
-    return _api_cell_promote(request, board_id, category, asset_id, filename)
-
-
-@router.post("/b/{board_id}/api/cell/{category}/{asset_id}/promote")
-def api_cell_promote_legacy(
-    request: Request, board_id: str, category: str, asset_id: str,
-    filename: str = Form(...),
-):
-    deps.ensure_owned_board(request, board_id)
-    return _api_cell_promote(request, board_id, category, asset_id, filename)
-
-
 def _api_rename_board(request: Request, board_id: str, project_name: str) -> JSONResponse:
     try:
-        summary = svc_boards.rename_board(auth.require_user(request).id, board_id, project_name)
+        summary = svc_boards.rename_board(require_user(request).id, board_id, project_name)
     except svc_boards.BoardNotFound:
         raise HTTPException(404, "Board not found") from None
     except svc_boards.InvalidBoardId as e:

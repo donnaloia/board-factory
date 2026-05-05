@@ -1,6 +1,6 @@
 """Shared helpers for route modules: auth guards, catalog HTTP mapping, job glue.
 
-Path resolution uses ``storage.fs.workspace`` directly — no thin re-export
+Path resolution uses ``infrastructure.files.workspace`` directly — no thin re-export
 wrappers around ``board_root`` / ``workspace_dir``.
 """
 
@@ -15,24 +15,23 @@ from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import func, or_, select
 
-import auth
-import cost_ledger
-import pipeline_adapters
+from auth.middleware import require_user
+from jobs import cost_ledger, pipeline_adapters
 from boardfactory import boards as bf_boards
 from boardfactory import config as bf_config
 from boardfactory import frames as bf_frames
-from jobs import get_runner
+from jobs.runner import get_runner
 from models.core import OwnedBoardRecord, UserRecord
-from storage.db import session_scope
-from storage.fs import workspace as fs_ws
+from infrastructure.db import session_scope
+from infrastructure.files import workspace as fs_ws
 
-from services import asset_urls
-from services import board_definition as bd
-from services import live_source as live_source_svc
-from services import board_ownership
-from services import catalog as svc_catalog
-from services import live_prompt as live_prompt_svc
-from storage import board_store as bs
+from assets import services as asset_urls
+from boards import services as bd
+from prompts import live_source as live_source_svc
+from boards import repository as board_ownership
+
+from prompts import live as live_prompt_svc
+from infrastructure import board_store as bs
 
 REPO_ROOT = Path(os.environ.get("BOARDFACTORY_REPO", "/repo"))
 SPEC_PROSE_PATH = REPO_ROOT / "docs" / "spec_prose.md"
@@ -134,7 +133,7 @@ def resolve_owned_board_path(request: Request, username: str, path_slug: str) ->
     """
     un = (username or "").strip().lower()
     seg = (path_slug or "").strip().lower()
-    user = auth.require_user(request)
+    user = require_user(request)
     if user.username != un:
         raise HTTPException(404, "Unknown board")
     with session_scope() as session:
@@ -158,7 +157,7 @@ def require_nested_board(request: Request, username: str, path_slug: str) -> str
 
 
 def ensure_owned_board(request: Request, board_id: str) -> bf_boards.BoardInfo:
-    user = auth.require_user(request)
+    user = require_user(request)
     uid = _resolve_segment_to_canonical_uuid(user.id, board_id)
     info = board_on_disk_or_404(uid)
     if not board_ownership.user_owns_board(user.id, uid):
@@ -168,8 +167,8 @@ def ensure_owned_board(request: Request, board_id: str) -> bf_boards.BoardInfo:
 
 def load_board_catalog(board_id: str) -> dict[str, Any]:
     try:
-        return svc_catalog.load_catalog(board_id)
-    except svc_catalog.CatalogNotFound:
+        return bd.load_catalog(board_id)
+    except bd.CatalogNotFound:
         raise HTTPException(404, f"Catalog not found for board {board_id!r}")
 
 
@@ -189,8 +188,9 @@ def job_or_redirect_response(
 def editorial_template_context(board_id: str | None, request: Request | None = None) -> dict:
     project = "Board Factory"
     if board_id:
-        # Canonical title is the catalog's ``project`` field. ``BoardInfo.project``
-        # only reflects legacy ``catalog.yml`` on disk or defaults to the slug.
+        # Catalog is the source of truth for the project title; fall back to
+        # the on-disk ``BoardInfo`` (which uses the id) for boards that are on
+        # disk but not yet persisted in the DB.
         row = bd.load_catalog_dict(board_id)
         if row is not None:
             project = str(row.get("project") or board_id)
@@ -254,7 +254,7 @@ def scoped_pipeline_callable(board_id: str, fn: Callable) -> Callable:
     def wrapped(job, cancel):
         with bf_config.scope_board(board_id):
             try:
-                from services import workspace_palette as _wp
+                from boards import palette as _wp
 
                 _wp.materialize_palette_to_disk(board_id)
             except Exception:
@@ -312,7 +312,7 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
         d = next((x for x in designs if x["id"] == asset_id), None)
         if d is None:
             raise HTTPException(404, f"Unknown space design: {asset_id}")
-        from board_svg import _resolve_position
+        from views.board_svg import _resolve_position
 
         layout = catalog["board_spaces"]["layout"]
         sample_pos = d["positions"][0] if d.get("positions") else None

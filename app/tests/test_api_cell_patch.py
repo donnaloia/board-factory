@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
-import sessions
+from auth import services as auth_services
 from server import app
 from starlette.testclient import TestClient
 
 
 def test_patch_space_kind(seeded_board, test_user):
-    sid = sessions.create(test_user.id)
+    sid = auth_services.create_session_cookie(test_user.id)
     client = TestClient(app)
     slug = seeded_board.id
     path = f"/users/{test_user.username}/board-games/{slug}/api/cell/spaces/corner_tl"
     r = client.patch(
         path,
         json={"space_kind": "event"},
-        cookies={sessions.COOKIE_NAME: sid},
+        cookies={auth_services.COOKIE_NAME: sid},
     )
     assert r.status_code == 200, r.text
     body = r.json()
@@ -24,13 +24,13 @@ def test_patch_space_kind(seeded_board, test_user):
 
 
 def test_patch_space_kind_rejects_panels(seeded_board, test_user):
-    sid = sessions.create(test_user.id)
+    sid = auth_services.create_session_cookie(test_user.id)
     client = TestClient(app)
     slug = seeded_board.id
     path = f"/users/{test_user.username}/board-games/{slug}/api/cell/panels/panel_left_top"
     r = client.patch(
         path,
         json={"space_kind": "event"},
-        cookies={sessions.COOKIE_NAME: sid},
+        cookies={auth_services.COOKIE_NAME: sid},
     )
     assert r.status_code == 400

@@ -2,13 +2,10 @@
 
 Each board is a self-contained directory under the configured per-board
 data root (``data/boards/`` by default; see ``boardfactory.config`` and
-the app's ``BoardStore``). The id is the directory name (slug). The
-human-readable **project** title and full catalog spec live in the
-application database (see ``app.services.board_definition``);
-``catalog.yml`` under each board is optional legacy-only.
-
-The pipeline receives catalog data via ``Catalog`` objects built from that
-DB layer (``app.pipeline_adapters``), not by reading YAML on every run.
+the app's ``BoardStore``). The full catalog spec — including the human-
+readable ``project`` title — lives in the application database
+(see ``app.services.board_definition``); the pipeline consumes
+``Catalog`` objects assembled from that DB layer.
 """
 
 from __future__ import annotations
@@ -17,8 +14,6 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
-import yaml
 
 from . import config
 
@@ -31,10 +26,14 @@ _UUID_RE = re.compile(
 
 @dataclass(frozen=True)
 class BoardInfo:
+    """On-disk view of a board.
+
+    The ``project`` title is filled in by the *app* layer when it is needed
+    for UI; pipeline tools usually only care about ``id`` and ``has_mockup``.
+    """
+
     id: str                # slug, e.g. "damnation"
-    project: str           # display name when known (legacy: from catalog.yml on disk)
-    catalog_path: Path     # <store-root>/<id>/catalog.yml (legacy; may be absent)
-    has_catalog: bool      # True only if legacy catalog.yml exists on disk
+    project: str           # display name; pipeline-only callers may pass id
     has_mockup: bool
 
 
@@ -241,27 +240,18 @@ def default_catalog_dict(board_id: str, project_name: str) -> dict[str, Any]:
 def list_boards() -> list[BoardInfo]:
     """Return every board on disk, sorted alphabetically by id (canonical).
 
-    Supports ``<boards>/<user_id>/<board_uuid>/`` (current layout), explicit
-    disk aliases via ``board_disk_map``, and legacy flat ``<boards>/<slug>/``.
+    Walks the canonical ``<boards>/<user_id>/<board_uuid>/`` layout only.
+    Legacy flat ``<boards>/<slug>/`` directories and ``board_disk_map``
+    aliases were removed once all checkouts had been reconciled (see
+    ``app/scripts/reconcile_board_dirs.py``).
     """
     root_dir = config.BOARDS_DIR
     if not root_dir.exists():
         return []
-    alias = config.board_disk_map()
-    consumed_paths: set[Path] = set()
+
     out: list[BoardInfo] = []
-
-    for canonical in sorted(alias.keys()):
-        physical = alias[canonical]
-        p = root_dir / physical
-        if p.is_dir() and (is_board_uuid(canonical) or is_valid_id(canonical)):
-            out.append(_load_board_info_at(canonical, p))
-            consumed_paths.add(p.resolve())
-
     for user_dir in sorted(root_dir.iterdir()):
-        if not user_dir.is_dir():
-            continue
-        if not _user_dir_name(user_dir.name):
+        if not user_dir.is_dir() or not _user_dir_name(user_dir.name):
             continue
         for board_dir in sorted(user_dir.iterdir()):
             if not board_dir.is_dir():
@@ -269,27 +259,7 @@ def list_boards() -> list[BoardInfo]:
             canonical = board_dir.name
             if not (is_board_uuid(canonical) or is_valid_id(canonical)):
                 continue
-            physical_name = alias.get(canonical, canonical)
-            board_path = user_dir / physical_name
-            if not board_path.is_dir():
-                continue
-            rs = board_path.resolve()
-            if rs in consumed_paths:
-                continue
-            out.append(_load_board_info_at(canonical, board_path))
-            consumed_paths.add(rs)
-
-    for child in sorted(root_dir.iterdir()):
-        if not child.is_dir() or child.resolve() in consumed_paths:
-            continue
-        name = child.name
-        if not (is_board_uuid(name) or is_valid_id(name)):
-            continue
-        if _user_dir_name(name):
-            continue
-        if (child / "workspace").exists() or (child / "mockup").exists():
-            out.append(_load_board_info_at(name, child))
-            consumed_paths.add(child.resolve())
+            out.append(_load_board_info_at(canonical, board_dir))
 
     out.sort(key=lambda b: b.id)
     return out
@@ -300,7 +270,9 @@ def get_board(board_id: str) -> BoardInfo | None:
         return None
     try:
         root = config.board_root(board_id)
-    except RuntimeError:
+    except (RuntimeError, LookupError):
+        # No active board, or the app's resolver raised BoardNotFound
+        # because there's no ``owned_boards`` row.
         return None
     if not root.exists() or not root.is_dir():
         return None
@@ -312,24 +284,15 @@ def _load_board_info(board_id: str) -> BoardInfo:
 
 
 def _load_board_info_at(canonical_id: str, root: Path) -> BoardInfo:
-    cat_path = root / "catalog.yml"
-    project = canonical_id
-    legacy_yaml = cat_path.exists()
-    if legacy_yaml:
-        try:
-            with cat_path.open() as f:
-                data = yaml.safe_load(f) or {}
-            project = data.get("project") or canonical_id
-        except Exception:
-            pass
+    """Synthesize a ``BoardInfo`` from on-disk state only.
+
+    The catalog and project name now live in Postgres; the app layer fills
+    in ``project`` post-hoc. Pipeline-only tools that don't reach into the
+    DB get the id as the project name, which is sufficient for those use
+    cases.
+    """
     has_mockup = (root / "mockup").exists() and any((root / "mockup").iterdir())
-    return BoardInfo(
-        id=canonical_id,
-        project=project,
-        catalog_path=cat_path,
-        has_catalog=legacy_yaml,
-        has_mockup=has_mockup,
-    )
+    return BoardInfo(id=canonical_id, project=canonical_id, has_mockup=has_mockup)
 
 
 def default_board_id() -> str | None:
@@ -346,8 +309,8 @@ def default_board_id() -> str | None:
 def create_board(board_id: str, project_name: str | None = None) -> BoardInfo:
     """Create directory skeleton for a new board (mockup, workspace, exports).
 
-    Does **not** write ``catalog.yml`` or touch the database — the web app
-    persists the initial catalog with ``persist_catalog_dict`` after this returns.
+    Does **not** touch the database — the web app persists the initial catalog
+    with ``persist_catalog_dict`` after this returns.
     """
     if not (is_board_uuid(board_id) or is_valid_id(board_id)):
         raise ValueError(

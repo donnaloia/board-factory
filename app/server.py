@@ -19,8 +19,9 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-import auth
-from routes import assets as routes_assets
+from auth.middleware import AuthMiddleware
+from assets import routes as routes_assets
+from cells import routes as routes_cells
 from routes import auth as routes_auth
 from routes import board as routes_board
 from routes import home as routes_home
@@ -28,7 +29,7 @@ from routes import job_tray as routes_job_tray
 from routes import profile as routes_profile
 
 app = FastAPI(title="Board Factory")
-app.add_middleware(auth.AuthMiddleware)
+app.add_middleware(AuthMiddleware)
 
 
 @app.get("/health")
@@ -42,7 +43,7 @@ def health_ready():
     """Anonymous DB probe — distinguishes process-up vs Postgres wedged / unreachable."""
     from sqlalchemy import text
 
-    from storage.db import session_scope
+    from infrastructure.db import session_scope
 
     try:
         with session_scope() as session:
@@ -77,7 +78,7 @@ def _configure_observability_logging() -> None:
     ``docker compose logs`` without guessing hangs vs slow network calls.
     """
     fmt = logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
-    for name in ("jobs", "storage.bootstrap"):
+    for name in ("jobs.runner", "boot"):
         lg = logging.getLogger(name)
         lg.setLevel(logging.INFO)
         if lg.handlers:
@@ -92,13 +93,13 @@ def _configure_observability_logging() -> None:
 def startup() -> None:
     _configure_observability_logging()
     from boardfactory import config as bf_config  # noqa: PLC0415
-    from services import board_paths as bp  # noqa: PLC0415
+    from boards import repository as boards_repo  # noqa: PLC0415
 
-    bf_config.set_board_root_resolver(bp.store_board_root)
+    bf_config.set_board_root_resolver(boards_repo.store_board_root)
 
-    from storage import bootstrap  # noqa: PLC0415
+    import boot  # noqa: PLC0415
 
-    bootstrap.apply()
+    boot.apply()
 
 
 app.include_router(routes_auth.router)
@@ -106,4 +107,5 @@ app.include_router(routes_profile.router)
 app.include_router(routes_home.router)
 app.include_router(routes_assets.router)
 app.include_router(routes_board.router)
+app.include_router(routes_cells.router)
 app.include_router(routes_job_tray.router)

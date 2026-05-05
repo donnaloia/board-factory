@@ -5,10 +5,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-import auth
+from auth.middleware import require_user
 from boardfactory import boards as bf_boards
 from routes import deps
-from services import boards as svc_boards
+from boards import services as svc_boards
 
 router = APIRouter()
 
@@ -24,7 +24,7 @@ def _boards_list_response(request: Request, ctx: dict) -> HTMLResponse:
 
 @router.get("/", response_class=HTMLResponse)
 def root(request: Request):
-    user = auth.require_user(request)
+    user = require_user(request)
     boards = svc_boards.list_boards(user.id)
     if not boards:
         ctx = deps.editorial_template_context(None, request)
@@ -46,7 +46,7 @@ async def api_create_board(
     board_id: str = Form(...),
     project_name: str | None = Form(default=None),
 ):
-    user = auth.require_user(request)
+    user = require_user(request)
     bid = bf_boards.slugify(board_id)
     try:
         summary = svc_boards.create_board(
@@ -64,7 +64,7 @@ async def api_create_board(
 
 @router.delete("/api/boards/{board_id}")
 def api_delete_board(request: Request, board_id: str):
-    user = auth.require_user(request)
+    user = require_user(request)
     try:
         svc_boards.delete_board(user.id, board_id)
     except svc_boards.InvalidBoardId:

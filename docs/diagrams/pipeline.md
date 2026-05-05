@@ -81,7 +81,7 @@ flowchart TB
 | **Steps** | Step-shaped operations that aren't per-cell: `style_lock` (palette extraction), `states` (procedural active variants), `compositor` (board preview), `export` (engine manifest). | `pipeline/boardfactory/steps/` |
 | **Assets** | The on-disk asset model: write a PNG into `history/<cat>/<id>/`, copy to `live/<cat>/<id>.png`, restore from any history entry. Notifies registered DB listeners on every history push. | `pipeline/boardfactory/assets.py` |
 | **Provider** | Hosted img2img/txt2img/inpaint behind one Python interface. Selected per board via `catalog.generation.provider`. | `pipeline/boardfactory/providers/` |
-| **Asset index** | Listener that mirrors every history push as a row in `asset_versions` (with sha256, ts_ms, sidecar metadata). Wired in `storage.bootstrap.register_pipeline_hooks`. | `app/services/asset_index.py` |
+| **Asset index** | Listener that mirrors every history push as a row in `asset_versions` (with sha256, ts_ms, sidecar metadata). Wired in `boot.register_pipeline_hooks`. | `app/services/asset_index.py` |
 
 ## Per-job lifecycle
 

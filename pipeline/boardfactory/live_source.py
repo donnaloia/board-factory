@@ -5,7 +5,7 @@ not just byte-equality (duplicate pixels, cleanup rows with missing metadata).
 
 Writes one JSON file per cell under ``workspace/meta/live_source/`` — see
 ``record_promoted_history_file``. The web app reads the same path via
-``BoardStore`` (``storage.fs.workspace.live_source_rel``).
+``BoardStore`` (``infrastructure.files.workspace.live_source_rel``).
 
 Schema version 1::
 

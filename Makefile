@@ -1,4 +1,4 @@
-.PHONY: up down down-force down-nuclear logs shell rebuild clean protect-keys unprotect-keys test db-upgrade db-current db-checkpoint db-snapshot db-restore
+.PHONY: up down down-force down-nuclear logs shell rebuild clean protect-keys unprotect-keys test db-upgrade db-current db-snapshot db-restore
 
 # Compose labels use this project id (defaults to this repo directory name). Override if you use COMPOSE_PROJECT_NAME.
 COMPOSE_LABEL_PROJECT ?= board-factory
@@ -58,16 +58,10 @@ test:
 	docker compose exec board-factory pip install --no-cache-dir -q -r /repo/app/requirements.txt
 	docker compose exec board-factory sh -c 'cd /app && PYTHONPATH=/app:/repo/pipeline python -m pytest -q /repo/app/tests/'
 
-# Apply Alembic migrations (SQLite or Postgres per BOARDFACTORY_DATABASE_URL).
+# Apply Alembic migrations against the configured Postgres database.
 # Safe to run repeatedly.
 db-upgrade:
 	docker compose exec board-factory sh -c 'cd /repo/app && alembic upgrade head'
-
-# Checkpoint SQLite so WAL/SHM sidecars disappear before committing .boardfactory.db
-db-checkpoint:
-	@sqlite3 .boardfactory.db "PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode=DELETE; VACUUM;" && \
-	  rm -f .boardfactory.db-wal .boardfactory.db-shm .boardfactory.db-journal && \
-	  echo ".boardfactory.db is ready to commit (WAL merged, journal_mode=DELETE)."
 
 # Print which migration the DB is currently on.
 db-current:

@@ -20,9 +20,9 @@ The web app uses the same root via the ``BoardStore`` abstraction in
 ``app/storage/board_store.py``; both pick up ``BOARDFACTORY_BOARDS_DIR`` so
 they stay in sync.
 
-The board **catalog spec** lives in the application database; ``catalog.yml``
-is optional legacy-only. ``config.CATALOG_PATH`` still resolves for rare
-tools that open a path.
+The board **catalog spec** lives entirely in the application database
+(``board_games`` columns + ``body_json``). The pipeline receives a
+validated ``Catalog`` model via ``app.pipeline_adapters``.
 
 The **active board id is stored per OS thread** (``threading.local()``).
 Paths resolved via ``config.WORKSPACE`` et al. always reflect that thread's
@@ -73,86 +73,6 @@ def _boards_dir() -> Path:
     if explicit:
         return Path(explicit)
     return REPO_ROOT / "data" / "boards"
-
-
-def _parse_board_disk_map_dict(data: object) -> dict[str, str]:
-    if not isinstance(data, dict):
-        return {}
-    out: dict[str, str] = {}
-    for k, v in data.items():
-        if isinstance(k, str) and isinstance(v, str) and k and v:
-            out[k] = v
-    return out
-
-
-def _board_disk_map_from_file() -> dict[str, str]:
-    import json
-    import logging
-
-    explicit = os.environ.get("BOARDFACTORY_BOARD_DISK_MAP_FILE", "").strip()
-    if explicit:
-        path = Path(explicit)
-    else:
-        path = _boards_dir() / ".board_disk_map.json"
-    if not path.is_file():
-        return {}
-    try:
-        raw = path.read_text(encoding="utf-8")
-        data = json.loads(raw)
-    except (OSError, json.JSONDecodeError) as e:
-        logging.getLogger(__name__).warning(
-            "Could not read %s: %s", path, e,
-        )
-        return {}
-    return _parse_board_disk_map_dict(data)
-
-
-def _board_disk_map_from_env() -> dict[str, str]:
-    import json
-    import logging
-
-    raw = os.environ.get("BOARDFACTORY_BOARD_DISK_MAP", "").strip()
-    if not raw:
-        return {}
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as e:
-        logging.getLogger(__name__).warning(
-            "BOARDFACTORY_BOARD_DISK_MAP is set but is not valid JSON: %s",
-            e,
-        )
-        return {}
-    return _parse_board_disk_map_dict(data)
-
-
-def board_disk_map() -> dict[str, str]:
-    """Map canonical board ids to on-disk directory names under ``BOARDS_DIR``.
-
-    **File** (optional): read ``<BOARDS_DIR>/.board_disk_map.json`` unless
-    ``BOARDFACTORY_BOARD_DISK_MAP_FILE`` points at another path. JSON object
-    e.g. ``{"demo-board": "untitled-board-mopxc3av"}`` — use this in Docker
-    when env is awkward; the file lives on the volume next to board folders.
-
-    **Env** (optional): ``BOARDFACTORY_BOARD_DISK_MAP`` with the same JSON
-    object. Merged on top of the file so env wins per key.
-
-    Remove mappings after renaming the on-disk folder to match ``board_id``.
-    """
-    merged = dict(_board_disk_map_from_file())
-    merged.update(_board_disk_map_from_env())
-    return merged
-
-
-def physical_board_dir_name(board_id: str) -> str:
-    """Directory basename under ``BOARDS_DIR`` for this canonical board id."""
-    m = board_disk_map()
-    if board_id in m:
-        return m[board_id]
-    bid_lower = board_id.lower()
-    for k, v in m.items():
-        if k.lower() == bid_lower:
-            return v
-    return board_id
 
 
 # Backward-compat: ``BOARDS_DIR`` is referenced as a module attribute by
@@ -227,7 +147,14 @@ def active_board() -> str | None:
 
 
 def board_root(board_id: str | None = None) -> Path:
-    """Return the root dir for a board. Defaults to the active board."""
+    """Return the root dir for a board. Defaults to the active board.
+
+    The app wires a resolver via ``set_board_root_resolver`` that consults
+    ``owned_boards`` and returns ``<boards>/<user_id>/<board_uuid>/`` —
+    raising ``BoardNotFound`` if the row is missing. Without that resolver
+    (e.g. pipeline-only invocation) this falls back to ``<boards>/<id>/``,
+    which is fine for tooling that already knows the board exists on disk.
+    """
     bid = board_id or active_board()
     if not bid:
         raise RuntimeError(
@@ -236,7 +163,7 @@ def board_root(board_id: str | None = None) -> Path:
         )
     if _board_root_resolver is not None:
         return _board_root_resolver(bid)
-    return _boards_dir() / physical_board_dir_name(bid)
+    return _boards_dir() / bid
 
 
 # ────────────────────────── path properties ──────────────────────────
@@ -247,7 +174,6 @@ def board_root(board_id: str | None = None) -> Path:
 # the currently active board id.
 _PATH_LAYOUT: dict[str, tuple[str, ...]] = {
     "BOARD_ROOT":      (),
-    "CATALOG_PATH":    ("catalog.yml",),
     "MOCKUP_DIR":      ("mockup",),
     "WORKSPACE":       ("workspace",),
     "STYLE_DIR":       ("workspace", "style"),
