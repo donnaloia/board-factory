@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from services import mockup_prompt as mp
+from prompts import mockup as mp
 
 
 def test_layout_context_counts():

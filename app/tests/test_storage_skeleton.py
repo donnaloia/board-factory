@@ -12,13 +12,13 @@ import pytest
 
 def test_engine_uses_overridden_url(db_engine):
     assert db_engine is not None
-    assert "sqlite" in str(db_engine.url)
+    assert db_engine.url.get_backend_name() == "postgresql"
 
 
 def test_session_scope_commits_and_rolls_back(db_engine):
     from sqlalchemy import text
 
-    from storage.db import session_scope
+    from infrastructure.db import session_scope
 
     with session_scope() as session:
         result = session.execute(text("SELECT 1")).scalar_one()
@@ -36,8 +36,8 @@ def test_pipeline_module_loads_under_isolated_repo(isolated_repo):
 
 
 def test_seeded_board_creates_catalog(seeded_board, isolated_repo):
-    from services import board_definition as bd
-    from storage import board_store as bs
+    from boards import services as bd
+    from infrastructure import board_store as bs
 
     assert bd.load_catalog_dict(seeded_board.id) is not None
     assert bs.get_store().exists(seeded_board.id, "mockup/board.png")
@@ -52,4 +52,3 @@ def test_config_has_no_legacy_cli_path_attrs(isolated_repo):
     importlib.reload(cfg)
     with pytest.raises(AttributeError):
         _ = cfg.APPROVED_DIR  # type: ignore[attr-defined]
-

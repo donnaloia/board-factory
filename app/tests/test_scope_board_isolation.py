@@ -219,11 +219,12 @@ def test_build_cell_side_panel_payload_does_not_block_on_running_writer(
         # us *how long* we ended up waiting on the lock.
         still_holding_write = writer.is_alive()
 
-        # Loose upper bound — the read itself is dominated by SQLite +
-        # listdir on a fresh board (typically <30ms). Anything north of
-        # 500ms means we re-acquired the write lock somewhere on the read
-        # path. Assert this BEFORE still_holding_write because it's the
-        # more diagnostic failure (tells you how long you blocked).
+        # Loose upper bound — the read itself is dominated by Postgres +
+        # listdir on a fresh board (typically <30ms locally, a bit higher
+        # over a real network). Anything north of 500ms means we re-acquired
+        # the write lock somewhere on the read path. Assert this BEFORE
+        # still_holding_write because it's the more diagnostic failure
+        # (tells you how long you blocked).
         assert elapsed < 0.5, (
             f"build_cell_side_panel_payload took {elapsed:.3f}s while a "
             f"writer held scope_board({board_id!r}); the side-panel "

@@ -2,7 +2,7 @@
 
 ## intro
 
-This document is the source of truth for the damnation board's geometry — every coordinate, dimension, and tile classification used by the Board Factory pipeline. The pipeline reads the damnation board's **catalog row** from the database (`board_games.body_json`) and uses these dimensions for every step: style lock, generation, cleanup, composition, and export. A legacy `data/boards/damnation/catalog.yml` on disk is still imported once when the DB row is missing.
+This document is the source of truth for the damnation board's geometry — every coordinate, dimension, and tile classification used by the Board Factory pipeline. The pipeline reads the damnation board's **catalog row** from the database (`board_games` columns + `body_json`) and uses these dimensions for every step: style lock, generation, cleanup, composition, and export.
 
 **The catalog *is* the spec.** Every diagram, table, and number on this page is generated live from the catalog. If you want to change the board, edit it in the web UI (or, for legacy clones, in the YAML and re-run the importer) — this page will update automatically. There is no longer a way for the docs to drift.
 

@@ -8,8 +8,8 @@ import json
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-import cost_ledger
-from jobs import get_runner
+from jobs import cost_ledger
+from jobs.runner import get_runner
 
 router = APIRouter()
 

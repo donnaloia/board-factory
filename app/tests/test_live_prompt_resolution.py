@@ -6,9 +6,9 @@ from boardfactory import assets as bf_assets
 from boardfactory import config as bf_config
 
 from routes import deps
-from services import asset_index
-from storage import board_store as bs
-from storage.fs import workspace as fs_ws
+from assets import repository as asset_index
+from infrastructure import board_store as bs
+from infrastructure.files import workspace as fs_ws
 
 
 def test_promote_writes_live_source_pointer(isolated_repo, seeded_board, board_id):

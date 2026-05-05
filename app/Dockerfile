@@ -25,27 +25,11 @@ COPY pipeline/pyproject.toml  /repo/pipeline/pyproject.toml
 COPY pipeline/boardfactory    /repo/pipeline/boardfactory
 RUN pip install --no-cache-dir -e /repo/pipeline
 
-# Application code (FastAPI — sibling to ``pipeline/`` in the repo)
-COPY app/routes              /app/routes
-COPY app/server.py             /app/
-COPY app/board_svg.py          /app/
-COPY app/spec_data.py          /app/
-COPY app/jobs.py               /app/
-COPY app/cost_ledger.py        /app/
-COPY app/pipeline_adapters.py  /app/
-COPY app/auth.py               /app/
-COPY app/sessions.py           /app/
-COPY app/users.py              /app/
-COPY app/pixellab_status.py    /app/
-COPY app/templates             /app/templates
-COPY app/static                /app/static
-
-COPY app/models                /app/models
-COPY app/storage               /app/storage
-COPY app/services              /app/services
-COPY app/migrations            /app/migrations
-COPY app/alembic.ini           /app/alembic.ini
-COPY app/tests                 /app/tests
+# Application code (FastAPI — sibling to ``pipeline/`` in the repo).
+# We copy the entire app/ tree so adding new modules / domains doesn't need
+# Dockerfile churn. Per-domain folders are organized vertical-slice; see
+# ``app/ARCHITECTURE.md``.
+COPY app/                    /app/
 
 EXPOSE 8473
 CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8473", \

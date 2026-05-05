@@ -2,17 +2,14 @@
 
 A catalog declares the entire structure of one board: where the board spaces are,
 what the feature panels look like, and how the centerpiece is positioned. The
-web app persists this shape to SQLite; the pipeline consumes ``Catalog`` models
-built from that data (see ``app.pipeline_adapters``). ``Catalog.load(path)``
-remains for optional legacy YAML on disk.
+web app persists this shape to Postgres; the pipeline consumes ``Catalog``
+models built from that data (see ``app.pipeline_adapters``).
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Literal
 
-import yaml
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -260,14 +257,7 @@ class Catalog(BaseModel):
 
     @classmethod
     def from_dict(cls, data: dict) -> "Catalog":
-        """Build from a plain dict (e.g. loaded from the relational store)."""
-        return cls.model_validate(data)
-
-    @classmethod
-    def load(cls, path: Path) -> "Catalog":
-        """Load from a YAML file on disk (legacy / tooling). Prefer ``from_dict``."""
-        with open(path) as f:
-            data = yaml.safe_load(f)
+        """Build from a plain dict (loaded from the relational store)."""
         return cls.model_validate(data)
 
     def all_space_designs(self) -> list[BoardSpaceDesign]:

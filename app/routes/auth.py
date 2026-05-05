@@ -5,11 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-import auth
-import sessions
-import users
+from auth import services as auth_services
 from routes import deps
-from services import board_ownership
 
 router = APIRouter()
 
@@ -21,7 +18,7 @@ def login_view(
     error: str | None = None,
     info: str | None = None,
 ):
-    if users.is_setup_required():
+    if auth_services.is_setup_required():
         return RedirectResponse("/register", status_code=303)
     return request.app.state.templates.TemplateResponse(
         request,
@@ -37,31 +34,31 @@ def login_submit(
     password: str = Form(...),
     next: str = Form(default="/"),
 ):
-    user = users.find_by_email(email)
-    if user is None or not users.verify_password(user, password):
+    user = auth_services.find_by_email(email)
+    if user is None or not auth_services.verify_password(user, password):
         return RedirectResponse(
             f"/login?next={deps.safe_next(next)}&error=Invalid+email+or+password",
             status_code=303,
         )
-    cookie = sessions.create(user.id)
-    users.touch_last_login(user.id)
+    cookie = auth_services.create_session_cookie(user.id)
+    auth_services.touch_last_login(user.id)
     response = RedirectResponse(deps.safe_next(next), status_code=303)
     response.set_cookie(
-        sessions.COOKIE_NAME,
+        auth_services.COOKIE_NAME,
         cookie,
         httponly=True,
         samesite="lax",
-        max_age=sessions.SESSION_TTL_SEC,
+        max_age=auth_services.SESSION_TTL_SEC,
     )
     return response
 
 
 @router.post("/logout")
 def logout_submit(request: Request):
-    cookie_value = request.cookies.get(sessions.COOKIE_NAME)
-    sessions.destroy(cookie_value)
+    cookie_value = request.cookies.get(auth_services.COOKIE_NAME)
+    auth_services.destroy_session_cookie(cookie_value)
     response = RedirectResponse("/login?info=Signed+out", status_code=303)
-    response.delete_cookie(sessions.COOKIE_NAME)
+    response.delete_cookie(auth_services.COOKIE_NAME)
     return response
 
 
@@ -80,7 +77,7 @@ def register_submit(
     display_name: str = Form(default=""),
 ):
     try:
-        user = users.register_user(
+        user = auth_services.register_user(
             email=email,
             password=password,
             display_name=display_name or None,
@@ -89,16 +86,15 @@ def register_submit(
         return RedirectResponse(
             f"/register?error={str(e).replace(' ', '+')}", status_code=303
         )
-    board_ownership.assign_all_unowned_disk_boards_to_user(user.id)
-    cookie = sessions.create(user.id)
-    users.touch_last_login(user.id)
+    cookie = auth_services.create_session_cookie(user.id)
+    auth_services.touch_last_login(user.id)
     response = RedirectResponse("/", status_code=303)
     response.set_cookie(
-        sessions.COOKIE_NAME,
+        auth_services.COOKIE_NAME,
         cookie,
         httponly=True,
         samesite="lax",
-        max_age=sessions.SESSION_TTL_SEC,
+        max_age=auth_services.SESSION_TTL_SEC,
     )
     return response
 

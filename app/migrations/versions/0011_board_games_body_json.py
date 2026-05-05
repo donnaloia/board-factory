@@ -24,7 +24,7 @@ This migration:
      ``generation_json`` / ``frame_json`` / per-field scalar columns on
      ``board_games``. ``palette_json``, ``palette_gpl_text``,
      ``style_lock_updated_ms`` are kept — they have a separate writer
-     (``services.workspace_palette``) and are materialized to disk on
+     (``boards.palette``) and are materialized to disk on
      job start.
 
 Downgrade rebuilds the child tables empty; **catalog data is not

@@ -104,7 +104,7 @@ def push_to_history(
 ) -> Path:
     """Write a new PNG into history and notify the asset index. Returns its path.
 
-    Metadata is recorded in SQLite via the registered listener
+    Metadata is recorded in the database via the registered listener
     (``asset_versions.meta_json``). Legacy ``.meta.json`` sidecars are no
     longer written for new entries.
 
@@ -145,9 +145,9 @@ def push_to_history(
 def read_meta(category: str, asset_id: str, history_filename: str) -> dict:
     """Return metadata for one history entry (merge DB ``meta_json`` + legacy sidecar).
 
-    New history rows record metadata only in SQLite. Legacy boards may still
-    have ``.meta.json`` sidecars; if the DB row exists but omits ``prompt``
-    (index gaps, partial rows), a sidecar prompt is still visible.
+    New history rows record metadata only in the database. Legacy boards may
+    still have ``.meta.json`` sidecars; if the DB row exists but omits
+    ``prompt`` (index gaps, partial rows), a sidecar prompt is still visible.
     """
     hist_dir = history_dir(category, asset_id)
     sidecar = (hist_dir / history_filename).with_suffix(".meta.json")
@@ -162,7 +162,7 @@ def read_meta(category: str, asset_id: str, history_filename: str) -> dict:
     bid = config.active_board()
     if bid:
         try:
-            from services.asset_meta import read_meta_from_db
+            from assets.repository import read_meta as read_meta_from_db
 
             db_meta = read_meta_from_db(bid, category, asset_id, history_filename)
         except Exception:

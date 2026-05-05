@@ -229,39 +229,24 @@ You can also run end-to-end with the **mock provider** to test the pipeline stru
   ```bash
    make protect-keys
   ```
-3. Create or pick a board under `data/boards/<board-id>/`, put your mockup at `data/boards/<board-id>/mockup/board.png`, and edit geometry and prompts in the **web UI**. Catalog data lives in the application database. Optional legacy `catalog.yml` on disk is still imported when present and the DB row is missing.
+3. Create or pick a board under `data/boards/<user-id>/<board-uuid>/`, put your mockup at `data/boards/<user-id>/<board-uuid>/mockup/board.png`, and edit geometry and prompts in the **web UI**. Catalog data lives entirely in the application database (`board_games` columns + `body_json`).
 4. Bring everything up:
   ```bash
    make up
   ```
-   On first boot, the app runs **Alembic migrations** during startup (`storage.bootstrap`). You can also run `make db-upgrade` manually inside the stack.
+   On first boot, the app runs **Alembic migrations** during startup (`app/boot.py`). You can also run `make db-upgrade` manually inside the stack.
 
-## Database: PostgreSQL (default) vs SQLite
+## Database: PostgreSQL
 
-**Docker Compose (default)** uses the `**postgres`** service and sets `BOARDFACTORY_DATABASE_URL` on `**board-factory`** to a `postgresql+psycopg://…` URL. Application data (users, sessions, catalog rows, jobs, ownership, …) lives in Postgres inside the `**postgres_data`** volume — not in git.
-
-**SQLite at the repository root** (`.boardfactory.db`) is still supported: omit or override `BOARDFACTORY_DATABASE_URL` and set `BOARDFACTORY_DB_PATH` if you want a file-backed DB (useful for portable checkouts or simple local runs). The repo may carry a committed `.boardfactory.db` for shared dev fixtures; **WAL sidecars** (`.boardfactory.db-wal`, `.boardfactory.db-shm`) should not be committed — see below.
-
-`make db-checkpoint` merges SQLite WAL into `.boardfactory.db` and is only relevant when you use **SQLite**, not when using Postgres-only dev.
+The compose stack runs a `postgres` service and sets `BOARDFACTORY_DATABASE_URL` on `board-factory` to a `postgresql+psycopg://…` URL. Application data (users, sessions, catalog rows, jobs, ownership, …) lives in Postgres inside the `postgres_data` volume — not in git. Postgres is the only supported backend; the previous SQLite fallback was removed once every dev/prod path stabilised on the compose service.
 
 ## Fresh clone
 
 1. `git clone` and `cd` into the repo.
 2. Set provider/API keys in `.env` or `docker-compose.yml` if you use real generation.
 3. `make up` — wait for Postgres to become healthy; migrations run when the app starts.
-4. Open `http://localhost:8473`. If the database was empty after migrations, revision `**0007_seed_dev_admin_user`** seeds a dev admin; `**board_ownership.backfill_owned_boards_if_empty()`** can attach on-disk boards when the `owned_boards` table is empty. For a long-lived **Postgres** volume, your existing users and data persist across restarts.
+4. Open `http://localhost:8473`. If the database was empty after migrations, revision `0007_seed_dev_admin_user` seeds a dev admin; `board_ownership.backfill_owned_boards_if_empty()` can attach on-disk boards when the `owned_boards` table is empty. The `postgres_data` volume persists users and data across restarts.
 5. Add API keys under **Account → Connections** if you did not set compose-level keys.
-
-For **SQLite** workflows with a committed `.boardfactory.db`: merge WAL before committing the main file (`make db-checkpoint`). Tracked PNGs under `data/boards/*/workspace/live/` and style snapshots may be part of git; large generated trees (`history/`, raw churn) stay ignored and rebuild when you run the pipeline again.
-
-### SQLite WAL files (`.db-wal` / `.db-shm`)
-
-Relevant only when the app uses **SQLite** with WAL enabled: recent changes may appear in sidecar files until checkpointed. `**make db-checkpoint`** folds WAL into `.boardfactory.db` and removes those sidecars so they do not clutter `git status`.
-
-
-| File               | Role                                          |
-| ------------------ | --------------------------------------------- |
-| `.boardfactory.db` | Main SQLite database file (when using SQLite) |
 
 
 ## Usage
@@ -300,7 +285,6 @@ data/                     Per-board mutable application data (BoardStore root)
       mockup/             Source mockup PNG (e.g. board.png)
       workspace/          Pipeline artifacts (style, live, history, preview, …)
       export/             Engine-ready export (tiles + board_manifest.json)
-.boardfactory.db          Optional SQLite DB at repo root (only when not using Postgres URL)
 docs/
   architecture.md         Design notes (start here for backend internals)
   diagrams/               Pipeline + data-model diagrams
@@ -329,7 +313,6 @@ For the backend internals, see [docs/architecture.md](docs/architecture.md) and 
 | `make test`           | Run pytest inside **board-factory** (container must be up)             |
 | `make db-upgrade`     | `alembic upgrade head` (same DB URL as the app)                        |
 | `make db-current`     | Show current Alembic revision                                          |
-| `make db-checkpoint`  | SQLite only — merge WAL into `.boardfactory.db` for a clean commit     |
 
 
 ## Configuration
