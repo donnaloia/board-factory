@@ -33,6 +33,13 @@ from .orchestrate import (
     generate_missing_panels,
     generate_missing_spaces,
 )
+from .reapply_frame import (
+    OP_FRAME_REWORK_PRE,
+    ReapplyPanelResult,
+    applicable_panels,
+    estimate_reapply_cost,
+    reapply_to_panel,
+)
 
 __all__ = [
     "ProgressSink",
@@ -49,4 +56,9 @@ __all__ = [
     "generate_centerpiece",
     "generate_missing_panels",
     "generate_missing_spaces",
+    "OP_FRAME_REWORK_PRE",
+    "ReapplyPanelResult",
+    "applicable_panels",
+    "estimate_reapply_cost",
+    "reapply_to_panel",
 ]

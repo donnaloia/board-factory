@@ -1,9 +1,9 @@
-"""Cells domain — ORM table: ``cells``."""
+"""Cells domain — ORM tables: ``cells``, ``frame_instances``."""
 
 from __future__ import annotations
 
 import sqlalchemy as sa
-from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -104,5 +104,80 @@ class CellRecord(Base):
                 AND target_w IS NOT NULL AND target_h IS NOT NULL)
             """,
             name="ck_cells_shape_by_kind",
+        ),
+    )
+
+
+class FrameInstanceRecord(Base):
+    """One adopted house frame per board.
+
+    Mirrors the on-disk ``workspace/frames/house/frame.json`` so the
+    Atelier can list frames across boards and so the Approach D batch
+    regen job has a stable id to attach progress to. Persisted by
+    ``app/domains/cells/frames_repository.py``; the on-disk pack
+    (eight slice PNGs + hole/rim masks) remains the source of truth for
+    the actual rim pixels.
+
+    Exactly one row per board can have ``active=true`` — the partial
+    unique index enforces that without forcing every other row to NULL
+    out. Older / replaced instances stay around with ``active=false``
+    for provenance-style queries (e.g. "what was the frame before this
+    one?").
+    """
+
+    __tablename__ = "frame_instances"
+
+    id: Mapped[str] = mapped_column(
+        PG_UUID(as_uuid=False),
+        primary_key=True,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    board_uuid: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("board_games.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    # Geometry.
+    ring_px: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_w: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_h: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Provenance.
+    source_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    source_cell_id: Mapped[str | None] = mapped_column(
+        PG_UUID(as_uuid=False),
+        ForeignKey("cells.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    source_asset_version_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("asset_versions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    model_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    prompt_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    candidate_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    __table_args__ = (
+        Index("ix_frame_instances_board", "board_uuid"),
+        Index(
+            "uq_frame_instances_one_active_per_board",
+            "board_uuid",
+            unique=True,
+            postgresql_where=sa.text("active = true"),
+        ),
+        sa.CheckConstraint(
+            "source_kind IN ('panel','mockup','upload')",
+            name="ck_frame_instances_source_kind",
+        ),
+        sa.CheckConstraint(
+            "ring_px >= 1 AND source_w > 0 AND source_h > 0",
+            name="ck_frame_instances_geometry",
         ),
     )

@@ -112,6 +112,22 @@
     </span>
     {% endif %}
 
+    {# Frame Atelier — board-level Propose / Refine / Commit + Approach D.
+       Always visible; the side panel keeps a tiny status block that links here. #}
+    <a href="{{ bb }}/frame" class="board-action board-action-link{{ ' is-ghosted' if frame_status.adopted else '' }}">
+      <span class="board-action-eyebrow">Atelier</span>
+      <span class="board-action-label">
+        {% if frame_status.adopted %}Edit the frame{% else %}Customize the frame{% endif %}
+      </span>
+      <span class="board-action-est">
+        {% if frame_status.adopted %}
+          active{% if frame_status.source_kind %} &middot; {{ frame_status.source_kind }}:{{ frame_status.source_id or "—" }}{% endif %}{% if frame_status.ring_px %} &middot; {{ frame_status.ring_px }}px{% endif %}
+        {% else %}
+          vision-assisted &middot; one ring for every panel
+        {% endif %}
+      </span>
+    </a>
+
     <form method="post" action="{{ bb }}/actions/preview" data-action class="board-action-form">
       <button type="submit" class="board-action">
         <span class="board-action-eyebrow">Composite</span>

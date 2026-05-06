@@ -60,10 +60,22 @@ def board_view(request: Request, board_id: NestedBoardId):
 
     frame_overlay_url = None
     frame_block = catalog.get("frame", {}) or {}
-    if frame_block.get("enabled") and frame_block.get("apply_to_panels", True):
-        with bf_config.set_active_board(board_id):
-            if bf_frames.has_house_frame():
+    frame_meta = None
+    frame_adopted = False
+    with bf_config.set_active_board(board_id):
+        if bf_frames.has_house_frame():
+            frame_adopted = True
+            frame_meta = bf_frames.read_house_meta()
+            if frame_block.get("enabled") and frame_block.get("apply_to_panels", True):
                 frame_overlay_url = f"{board_prefix(board_id)}/frame.png"
+
+    frame_status = {
+        "adopted": frame_adopted,
+        "enabled": bool(frame_block.get("enabled")),
+        "source_kind": frame_meta.source_kind if frame_meta else None,
+        "source_id": frame_meta.source_id if frame_meta else None,
+        "ring_px": frame_meta.ring_px if frame_meta else None,
+    }
 
     svg_markup = render_board_svg(
         catalog, space_status, panel_status, cp_status,
@@ -102,6 +114,7 @@ def board_view(request: Request, board_id: NestedBoardId):
                 else "Generate missing spaces"
             ),
         },
+        "frame_status": frame_status,
         "generation": svc_boards.read_generation(catalog),
     })
     return request.app.state.templates.TemplateResponse(request, "board.html", ctx)
@@ -145,39 +158,101 @@ def spec_view(request: Request, board_id: NestedBoardId):
 
 @router.get("/users/{username}/board-games/{path_slug}/frame", response_class=HTMLResponse)
 def frame_view(request: Request, board_id: NestedBoardId):
-    """House-frame picker / library page."""
+    """Frame Atelier — Propose / Refine / Commit + Approach D progress.
+
+    Replaces the old single-step picker; the Jinja template renders the
+    shell (status bar, phase rail, source picker grid, refine canvas
+    placeholder, commit panel) and ``frame-atelier.js`` wires up the
+    interactive behaviour against the new ``/api/frame/...`` endpoints.
+    """
     catalog = deps.load_board_catalog(board_id)
+    store = bs.get_store()
+    bp = board_prefix(board_id)
 
     with bf_config.set_active_board(board_id):
         has_frame = bf_frames.has_house_frame()
         meta = bf_frames.read_house_meta() if has_frame else None
 
+    # Lazy-backfill the relational row if the on-disk pack predates the
+    # frame_instances table; the Atelier UI surfaces "imported from disk"
+    # provenance based on the row that comes back here.
+    from domains.cells import frames_repository as frames_repo
+
+    active_view = frames_repo.ensure_active_for_disk_pack(board_id)
+
+    # Source: live panels (ordered, with size + URL).
     panels = catalog.get("feature_panels", {}).get("panels", [])
-    store = bs.get_store()
-    bp = board_prefix(board_id)
-    candidates = []
+    panel_sources: list[dict] = []
     for p in panels:
         live_rel = fs_ws.live_rel("panels", p["id"])
+        size = [int(p["target_size"][0]), int(p["target_size"][1])]
         if not store.exists(board_id, live_rel):
+            panel_sources.append({
+                "id": p["id"], "label": p["id"].replace("_", " "),
+                "size": size, "url": None, "has_live": False,
+            })
             continue
         url_rel = live_rel.removeprefix("workspace/")
-        candidates.append({
+        panel_sources.append({
             "id": p["id"],
-            "size": [p["target_size"][0], p["target_size"][1]],
+            "label": p["id"].replace("_", " "),
+            "size": size,
             "url": asset_urls.board_asset_url(
                 http_prefix=bp,
                 asset_relpath=url_rel,
                 mtime_ms=store.stat(board_id, live_rel).mtime_ms,
             ),
+            "has_live": True,
         })
+
+    # Source: mockup regions (one per panel bbox).
+    mockup_sources: list[dict] = []
+    ref_rel = (catalog.get("style") or {}).get("reference_image") or "mockup/board.png"
+    if store.exists(board_id, ref_rel):
+        for p in panels:
+            size = [int(p["target_size"][0]), int(p["target_size"][1])]
+            mockup_sources.append({
+                "id": p["id"],
+                "label": f"{p['id'].replace('_', ' ')} (from mockup)",
+                "size": size,
+                "url": (
+                    f"{bp}/api/frame/preview.png"
+                    f"?source_kind=mockup&source_id={p['id']}"
+                    f"&ring_px=8&w={size[0]}&h={size[1]}"
+                ),
+            })
+
+    user = getattr(request.state, "user", None)
+    has_openai_key = bool(
+        (user and user.openai_api_key)
+        or os.environ.get("OPENAI_API_KEY", "")
+    )
+
+    n_panels = len(panels)
+    typical_size = (
+        [int(panels[0]["target_size"][0]), int(panels[0]["target_size"][1])]
+        if panels else [260, 240]
+    )
+    default_ring = max(4, min(typical_size) // 16)
+    max_ring = max(default_ring, min(typical_size) // 3)
 
     ctx = deps.editorial_template_context(board_id, request)
     ctx.update({
         "has_frame": has_frame,
-        "meta": meta.to_dict() if meta else None,
-        "candidates": candidates,
         "frame_enabled": bool((catalog.get("frame") or {}).get("enabled")),
-        "frame_url": f"{bp}/frame.png?t={asset_urls.wall_clock_ms()}" if has_frame else None,
+        "meta": meta.to_dict() if meta else None,
+        "active_view": active_view.to_dict() if active_view else None,
+        "frame_url": (
+            f"{bp}/frame.png?t={asset_urls.wall_clock_ms()}" if has_frame else None
+        ),
+        "panel_sources": panel_sources,
+        "mockup_sources": mockup_sources,
+        "n_panels": n_panels,
+        "typical_size": typical_size,
+        "default_ring_px": default_ring,
+        "min_ring_px": 2,
+        "max_ring_px": max_ring,
+        "has_openai_key": has_openai_key,
     })
     return request.app.state.templates.TemplateResponse(request, "frame.html", ctx)
 

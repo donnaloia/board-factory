@@ -2995,6 +2995,15 @@ body.modal-open {
   color: var(--ink-2);
   line-height: 1.5;
 }
+.frame-summary-inline {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-left: auto;
+}
+
 .frame-summary code {
   font-family: var(--mono);
   font-size: 11px;
@@ -4023,4 +4032,633 @@ body.modal-open {
 .gen-modal-foot .btn-primary:hover {
   background: var(--brass-bright);
   border-color: var(--brass-bright);
+}
+
+/* ─────────────────────────────────────────────
+   Frame Atelier (board-level frame customization)
+   Three-phase Propose / Refine / Commit, plus an
+   Approach D progress overlay for the batch regen.
+   Lives at /users/<u>/board-games/<b>/frame.
+   ───────────────────────────────────────────── */
+
+.frame-atelier {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: var(--top-room) 0 96px;
+  display: grid;
+  gap: 56px;
+}
+
+.atelier-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: 64px;
+  align-items: end;
+}
+.atelier-hero-text { min-width: 0; }
+.atelier-hero-text .display { margin-bottom: 16px; }
+
+.atelier-status {
+  display: flex; flex-direction: column; gap: 16px;
+  padding: 20px 24px;
+  border: 1px solid var(--rule-strong);
+  background: var(--paper-2);
+  border-radius: 2px;
+  min-width: 0;
+}
+.atelier-status-row {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 12px;
+  align-items: start;
+}
+.atelier-status-pip {
+  font-family: var(--serif);
+  font-size: 22px;
+  color: var(--ink-3);
+  line-height: 1;
+}
+.atelier-status-pip.is-on { color: var(--brass-bright); }
+.atelier-status-line {
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--ink);
+  letter-spacing: 0.01em;
+}
+.atelier-status-sub {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  line-height: 1.5;
+  margin-top: 2px;
+}
+.atelier-status-sub code { color: var(--ink-2); }
+.atelier-status-actions {
+  display: flex; gap: 16px;
+  border-top: 1px solid var(--rule);
+  padding-top: 12px;
+}
+.atelier-status-actions .quiet-action { padding: 0; }
+
+@media (max-width: 960px) {
+  .atelier-hero { grid-template-columns: 1fr; }
+}
+
+/* Phase rail */
+
+.atelier-phases ol {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+  margin: 0; padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+.atelier-phases .phase {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  align-items: center;
+  gap: 12px 14px;
+  padding: 18px 24px 18px 0;
+  border-left: 1px solid var(--rule);
+  position: relative;
+}
+.atelier-phases .phase:first-child { border-left: 0; }
+.atelier-phases .phase.is-current::before {
+  content: "";
+  position: absolute;
+  top: -1px; left: 0; right: 0;
+  height: 2px;
+  background: var(--brass-bright);
+}
+.atelier-phases .phase-num {
+  font-family: var(--serif);
+  font-size: 28px;
+  color: var(--ink-3);
+  line-height: 1;
+  font-variation-settings: "opsz" 96;
+}
+.atelier-phases .phase.is-current .phase-num { color: var(--brass-bright); }
+.atelier-phases .phase.is-done .phase-num { color: var(--brass-deep); }
+.atelier-phases .phase-label {
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--ink);
+  letter-spacing: 0.02em;
+  display: block;
+}
+.atelier-phases .phase-sub {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  display: block;
+  margin-top: 2px;
+}
+
+/* Generic pane (propose / refine / commit) */
+
+.atelier-pane { display: grid; gap: 24px; }
+.atelier-pane[hidden] { display: none; }
+.atelier-pane-head { display: grid; gap: 4px; max-width: 720px; }
+.atelier-pane-head .eyebrow { margin-bottom: 0; }
+.atelier-pane-head .atelier-help {
+  font-family: var(--serif);
+  font-size: 16px;
+  color: var(--ink-2);
+  line-height: 1.55;
+  margin: 0;
+}
+.atelier-pane-head .rim-swatch,
+.atelier-pane-head .hole-swatch {
+  display: inline-block;
+  width: 14px; height: 14px;
+  vertical-align: -2px;
+  margin: 0 2px;
+  border-radius: 2px;
+}
+.atelier-pane-head .rim-swatch { background: rgba(255,80,200,0.62); }
+.atelier-pane-head .hole-swatch { background: rgba(40,180,255,0.45); border: 1px dashed var(--ink-3); }
+
+/* Source picker */
+
+.atelier-source-tabs {
+  display: flex;
+  gap: 24px;
+  border-bottom: 1px solid var(--rule);
+}
+.atelier-tab {
+  background: transparent;
+  border: 0;
+  padding: 12px 4px;
+  margin-bottom: -1px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color .15s, border-color .15s;
+}
+.atelier-tab:hover { color: var(--ink-2); }
+.atelier-tab.is-active {
+  color: var(--brass-bright);
+  border-bottom-color: var(--brass);
+}
+
+.atelier-source-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 16px;
+}
+.atelier-source-card {
+  background: transparent;
+  border: 1px solid var(--rule);
+  padding: 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color .15s, transform .15s;
+  text-align: left;
+  color: inherit;
+}
+.atelier-source-card:hover { border-color: var(--brass-deep); transform: translateY(-1px); }
+.atelier-source-card.is-active { border-color: var(--brass-bright); }
+.atelier-source-card.is-disabled { opacity: 0.45; cursor: not-allowed; }
+.atelier-source-card.is-disabled:hover { border-color: var(--rule); transform: none; }
+.atelier-source-thumb {
+  aspect-ratio: 13 / 12;
+  background: repeating-conic-gradient(#191920 0% 25%, #111118 0% 50%) 0 0 / 16px 16px;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+  border: 1px solid var(--rule);
+}
+.atelier-source-thumb img {
+  width: 100%; height: 100%;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+.atelier-source-empty {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.atelier-source-label {
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--ink);
+}
+.atelier-source-size {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.atelier-empty {
+  font-family: var(--serif);
+  font-size: 14px;
+  color: var(--ink-3);
+  padding: 32px 0;
+  text-align: center;
+  border: 1px dashed var(--rule);
+  border-radius: 2px;
+}
+
+/* Upload tab */
+
+.atelier-source-grid.is-upload { grid-template-columns: 1fr; }
+.atelier-upload-drop {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 8px;
+  padding: 56px 16px;
+  border: 1px dashed var(--rule-strong);
+  background: var(--paper-2);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.atelier-upload-drop:hover {
+  border-color: var(--brass-deep);
+  background: var(--paper-3);
+}
+.atelier-upload-icon {
+  font-family: var(--serif);
+  font-size: 36px;
+  color: var(--brass);
+  line-height: 1;
+}
+.atelier-upload-cta {
+  font-family: var(--sans);
+  font-size: 14px;
+  color: var(--ink);
+}
+.atelier-upload-hint {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.atelier-upload-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+/* Propose footer + vision job status */
+
+.atelier-propose-actions {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--rule);
+  padding-top: 24px;
+}
+.atelier-propose-actions .editorial-action { flex: 1 1 360px; min-width: 280px; }
+
+.atelier-checkbox {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.atelier-checkbox input { accent-color: var(--brass-bright); }
+.atelier-checkbox.tiny { font-size: 11px; color: var(--ink-3); }
+.atelier-key-warn {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ember-bright);
+}
+
+.atelier-vision-status {
+  display: grid;
+  gap: 8px;
+  padding: 16px 20px;
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+}
+.atelier-vision-summary {
+  margin: 0;
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--ink);
+}
+.atelier-vision-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid; gap: 2px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  max-height: 160px;
+  overflow-y: auto;
+}
+.atelier-vision-log li { padding: 2px 0; }
+
+.atelier-progress-rail {
+  position: relative;
+  height: 2px;
+  background: var(--rule);
+  overflow: hidden;
+}
+.atelier-progress-rail.big { height: 4px; }
+.atelier-progress-bar {
+  position: absolute; inset: 0 100% 0 0;
+  background: var(--brass);
+  transition: right .25s ease;
+}
+.atelier-progress-bar.indeterminate {
+  inset: 0 100% 0 0;
+  background: linear-gradient(90deg,
+    transparent 0%, var(--brass) 30%, var(--brass-bright) 50%,
+    var(--brass) 70%, transparent 100%);
+  animation: progress-sweep 1.4s ease-in-out infinite;
+  right: -50%;
+}
+
+/* Refine pane */
+
+.atelier-refine-grid {
+  display: grid;
+  grid-template-columns: 200px 1fr 280px;
+  gap: 32px;
+  align-items: start;
+}
+@media (max-width: 1080px) {
+  .atelier-refine-grid { grid-template-columns: 1fr; }
+}
+
+.atelier-candidates {
+  display: grid; gap: 12px;
+}
+.atelier-candidates .micro-h,
+.atelier-inspector .micro-h {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0;
+}
+.atelier-candidate-list {
+  list-style: none;
+  margin: 0; padding: 0;
+  display: grid; gap: 8px;
+}
+.atelier-candidate-list li {
+  border: 1px solid var(--rule);
+  padding: 8px;
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
+  transition: border-color .15s;
+}
+.atelier-candidate-list li:hover { border-color: var(--brass-deep); }
+.atelier-candidate-list li.is-active { border-color: var(--brass-bright); }
+.atelier-candidate-list .cand-thumb {
+  width: 56px; height: 50px;
+  background: var(--paper-3);
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+}
+.atelier-candidate-list .cand-thumb img {
+  width: 100%; height: 100%;
+  object-fit: contain; image-rendering: pixelated;
+}
+.atelier-candidate-list .cand-meta {
+  display: grid; gap: 2px;
+  min-width: 0;
+}
+.atelier-candidate-list .cand-title {
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.atelier-candidate-list .cand-score {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-3);
+}
+
+.atelier-stage {
+  display: grid; gap: 12px;
+}
+.atelier-stage-frame {
+  position: relative;
+  background: var(--paper-2);
+  border: 1px solid var(--rule-strong);
+  display: flex; align-items: center; justify-content: center;
+  min-height: 360px;
+  overflow: hidden;
+}
+.atelier-stage-source {
+  display: block;
+  max-width: 100%;
+  max-height: 60vh;
+  image-rendering: pixelated;
+}
+.atelier-stage-overlay {
+  position: absolute;
+  pointer-events: none;
+}
+.atelier-stage-overlay.is-hidden { opacity: 0; }
+.atelier-stage-handles {
+  position: absolute;
+  inset: 0;
+}
+.atelier-stage-handles .handle {
+  position: absolute;
+  width: 16px; height: 16px;
+  background: var(--brass-bright);
+  border: 2px solid var(--paper);
+  box-shadow: 0 0 0 1px var(--brass-deep);
+  cursor: nwse-resize;
+  transform: translate(-50%, -50%);
+}
+.atelier-stage-handles .handle.handle-tr,
+.atelier-stage-handles .handle.handle-bl { cursor: nesw-resize; }
+.atelier-stage-toolbar {
+  display: flex; gap: 16px;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.atelier-stage-toolbar .quiet-action.is-active { color: var(--brass-bright); }
+
+.atelier-inspector {
+  display: grid; gap: 18px;
+  padding: 20px 22px;
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+}
+.atelier-field {
+  display: grid; gap: 6px;
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.atelier-field-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.atelier-field input[type="range"] {
+  accent-color: var(--brass);
+  width: 100%;
+}
+.atelier-ring-readout {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--brass-bright);
+}
+.atelier-ring-readout strong { font-size: 18px; color: var(--ink); }
+
+.atelier-meta-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 0;
+}
+.atelier-meta-grid div { display: contents; }
+.atelier-meta-grid dt {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.atelier-meta-grid dd {
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--ink);
+  margin: 0;
+}
+
+.atelier-preview-tile {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 13 / 12;
+  background: var(--paper-3);
+  border: 1px solid var(--rule);
+  overflow: hidden;
+}
+.atelier-preview-interior {
+  position: absolute; inset: 0;
+  background: repeating-conic-gradient(#1c1c22 0% 25%, #15151a 0% 50%) 0 0 / 14px 14px;
+}
+.atelier-preview-tile img {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  image-rendering: pixelated;
+}
+
+/* Commit pane */
+
+.atelier-commit {
+  display: grid; gap: 24px;
+  padding: 32px;
+  border-top: 1px solid var(--rule-strong);
+  border-bottom: 1px solid var(--rule-strong);
+  background: linear-gradient(180deg, var(--paper) 0%, var(--paper-2) 100%);
+}
+.atelier-commit-row {
+  display: flex; align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.atelier-commit-row .editorial-action.big {
+  flex: 1 1 400px;
+  font-size: 26px;
+  padding: 20px 0;
+}
+
+/* Approach D progress overlay */
+
+.atelier-progress-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 8, 10, 0.88);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 240;
+  padding: 32px;
+}
+.atelier-progress-overlay[hidden] { display: none; }
+.atelier-progress-card {
+  width: min(960px, 100%);
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  background: var(--paper);
+  border: 1px solid var(--rule-strong);
+  padding: 36px;
+  display: grid; gap: 24px;
+}
+.atelier-progress-card .display { font-size: clamp(28px, 3vw, 40px); margin: 0; }
+.atelier-progress-card .body-lead { margin: 0; }
+.atelier-progress-grid {
+  list-style: none; margin: 0; padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 16px;
+}
+.atelier-progress-cell {
+  display: grid; gap: 6px;
+  border: 1px solid var(--rule);
+  padding: 8px;
+  text-align: center;
+}
+.atelier-progress-cell.is-running { border-color: var(--brass-bright); }
+.atelier-progress-cell.is-done { border-color: var(--jade); }
+.atelier-progress-cell.is-failed { border-color: var(--ember-bright); }
+.atelier-progress-thumb {
+  aspect-ratio: 13 / 12;
+  background: var(--paper-2);
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+}
+.atelier-progress-thumb img {
+  width: 100%; height: 100%;
+  object-fit: contain; image-rendering: pixelated;
+}
+.atelier-progress-label {
+  font-family: var(--sans);
+  font-size: 11px;
+  color: var(--ink);
+}
+.atelier-progress-state {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.atelier-progress-cell.is-running .atelier-progress-state { color: var(--brass-bright); }
+.atelier-progress-cell.is-done .atelier-progress-state { color: var(--jade); }
+.atelier-progress-cell.is-failed .atelier-progress-state { color: var(--ember-bright); }
+.atelier-progress-actions {
+  display: flex; justify-content: flex-end; gap: 16px;
 }
