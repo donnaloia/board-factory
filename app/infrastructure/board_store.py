@@ -212,12 +212,13 @@ class LocalBoardStore:
         return FileStat(size=st.st_size, mtime_ms=int(st.st_mtime * 1000))
 
     def url_for(self, board_id: str, rel: str) -> str:
-        """URL the browser can fetch this asset from.
+        """URL the browser can fetch this asset from (canonical board path + ``/asset/``).
 
-        Local backend serves through the FastAPI route at ``/b/<id>/asset/<rel>``;
-        S3 backend will return a presigned GET URL via ``signed_get_url``.
+        S3 backend will return a presigned GET URL via ``signed_get_url`` instead.
         """
-        return f"/b/{board_id}/asset/{rel}"
+        from infrastructure import deps
+
+        return f"{deps.board_http_prefix(board_id)}/asset/{rel}"
 
     def signed_get_url(self, board_id: str, rel: str) -> str | None:
         """Presigned URL the browser can fetch directly without going through

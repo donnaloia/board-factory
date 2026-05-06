@@ -10,11 +10,11 @@ import pytest
 
 
 def test_load_catalog_round_trip(seeded_board):
-    from boards import services as svc_catalog
+    from domains.boards import services as svc_catalog
 
     data = svc_catalog.load_catalog(seeded_board.id)
     assert data["project"] == "Test Board"
-    # Default generation block from boards.create_board.
+    # Default generation block from domains.boards.create_board.
     gen = data["generation"]
     assert gen["palette_size"] == 36
     assert gen["provider"] == "openai"
@@ -24,20 +24,20 @@ def test_load_catalog_round_trip(seeded_board):
 
 
 def test_safe_load_catalog_returns_none_for_missing(isolated_repo):
-    from boards import services as svc_catalog
+    from domains.boards import services as svc_catalog
 
     assert svc_catalog.safe_load_catalog("does-not-exist") is None
 
 
 def test_load_catalog_raises_for_missing(isolated_repo):
-    from boards import services as svc_catalog
+    from domains.boards import services as svc_catalog
 
     with pytest.raises(svc_catalog.CatalogNotFound):
         svc_catalog.load_catalog("does-not-exist")
 
 
 def test_read_generation_fills_defaults_for_partial_block():
-    from boards import services as svc_catalog
+    from domains.boards import services as svc_catalog
 
     block = svc_catalog.read_generation({"generation": {"palette_size": 24}})
     assert block["palette_size"] == 24
@@ -46,7 +46,7 @@ def test_read_generation_fills_defaults_for_partial_block():
 
 
 def test_write_generation_persists_and_marks_configured(seeded_board):
-    from boards import services as svc_catalog
+    from domains.boards import services as svc_catalog
 
     new_block = svc_catalog.write_generation(
         seeded_board.id,
@@ -67,7 +67,7 @@ def test_write_generation_persists_and_marks_configured(seeded_board):
 
 
 def test_write_generation_rejects_bad_palette_size(seeded_board):
-    from boards import services as svc_catalog
+    from domains.boards import services as svc_catalog
 
     with pytest.raises(svc_catalog.GenerationValidationError):
         svc_catalog.write_generation(
@@ -82,7 +82,7 @@ def test_write_generation_rejects_bad_palette_size(seeded_board):
 
 
 def test_write_generation_rejects_bad_provider(seeded_board):
-    from boards import services as svc_catalog
+    from domains.boards import services as svc_catalog
 
     with pytest.raises(svc_catalog.GenerationValidationError):
         svc_catalog.write_generation(
@@ -97,7 +97,7 @@ def test_write_generation_rejects_bad_provider(seeded_board):
 
 
 def test_space_kind_persists_on_space_design(seeded_board):
-    from boards import services as svc_catalog
+    from domains.boards import services as svc_catalog
 
     data = svc_catalog.load_catalog(seeded_board.id)
     corner = next(d for d in data["board_spaces"]["designs"] if d["id"] == "corner_tl")

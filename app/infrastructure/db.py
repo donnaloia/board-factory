@@ -16,7 +16,8 @@ now uses the ``postgres`` compose service.
 Notes:
 
 * **Single process-wide engine**, lazy-init. Tests use ``override_database_url``.
-* ORM models live in ``app/models/``; import ``infrastructure.db`` for the engine.
+* ORM table classes live in each domain's ``models.py``; import
+  ``infrastructure.db`` for the engine and ``infrastructure.orm`` for ``Base``.
 """
 
 from __future__ import annotations

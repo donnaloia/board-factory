@@ -1,0 +1,254 @@
+{% extends "_base.html" %}
+{% block title %}Device preview · {{ project }}{% endblock %}
+
+{% block breadcrumb %}
+<nav class="section-path" aria-label="breadcrumb">
+  {% if board_base %}
+  <a href="{{ board_base }}/" class="crumb">Board</a>
+  {% else %}
+  <span class="crumb">Board</span>
+  {% endif %}
+  <span class="sep">/</span>
+  <span class="here">Device preview</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+{% set bb = board_base %}
+<section class="console-stage">
+
+  <header class="console-head">
+    <span class="eyebrow">Device preview</span>
+    <h1 class="display">Across screens</h1>
+    <p class="body-lead">
+      The composited {{ board_w }}&thinsp;&times;&thinsp;{{ board_h }} board, rendered
+      inside the physical screens players will actually see it on &mdash; from the
+      living-room TV down to the handheld. Each device is drawn at its real
+      relative size so you can read scale at a glance.
+    </p>
+
+    {% if preview_present and idle_url and active_url %}
+    <div class="state-toggle" data-state-toggle role="tablist" aria-label="Board state">
+      <button type="button" class="state-btn is-active" data-state="idle" role="tab" aria-selected="true">Idle</button>
+      <button type="button" class="state-btn" data-state="active" role="tab" aria-selected="false">Active states</button>
+    </div>
+    {% endif %}
+  </header>
+
+  {% if not preview_present %}
+    <div class="plate-frame empty" style="margin: 56px 0; min-height: 240px">
+      no composite yet &mdash; run &ldquo;Composite preview&rdquo; on the
+      <a href="{{ bb }}/">board page</a> first
+    </div>
+  {% else %}
+
+  {# ───── 65" 4K Living-Room TV ───── #}
+  <article class="device-stage">
+    <div class="device-info">
+      <span class="device-eyebrow">Living room</span>
+      <h2 class="device-title">65&Prime; 4K TV</h2>
+      <p class="device-spec">3840 &times; 2160 &middot; 16:9 &middot; ~57&Prime; &times; 32&Prime; panel</p>
+      <p class="device-note">Couch-distance reading. Generous bezel-free face. Native 16:9 fills the panel exactly.</p>
+    </div>
+
+    <div class="device-shell">
+      <div class="device device-tv">
+        <div class="tv-body">
+          <div class="tv-bezel">
+            <div class="tv-screen device-screen">
+              {% if idle_url %}<img class="board-img is-idle" data-state-img="idle" src="{{ idle_url }}" alt="board on TV">{% endif %}
+              {% if active_url %}<img class="board-img is-active" data-state-img="active" src="{{ active_url }}" alt="board active on TV"{% if idle_url %} hidden{% endif %}>{% endif %}
+            </div>
+          </div>
+          <div class="tv-chin"><span class="tv-led"></span></div>
+        </div>
+        <div class="tv-stand-neck"></div>
+        <div class="tv-stand-base"></div>
+      </div>
+    </div>
+  </article>
+
+  {# ───── 27" Desktop Monitor ───── #}
+  <article class="device-stage">
+    <div class="device-info">
+      <span class="device-eyebrow">Desk</span>
+      <h2 class="device-title">27&Prime; Desktop monitor</h2>
+      <p class="device-spec">2560 &times; 1440 &middot; 16:9 &middot; ~24&Prime; &times; 13&Prime; panel</p>
+      <p class="device-note">The default development surface. Slim three-side bezel, chin houses the brand mark.</p>
+    </div>
+
+    <div class="device-shell">
+      <div class="device device-monitor">
+        <div class="monitor-bezel">
+          <div class="monitor-screen device-screen">
+            {% if idle_url %}<img class="board-img" data-state-img="idle" src="{{ idle_url }}" alt="board on monitor">{% endif %}
+            {% if active_url %}<img class="board-img" data-state-img="active" src="{{ active_url }}" alt="board active on monitor"{% if idle_url %} hidden{% endif %}>{% endif %}
+          </div>
+          <div class="monitor-chin"><span class="monitor-mark"></span></div>
+        </div>
+        <div class="monitor-stand-neck"></div>
+        <div class="monitor-stand-base"></div>
+      </div>
+    </div>
+  </article>
+
+  {# ───── 15" Laptop ───── #}
+  <article class="device-stage">
+    <div class="device-info">
+      <span class="device-eyebrow">Lap</span>
+      <h2 class="device-title">15&Prime; Laptop</h2>
+      <p class="device-spec">2560 &times; 1600 &middot; 16:10 &middot; ~13&Prime; &times; 8&Prime; panel</p>
+      <p class="device-note">Open clamshell. 16:10 panel is now the norm for thin-and-light laptops &mdash; the 16:9 board letterboxes with thin black bars top &amp; bottom.</p>
+    </div>
+
+    <div class="device-shell">
+      <div class="device device-laptop">
+        <div class="laptop-lid">
+          <span class="laptop-cam"></span>
+          <div class="laptop-screen device-screen">
+            {% if idle_url %}<img class="board-img" data-state-img="idle" src="{{ idle_url }}" alt="board on laptop">{% endif %}
+            {% if active_url %}<img class="board-img" data-state-img="active" src="{{ active_url }}" alt="board active on laptop"{% if idle_url %} hidden{% endif %}>{% endif %}
+          </div>
+        </div>
+        <div class="laptop-hinge"></div>
+        <div class="laptop-base">
+          <div class="laptop-keyboard" aria-hidden="true">
+            {% for row in range(4) %}
+            <div class="laptop-key-row">
+              {% for col in range(14) %}<span class="laptop-key"></span>{% endfor %}
+            </div>
+            {% endfor %}
+            <div class="laptop-key-row laptop-key-row-bottom">
+              <span class="laptop-key wide"></span>
+              <span class="laptop-key space"></span>
+              <span class="laptop-key wide"></span>
+            </div>
+          </div>
+          <div class="laptop-trackpad"></div>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  {# ───── Nintendo Switch (handheld) ───── #}
+  <article class="device-stage">
+    <div class="device-info">
+      <span class="device-eyebrow">Handheld</span>
+      <h2 class="device-title">Nintendo Switch</h2>
+      <p class="device-spec">1280 &times; 720 &middot; 16:9 &middot; 6.2&Prime; LCD &middot; ~9.4&Prime; total</p>
+      <p class="device-note">Native 16:9 means the board fills the screen exactly. Joy-Cons docked on either side.</p>
+    </div>
+
+    <div class="device-shell">
+      <div class="device device-switch">
+        <div class="joycon joycon-left" aria-hidden="true">
+          <span class="rail-pin rail-top"></span>
+          <span class="rail-pin rail-bottom"></span>
+          <span class="joy-stick"></span>
+          <div class="joy-dpad">
+            <span></span><span></span><span></span><span></span>
+          </div>
+          <span class="btn minus"></span>
+          <span class="btn capture"></span>
+          <span class="bumper bumper-l"></span>
+        </div>
+        <div class="switch-bezel">
+          <div class="switch-screen device-screen">
+            {% if idle_url %}<img class="board-img" data-state-img="idle" src="{{ idle_url }}" alt="board on Switch">{% endif %}
+            {% if active_url %}<img class="board-img" data-state-img="active" src="{{ active_url }}" alt="board active on Switch"{% if idle_url %} hidden{% endif %}>{% endif %}
+          </div>
+        </div>
+        <div class="joycon joycon-right" aria-hidden="true">
+          <span class="rail-pin rail-top"></span>
+          <span class="rail-pin rail-bottom"></span>
+          <div class="joy-abxy">
+            <span class="x">X</span>
+            <span class="y">Y</span>
+            <span class="a">A</span>
+            <span class="b">B</span>
+          </div>
+          <span class="joy-stick"></span>
+          <span class="btn plus"></span>
+          <span class="btn home"></span>
+          <span class="bumper bumper-r"></span>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  {# ───── Steam Deck ───── #}
+  <article class="device-stage">
+    <div class="device-info">
+      <span class="device-eyebrow">Handheld &middot; Valve</span>
+      <h2 class="device-title">Steam Deck</h2>
+      <p class="device-spec">1280 &times; 800 &middot; 16:10 &middot; 7&Prime; LCD &middot; ~11.7&Prime; total</p>
+      <p class="device-note">16:10 panel &mdash; the 16:9 board letterboxes with thin black bars top &amp; bottom. Twin sticks, twin trackpads, full grip shell.</p>
+    </div>
+
+    <div class="device-shell">
+      <div class="device device-deck">
+        <div class="deck-grip deck-grip-left" aria-hidden="true">
+          <span class="deck-stick"></span>
+          <div class="deck-dpad">
+            <span></span><span></span><span></span><span></span>
+          </div>
+          <span class="deck-trackpad"></span>
+          <span class="deck-btn deck-btn-view"></span>
+          <span class="deck-bumper deck-bumper-l"></span>
+        </div>
+        <div class="deck-bezel">
+          <div class="deck-screen device-screen">
+            {% if idle_url %}<img class="board-img" data-state-img="idle" src="{{ idle_url }}" alt="board on Steam Deck">{% endif %}
+            {% if active_url %}<img class="board-img" data-state-img="active" src="{{ active_url }}" alt="board active on Steam Deck"{% if idle_url %} hidden{% endif %}>{% endif %}
+          </div>
+        </div>
+        <div class="deck-grip deck-grip-right" aria-hidden="true">
+          <div class="deck-abxy">
+            <span class="y">Y</span>
+            <span class="x">X</span>
+            <span class="b">B</span>
+            <span class="a">A</span>
+          </div>
+          <span class="deck-stick"></span>
+          <span class="deck-trackpad"></span>
+          <span class="deck-btn deck-btn-menu"></span>
+          <span class="deck-bumper deck-bumper-r"></span>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  {% endif %}
+
+  <footer class="board-foot" style="margin-top: 56px">
+    <p class="caption" style="margin: 0">
+      Source: <code>data/boards/{{ board_id }}/workspace/preview/</code> &middot;
+      regenerate via <a href="{{ bb }}/preview">Composite preview</a>
+    </p>
+  </footer>
+
+</section>
+
+<script>
+(function () {
+  const toggle = document.querySelector('[data-state-toggle]');
+  if (!toggle) return;
+
+  toggle.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-state]');
+    if (!btn) return;
+    const state = btn.dataset.state;
+
+    toggle.querySelectorAll('.state-btn').forEach(b => {
+      const on = b === btn;
+      b.classList.toggle('is-active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+
+    document.querySelectorAll('[data-state-img]').forEach(img => {
+      img.hidden = img.dataset.stateImg !== state;
+    });
+  });
+})();
+</script>
+{% endblock %}

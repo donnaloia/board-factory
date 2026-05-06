@@ -3,9 +3,9 @@
 Uses the same URL resolver as ``infrastructure.db`` so CLI migrations and the running
 app never point at different databases.
 
-``target_metadata`` is ``None``: revisions are **hand-written** (not
-``alembic revision --autogenerate`` from SQLAlchemy metadata). Keep models and
-migrations in sync by convention.
+``target_metadata`` is ``None``: the baseline revision builds schema via
+``Base.metadata.create_all`` (see ``versions/0001_full_schema.py``). Follow-on
+revisions may use autogenerate if you wire ``target_metadata`` later.
 """
 
 from __future__ import annotations

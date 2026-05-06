@@ -7,9 +7,9 @@ state on disk:
 
 - workspace/live/<category>/<asset_id>.png      ← what's currently shown
 - ``workspace/history/…``        — every version ever made
-- ``workspace/meta/live_source/`` — JSON pointer: which history file was last
-  promoted to live (sidebar ``active_prompt``; see ``live_source``)
 
+Promotion updates ``cells.live_asset_version_id`` in Postgres via the
+registered ``live_promote`` listener (see web ``assets.repository``).
 Generation auto-promotes the newest output as live; the user can scroll
 the history strip to flip back to any prior version (just copies that
 file back to live/<asset_id>.png).
@@ -30,7 +30,6 @@ from pathlib import Path
 from typing import Any
 
 from . import config
-from .live_source import record_promoted_history_file
 
 
 _asset_db_listeners: list[Callable[..., None]] = []
@@ -187,7 +186,12 @@ def promote(category: str, asset_id: str, history_filename: str) -> Path:
     dst = live_path(category, asset_id)
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
-    record_promoted_history_file(category, asset_id, history_filename)
+    _notify_asset_db(
+        "live_promote",
+        category=category,
+        asset_id=asset_id,
+        history_filename=history_filename,
+    )
     return dst
 
 

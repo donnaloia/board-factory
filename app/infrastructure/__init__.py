@@ -1,9 +1,9 @@
 """Storage layer for the Board Factory web application.
 
 This package owns the I/O boundaries: SQL connections, the per-board file
-store, and shared filesystem path math. Domain ORM models live one level
-up at ``app/models/`` so they sit alongside the rest of the application
-surface (services, routes) rather than being buried inside infrastructure.
+store, and shared filesystem path math. The shared SQLAlchemy
+``DeclarativeBase`` lives in ``infrastructure.orm``; each domain's table
+mappings live in that domain's ``models.py``.
 
   - ``board_store`` — the ``BoardStore`` protocol + ``LocalBoardStore``
     backend. Singleton wired in via ``get_store()``; every per-board file
@@ -11,6 +11,9 @@ surface (services, routes) rather than being buried inside infrastructure.
 
   - ``db`` — SQLAlchemy engine, ``session_scope``, and URL resolution
     shared with Alembic.
+
+  - ``deps`` — Shared FastAPI ``Depends`` helpers and HTTP glue (nested board
+    resolution, ``job_or_redirect_response``, ``editorial_template_context``, …).
 
   - ``fs`` — filesystem path helpers that delegate to the configured
     ``BoardStore`` (e.g. ``fs.workspace.live_path``). Use the bytes API on

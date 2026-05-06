@@ -4,7 +4,7 @@ The pipeline calls ``boardfactory.assets`` to write PNG files (live + history)
 and emits ``history_push`` events that this domain catches in
 :mod:`assets.repository.on_asset_event` to index a row in
 ``asset_versions``. Browsers then reach files through routes registered in
-:mod:`assets.routes`, with cache-busting URLs built by
+:mod:`assets.routes_api`, with cache-busting URLs built by
 :func:`assets.services.board_asset_url`.
 
 Files in this package
@@ -18,7 +18,7 @@ Files in this package
     URL builders + cache-bust helpers used by views and routes when
     rendering links to ``/asset/...``.
 
-``routes``
-    HTTP routes serving ``/asset/...`` and ``/mockup/...`` for both the
-    canonical nested URL form and the legacy ``/b/{board_id}/...`` form.
+``routes_api``
+    HTTP routes serving ``/asset/...`` and ``/mockup/...`` under the nested
+    board URL prefix.
 """

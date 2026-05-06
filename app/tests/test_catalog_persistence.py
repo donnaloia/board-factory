@@ -5,12 +5,13 @@ from __future__ import annotations
 from sqlalchemy import select
 
 from infrastructure.db import session_scope
-from models.core import AssetVersionRecord, BoardGameRecord
+from assets.models import AssetVersionRecord
+from domains.boards.models import BoardGameRecord
 
 
 def test_catalog_persists_to_board_games(isolated_repo, seeded_board, board_id):
-    from boards import services as svc_catalog
-    from models.core import CellRecord
+    from domains.boards import services as svc_catalog
+    from domains.cells.models import CellRecord
 
     data = svc_catalog.load_catalog(board_id)
     assert data.get("project") == "Test Board"
@@ -29,7 +30,7 @@ def test_catalog_persists_to_board_games(isolated_repo, seeded_board, board_id):
 
 
 def test_save_catalog_updates_db(isolated_repo, seeded_board, board_id):
-    from boards import services as svc_catalog
+    from domains.boards import services as svc_catalog
 
     cat = svc_catalog.load_catalog(board_id)
     cat["project"] = "Saved Via DB"

@@ -44,7 +44,7 @@ from sqlalchemy.orm import Session as SASession
 from auth import repository as auth_repo
 from boardfactory import boards as bf_boards
 from infrastructure.db import session_scope
-from models.core import UserRecord
+from auth.models import UserRecord
 
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
