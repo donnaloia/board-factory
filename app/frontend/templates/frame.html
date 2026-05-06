@@ -1,5 +1,5 @@
 {% extends "_base.html" %}
-{% block title %}Frame · {{ project }}{% endblock %}
+{% block title %}Frame Atelier · {{ project }}{% endblock %}
 
 {% block breadcrumb %}
 <nav class="section-path" aria-label="breadcrumb">
@@ -9,228 +9,315 @@
   <span class="crumb">Board</span>
   {% endif %}
   <span class="sep">/</span>
-  <span class="here">Frame</span>
+  <span class="here">Frame Atelier</span>
 </nav>
 {% endblock %}
 
 {% block content %}
 {% set bb = board_base %}
-<section class="frame-stage">
+<section class="frame-atelier"
+         data-board-id="{{ board_id }}"
+         data-board-base="{{ bb or '' }}"
+         data-has-openai-key="{{ '1' if has_openai_key else '0' }}"
+         data-default-ring="{{ default_ring_px }}"
+         data-min-ring="{{ min_ring_px }}"
+         data-max-ring="{{ max_ring_px }}"
+         data-typical-w="{{ typical_size[0] }}"
+         data-typical-h="{{ typical_size[1] }}"
+         data-n-panels="{{ n_panels }}">
 
-  <header class="frame-head">
-    <span class="eyebrow">Atelier · Frame</span>
-    <h1 class="display">The frame</h1>
-    <p class="body-lead">
-      One ornate frame, used by every functional panel on the board.
-      Pick a source asset (a generated panel or a region of the mockup),
-      slide the ring thickness, and adopt &mdash; from then on every panel
-      on the board wears the same frame, and regenerations only repaint
-      the interior.
-    </p>
-  </header>
-
-  {% if has_frame %}
-  <section class="frame-current" aria-labelledby="current-h">
-    <h2 id="current-h" class="eyebrow">Currently adopted</h2>
-    <div class="frame-current-row">
-      <div class="frame-preview-tile">
-        <img src="{{ frame_url }}" alt="current frame at source size">
-        <span class="caption">at source size</span>
-      </div>
-      <div class="frame-preview-tile">
-        <img src="{{ bb }}/frame.png?w=260&h=240&t={{ meta.created_ms }}"
-             alt="current frame at typical panel size">
-        <span class="caption">at 260 &times; 240 (typical panel)</span>
-      </div>
-      <dl class="frame-meta">
-        <div><dt>ring</dt><dd>{{ meta.ring_px }} px</dd></div>
-        <div><dt>source</dt><dd>{{ meta.source_kind }} &middot; {{ meta.source_id }}</dd></div>
-        <div><dt>source size</dt><dd>{{ meta.source_size[0] }} &times; {{ meta.source_size[1] }}</dd></div>
-        <div><dt>state</dt><dd>{% if frame_enabled %}<span class="frame-on">enabled</span>{% else %}<span class="frame-off">disabled</span>{% endif %}</dd></div>
-      </dl>
-    </div>
-    {% if frame_enabled %}
-    <form method="post" action="{{ bb }}/api/frame/disable" data-ajax-form>
-      <button type="submit" class="quiet-action">Disable on board</button>
-    </form>
-    {% endif %}
-  </section>
-  {% else %}
-  <section class="frame-empty">
-    <p class="body-lead muted">
-      No frame adopted yet. Pick one below.
-    </p>
-  </section>
-  {% endif %}
-
-  <section class="frame-picker" aria-labelledby="picker-h">
-    <h2 id="picker-h" class="eyebrow">Pick a source</h2>
-
-    <div class="picker-tabs">
-      <button type="button" class="tab is-active" data-source-kind="panel">From a generated panel</button>
-      <button type="button" class="tab" data-source-kind="mockup">From the mockup</button>
+  {# ─────────── status bar / hero ─────────── #}
+  <header class="atelier-hero">
+    <div class="atelier-hero-text">
+      <span class="eyebrow">Atelier · Frame</span>
+      <h1 class="display">The frame</h1>
+      <p class="body-lead">
+        One ornate ring, used by every functional panel on this board. Pick a
+        source, let the model propose where the ring sits, fine-tune the inset,
+        and commit &mdash; on commit the board re-paints every applicable panel
+        interior under the new rim so old chrome doesn't double up.
+      </p>
     </div>
 
-    <div class="picker-source-grid" data-source-grid>
-      {% if candidates %}
-      {% for c in candidates %}
-      <button type="button" class="source-card" data-source-id="{{ c.id }}" data-w="{{ c.size[0] }}" data-h="{{ c.size[1] }}">
-        <div class="source-thumb"><img src="{{ c.url }}" alt=""></div>
-        <span class="source-id">{{ c.id }}</span>
-        <span class="source-size">{{ c.size[0] }} &times; {{ c.size[1] }}</span>
-      </button>
-      {% endfor %}
-      {% else %}
-      <p class="muted">No live panel assets yet. Generate some panels first, or switch to "From the mockup".</p>
-      {% endif %}
-    </div>
-
-    <div class="picker-editor" data-picker-editor hidden>
-      <div class="editor-cols">
-        <div class="editor-controls">
-          <p class="caption">Ring thickness</p>
-          <input type="range" id="ring-slider" min="2" max="40" value="14" step="1">
-          <output for="ring-slider" id="ring-value" class="ring-value">14 px</output>
-
-          <p class="caption" style="margin-top: 24px">Source: <span data-selected-id>—</span></p>
-
-          <button type="button" class="editorial-action primary" data-adopt>
-            <span class="arrow">→</span>
-            <span>Adopt as frame</span>
-            <span class="est">enables on board</span>
-          </button>
-        </div>
-
-        <div class="editor-preview">
-          <p class="caption">Preview at 260 &times; 240</p>
-          <div class="preview-frame-mount">
-            <div class="preview-interior">interior</div>
-            <img id="preview-img" alt="frame preview">
+    <aside class="atelier-status" data-status>
+      {% if has_frame %}
+      <div class="atelier-status-row">
+        <span class="atelier-status-pip is-on" aria-hidden="true">◆</span>
+        <div>
+          <div class="atelier-status-line"><strong data-status-state>{{ 'enabled' if frame_enabled else 'adopted (disabled)' }}</strong></div>
+          <div class="atelier-status-sub" data-status-meta>
+            from <code>{{ meta.source_kind }}:{{ meta.source_id or '—' }}</code>
+            · <span data-status-ring>{{ meta.ring_px }}</span>px ring
+            {% if active_view and active_view.model_id %} · {{ active_view.model_id }}{% endif %}
           </div>
         </div>
       </div>
+      <div class="atelier-status-actions">
+        {% if frame_enabled %}
+        <button type="button" class="quiet-action" data-disable>Disable on board</button>
+        {% endif %}
+      </div>
+      {% else %}
+      <div class="atelier-status-row">
+        <span class="atelier-status-pip" aria-hidden="true">○</span>
+        <div>
+          <div class="atelier-status-line"><strong>No frame adopted</strong></div>
+          <div class="atelier-status-sub">Pick a source below to begin.</div>
+        </div>
+      </div>
+      {% endif %}
+    </aside>
+  </header>
+
+  {# ─────────── phase rail ─────────── #}
+  <nav class="atelier-phases" aria-label="Atelier phases">
+    <ol>
+      <li class="phase is-current" data-phase="propose">
+        <span class="phase-num">1</span>
+        <span class="phase-label">Propose</span>
+        <span class="phase-sub">Pick a source &amp; run vision</span>
+      </li>
+      <li class="phase" data-phase="refine">
+        <span class="phase-num">2</span>
+        <span class="phase-label">Refine</span>
+        <span class="phase-sub">Tune rim and hole</span>
+      </li>
+      <li class="phase" data-phase="commit">
+        <span class="phase-num">3</span>
+        <span class="phase-label">Commit</span>
+        <span class="phase-sub">Adopt &amp; reapply to {{ n_panels }} panel{{ '' if n_panels == 1 else 's' }}</span>
+      </li>
+    </ol>
+  </nav>
+
+  {# ─────────── propose: source picker ─────────── #}
+  <section class="atelier-pane" data-pane="propose" aria-labelledby="propose-h">
+    <div class="atelier-pane-head">
+      <h2 id="propose-h" class="eyebrow">Propose &mdash; pick a source</h2>
+      <p class="atelier-help">
+        The model finds the rim in the image you choose. <strong>Panels</strong>
+        give the strongest signal once art exists. The <strong>mockup</strong>
+        is a great starting point before tiles are generated. <strong>Upload</strong>
+        anything (a sketch, an existing frame asset) for full control.
+      </p>
+    </div>
+
+    <div class="atelier-source-tabs" role="tablist">
+      <button type="button" class="atelier-tab is-active" role="tab" data-source-tab="panel">
+        From a generated panel
+      </button>
+      <button type="button" class="atelier-tab" role="tab" data-source-tab="mockup">
+        From the mockup
+      </button>
+      <button type="button" class="atelier-tab" role="tab" data-source-tab="upload">
+        Upload an image
+      </button>
+    </div>
+
+    <div class="atelier-source-grid" data-source-grid="panel">
+      {% if panel_sources %}
+        {% for s in panel_sources %}
+          <button type="button" class="atelier-source-card{{ ' is-disabled' if not s.has_live else '' }}"
+                  {% if s.has_live %}data-source-kind="panel" data-source-id="{{ s.id }}" data-w="{{ s.size[0] }}" data-h="{{ s.size[1] }}"{% endif %}
+                  {% if not s.has_live %}aria-disabled="true" title="No live art yet — generate this panel first."{% endif %}>
+            <div class="atelier-source-thumb">
+              {% if s.url %}
+              <img src="{{ s.url }}" alt="">
+              {% else %}
+              <span class="atelier-source-empty">empty</span>
+              {% endif %}
+            </div>
+            <span class="atelier-source-label">{{ s.label }}</span>
+            <span class="atelier-source-size">{{ s.size[0] }} × {{ s.size[1] }}</span>
+          </button>
+        {% endfor %}
+      {% else %}
+        <p class="atelier-empty">No functional panels in this catalog yet.</p>
+      {% endif %}
+    </div>
+
+    <div class="atelier-source-grid" data-source-grid="mockup" hidden>
+      {% if mockup_sources %}
+        {% for s in mockup_sources %}
+          <button type="button" class="atelier-source-card"
+                  data-source-kind="mockup"
+                  data-source-id="{{ s.id }}"
+                  data-w="{{ s.size[0] }}" data-h="{{ s.size[1] }}">
+            <div class="atelier-source-thumb"><img src="{{ s.url }}" alt=""></div>
+            <span class="atelier-source-label">{{ s.label }}</span>
+            <span class="atelier-source-size">{{ s.size[0] }} × {{ s.size[1] }}</span>
+          </button>
+        {% endfor %}
+      {% else %}
+        <p class="atelier-empty">No mockup uploaded yet for this board.</p>
+      {% endif %}
+    </div>
+
+    <div class="atelier-source-grid is-upload" data-source-grid="upload" hidden>
+      <label class="atelier-upload-drop" data-upload-drop>
+        <input type="file" accept="image/png,image/jpeg" id="atelier-upload-input" hidden>
+        <span class="atelier-upload-icon" aria-hidden="true">↑</span>
+        <span class="atelier-upload-cta">Choose an image</span>
+        <span class="atelier-upload-hint">PNG or JPEG · uses the full image as the rim source</span>
+      </label>
+      <div class="atelier-upload-list" data-upload-list></div>
+    </div>
+
+    <div class="atelier-propose-actions">
+      <label class="atelier-checkbox">
+        <input type="checkbox" id="atelier-use-vision"
+               {% if has_openai_key %}checked{% endif %}>
+        <span>Use AI vision to find the ring</span>
+        {% if not has_openai_key %}
+        <span class="atelier-key-warn">(needs OpenAI key — falls back to deterministic 9-slice)</span>
+        {% endif %}
+      </label>
+
+      <button type="button" class="editorial-action primary" data-run-vision disabled>
+        <span class="arrow">→</span>
+        <span>Run vision on this source</span>
+        <span class="est" data-vision-cost-est></span>
+      </button>
+    </div>
+
+    <div class="atelier-vision-status" data-vision-status hidden>
+      <p class="atelier-vision-summary" data-vision-summary>Analyzing source…</p>
+      <div class="atelier-progress-rail"><div class="atelier-progress-bar" data-vision-bar></div></div>
+      <ul class="atelier-vision-log" data-vision-log></ul>
+    </div>
+  </section>
+
+  {# ─────────── refine: canvas + handles ─────────── #}
+  <section class="atelier-pane is-empty" data-pane="refine" aria-labelledby="refine-h" hidden>
+    <div class="atelier-pane-head">
+      <h2 id="refine-h" class="eyebrow">Refine &mdash; tune the rim</h2>
+      <p class="atelier-help">
+        Drag the corners, or slide the ring thickness, until the
+        <span class="rim-swatch" aria-hidden="true"></span> rim and
+        <span class="hole-swatch" aria-hidden="true"></span> hole sit where you
+        want them. Switch candidates if the model offered alternatives.
+      </p>
+    </div>
+
+    <div class="atelier-refine-grid">
+      <aside class="atelier-candidates" data-candidates aria-label="Candidate rings">
+        <h3 class="micro-h">Candidates</h3>
+        <ul class="atelier-candidate-list" data-candidate-list></ul>
+        <button type="button" class="quiet-action" data-rerun-vision>Re-run vision</button>
+      </aside>
+
+      <div class="atelier-stage" data-stage>
+        <div class="atelier-stage-frame">
+          <img class="atelier-stage-source" data-stage-source alt="frame source">
+          <canvas class="atelier-stage-overlay" data-stage-overlay></canvas>
+          <div class="atelier-stage-handles" data-stage-handles aria-hidden="true">
+            <span class="handle handle-tl" data-handle="tl"></span>
+            <span class="handle handle-tr" data-handle="tr"></span>
+            <span class="handle handle-bl" data-handle="bl"></span>
+            <span class="handle handle-br" data-handle="br"></span>
+          </div>
+        </div>
+        <div class="atelier-stage-toolbar">
+          <button type="button" class="quiet-action is-active" data-toggle-overlay>Show overlay</button>
+          <label class="atelier-checkbox tiny">
+            <input type="checkbox" data-snap-to-grid checked>
+            <span>Snap to grid</span>
+          </label>
+        </div>
+      </div>
+
+      <aside class="atelier-inspector" data-inspector>
+        <h3 class="micro-h">Geometry</h3>
+
+        <label class="atelier-field">
+          <span class="atelier-field-label">Ring thickness</span>
+          <input type="range" data-ring-slider
+                 min="{{ min_ring_px }}" max="{{ max_ring_px }}"
+                 value="{{ default_ring_px }}" step="1">
+          <span class="atelier-ring-readout"><strong data-ring-value>{{ default_ring_px }}</strong> px (source)</span>
+        </label>
+
+        <dl class="atelier-meta-grid">
+          <div><dt>source</dt><dd data-meta-source>—</dd></div>
+          <div><dt>source size</dt><dd data-meta-source-size>—</dd></div>
+          <div><dt>model</dt><dd data-meta-model>—</dd></div>
+          <div><dt>score</dt><dd data-meta-score>—</dd></div>
+        </dl>
+
+        <h3 class="micro-h">Preview at typical panel ({{ typical_size[0] }}×{{ typical_size[1] }})</h3>
+        <div class="atelier-preview-tile">
+          <div class="atelier-preview-interior"></div>
+          <img data-preview-img alt="frame preview at typical size">
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  {# ─────────── commit panel ─────────── #}
+  <section class="atelier-commit" data-pane="commit" aria-labelledby="commit-h" hidden>
+    <div class="atelier-pane-head">
+      <h2 id="commit-h" class="eyebrow">Commit &mdash; adopt &amp; reapply</h2>
+      <p class="atelier-help">
+        Adopting writes the new frame into <code>workspace/frames/house/</code>
+        and (when "reapply" is on) repaints every applicable panel interior so
+        old baked-in chrome is replaced cleanly. Each panel keeps a snapshot in
+        history tagged <code>frame_rework_pre</code>, so you can always go back.
+      </p>
+    </div>
+
+    <div class="atelier-commit-row">
+      <label class="atelier-checkbox">
+        <input type="checkbox" data-enable-after checked>
+        <span>Enable on board after commit</span>
+      </label>
+      <label class="atelier-checkbox">
+        <input type="checkbox" data-regen-panels checked>
+        <span>Reapply to {{ n_panels }} panel{{ '' if n_panels == 1 else 's' }} (Approach D)</span>
+      </label>
+
+      <button type="button" class="editorial-action primary big" data-commit>
+        <span class="arrow">→</span>
+        <span>Adopt frame</span>
+        <span class="est" data-commit-cost-est>—</span>
+      </button>
+    </div>
+  </section>
+
+  {# ─────────── approach D progress overlay ─────────── #}
+  <section class="atelier-progress-overlay" data-progress-overlay hidden aria-live="polite">
+    <div class="atelier-progress-card">
+      <header>
+        <span class="eyebrow">Approach D</span>
+        <h2 class="display" data-progress-title>Reapplying frame…</h2>
+        <p class="body-lead" data-progress-summary>0 of {{ n_panels }} panels regenerated.</p>
+      </header>
+
+      <div class="atelier-progress-rail big">
+        <div class="atelier-progress-bar" data-progress-bar></div>
+      </div>
+
+      <ul class="atelier-progress-grid" data-progress-grid>
+        {% for s in panel_sources %}
+        <li class="atelier-progress-cell" data-panel-id="{{ s.id }}">
+          <div class="atelier-progress-thumb">
+            {% if s.url %}<img src="{{ s.url }}" alt="">{% endif %}
+          </div>
+          <span class="atelier-progress-label">{{ s.label }}</span>
+          <span class="atelier-progress-state">queued</span>
+        </li>
+        {% endfor %}
+      </ul>
+
+      <footer class="atelier-progress-actions">
+        <button type="button" class="quiet-action" data-cancel-regen>Cancel</button>
+        <button type="button" class="quiet-action" data-progress-done hidden>Done</button>
+      </footer>
     </div>
   </section>
 
 </section>
+{% endblock %}
 
-<script>
-(function () {
-  const boardId = {{ board_id | tojson }};
-  const boardBase = {{ (board_base or '') | tojson }};
-  const sourceGrid = document.querySelector("[data-source-grid]");
-  const editor = document.querySelector("[data-picker-editor]");
-  const selectedIdEl = document.querySelector("[data-selected-id]");
-  const slider = document.getElementById("ring-slider");
-  const ringVal = document.getElementById("ring-value");
-  const previewImg = document.getElementById("preview-img");
-  const adoptBtn = document.querySelector("[data-adopt]");
-  const tabs = document.querySelectorAll(".picker-tabs .tab");
-
-  let currentSourceKind = "panel";
-  let currentSourceId = null;
-  let mockupCandidates = [];
-
-  // Fetch mockup-based candidates lazily (we need to hit the panels list).
-  async function loadMockupCandidates() {
-    if (mockupCandidates.length) return mockupCandidates;
-    // Reuse the catalog via the spec data — easiest is parsing catalog dict
-    // from the same source as panels above. The server already exposes panels
-    // via /api/cell, but we need a panel list. Read from the existing DOM
-    // panel cards if we have them; otherwise fall back to a simple hit.
-    const panels = Array.from(document.querySelectorAll("[data-source-id]"))
-      .map(el => ({
-        id: el.getAttribute("data-source-id"),
-        w: parseInt(el.getAttribute("data-w")) || 260,
-        h: parseInt(el.getAttribute("data-h")) || 240,
-      }));
-    mockupCandidates = panels;
-    return panels;
-  }
-
-  tabs.forEach(t => {
-    t.addEventListener("click", async () => {
-      tabs.forEach(x => x.classList.remove("is-active"));
-      t.classList.add("is-active");
-      currentSourceKind = t.getAttribute("data-source-kind");
-      currentSourceId = null;
-      editor.hidden = true;
-      adoptBtn?.removeAttribute("data-disabled");
-
-      if (currentSourceKind === "mockup") {
-        const items = await loadMockupCandidates();
-        sourceGrid.innerHTML = items.map(p => `
-          <button type="button" class="source-card" data-source-id="${p.id}" data-w="${p.w}" data-h="${p.h}">
-            <div class="source-thumb">
-              <img src="${boardBase}/api/frame/preview.png?source_kind=mockup&source_id=${p.id}&ring_px=14&w=${p.w}&h=${p.h}" alt="">
-            </div>
-            <span class="source-id">${p.id}</span>
-            <span class="source-size">${p.w} &times; ${p.h} (from mockup)</span>
-          </button>
-        `).join("");
-        wireCards();
-      } else {
-        // Panel mode → just refresh the page server-side rendered list.
-        // Already in DOM from initial render; nothing to do.
-        if (sourceGrid.querySelectorAll("[data-source-id]").length === 0) {
-          location.reload();
-        }
-      }
-    });
-  });
-
-  function wireCards() {
-    sourceGrid.querySelectorAll("[data-source-id]").forEach(card => {
-      card.addEventListener("click", () => {
-        sourceGrid.querySelectorAll(".source-card.is-active").forEach(x => x.classList.remove("is-active"));
-        card.classList.add("is-active");
-        currentSourceId = card.getAttribute("data-source-id");
-        selectedIdEl.textContent = currentSourceId;
-        editor.hidden = false;
-        slider.dispatchEvent(new Event("input"));
-      });
-    });
-  }
-  wireCards();
-
-  function refreshPreview() {
-    if (!currentSourceId) return;
-    const ring = slider.value;
-    ringVal.textContent = `${ring} px`;
-    previewImg.src = `${boardBase}/api/frame/preview.png?source_kind=${currentSourceKind}&source_id=${encodeURIComponent(currentSourceId)}&ring_px=${ring}&w=260&h=240&t=${Date.now()}`;
-  }
-  slider.addEventListener("input", refreshPreview);
-
-  adoptBtn?.addEventListener("click", async () => {
-    if (!currentSourceId) return;
-    adoptBtn.setAttribute("disabled", "true");
-    const fd = new FormData();
-    fd.append("source_kind", currentSourceKind);
-    fd.append("source_id", currentSourceId);
-    fd.append("ring_px", slider.value);
-    fd.append("enable_after", "true");
-    try {
-      const r = await fetch(`${boardBase}/api/frame/adopt`, { method: "POST", body: fd });
-      if (!r.ok) {
-        alert("Could not adopt frame: " + (await r.text()));
-        adoptBtn.removeAttribute("disabled");
-        return;
-      }
-      location.reload();
-    } catch (err) {
-      alert("Network error: " + err);
-      adoptBtn.removeAttribute("disabled");
-    }
-  });
-
-  // Disable form (AJAX submit, then reload).
-  document.querySelectorAll("form[data-ajax-form]").forEach(f => {
-    f.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const r = await fetch(f.getAttribute("action"), { method: "POST" });
-      if (r.ok) location.reload();
-    });
-  });
-})();
-</script>
+{% block scripts %}
+<script src="/static/frame-atelier.js?v={{ asset_v('frame-atelier.js') }}"></script>
 {% endblock %}

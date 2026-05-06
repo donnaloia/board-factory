@@ -80,7 +80,15 @@ def do_preview(catalog: Catalog, sink: ProgressSink) -> None:
         paste_tile(active_canvas, active_tile, pos, (tgt_w, tgt_h))
 
         if frame_active_for_panels:
-            frame_overlay = frames.compose_house_frame_for((tgt_w, tgt_h))
+            # Rim-only composite: the panel art carries any baked-in chrome
+            # through the hole, while the active rim sits exactly where the
+            # FrameInstance says it should. For rectangular ring frames this
+            # is bit-identical to the prior "paste full frame" behavior.
+            # For Phase A vision frames whose rim has cut-outs, the panel
+            # interior shows through wherever the rim is transparent — that
+            # is the doc's "interim preview may still use improved
+            # compositing (hole mask) before the batch finishes" path.
+            frame_overlay = frames.compose_house_rim_for((tgt_w, tgt_h))
             if frame_overlay is not None:
                 idle_canvas.paste(frame_overlay, pos, frame_overlay)
                 active_canvas.paste(frame_overlay, pos, frame_overlay)

@@ -15,6 +15,17 @@ Why 9-slice instead of "scale the whole frame"?
 
 The "house frame" lives at workspace/frames/house/ — exactly one frame is
 active per board. Per-panel frame overrides are explicitly out of scope.
+
+In addition to the 8 sprite PNGs, the on-disk pack also stores two binary
+masks at the source-asset resolution:
+
+  - hole_mask.png   white = interior content area (inpaint here / show through)
+  - rim_mask.png    white = decorative rim (preserve / paste this on top)
+
+For a deterministic 9-slice frame these are simple rectangles derived from
+``ring_px``; for vision-derived frames they may have non-rectangular
+geometry. The compositor uses ``rim_mask`` when present so panel art with
+baked-in chrome shows through the hole region instead of being double-framed.
 """
 
 from __future__ import annotations
@@ -25,7 +36,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from . import config
 
@@ -63,17 +74,32 @@ _SLICE_NAMES = (
 
 
 @dataclass
-class FrameMeta:
-    """Sidecar metadata for the house frame."""
-    ring_px: int                  # outer ring thickness in source-asset pixels
-    source_kind: str              # "panel" | "mockup_region" | "generated"
-    source_id: str | None         # the panel id or mockup region key
-    source_size: tuple[int, int]  # WxH of the source asset that frame was cut from
+class FrameInstance:
+    """Sidecar metadata for an adopted house frame.
+
+    Carries provenance the Atelier needs (where the rim came from, which
+    vision model produced it) plus the geometry parameters that drive
+    9-slice composition. Persisted as ``frame.json`` next to the eight
+    slice PNGs and the two masks; mirrored into the relational store for
+    cross-board queries (see ``app/domains/cells/frames_repository.py``).
+    """
+
+    ring_px: int                              # outer ring thickness, source-asset pixels
+    source_kind: str                          # "panel" | "mockup" | "upload"
+    source_id: str | None                     # panel id, mockup region key, or upload filename
+    source_size: tuple[int, int]              # WxH of the source asset frame was cut from
     created_ms: int = field(default_factory=lambda: int(time.time() * 1000))
     notes: str = ""
 
+    # Optional provenance.
+    source_cell_id: str | None = None         # cells.id when source was a panel cell
+    source_asset_version_id: int | None = None  # asset_versions.id when sourced from history
+    model_id: str | None = None               # vision model id (e.g. "gpt-4o-2024-08-06")
+    prompt_hash: str | None = None            # short hash of vision prompt for replay
+    candidate_index: int | None = None        # which proposal (0-based) the user picked
+
     def to_dict(self) -> dict:
-        return {
+        d: dict = {
             "ring_px": self.ring_px,
             "source_kind": self.source_kind,
             "source_id": self.source_id,
@@ -81,30 +107,59 @@ class FrameMeta:
             "created_ms": self.created_ms,
             "notes": self.notes,
         }
+        if self.source_cell_id is not None:
+            d["source_cell_id"] = self.source_cell_id
+        if self.source_asset_version_id is not None:
+            d["source_asset_version_id"] = self.source_asset_version_id
+        if self.model_id:
+            d["model_id"] = self.model_id
+        if self.prompt_hash:
+            d["prompt_hash"] = self.prompt_hash
+        if self.candidate_index is not None:
+            d["candidate_index"] = self.candidate_index
+        return d
 
     @classmethod
-    def from_dict(cls, d: dict) -> "FrameMeta":
+    def from_dict(cls, d: dict) -> "FrameInstance":
+        kind = str(d.get("source_kind", "panel"))
+        if kind == "mockup_region":
+            kind = "mockup"
+        if kind == "generated":
+            kind = "upload"
+        size_raw = d.get("source_size", [0, 0])
+        size = (int(size_raw[0]), int(size_raw[1])) if size_raw else (0, 0)
         return cls(
             ring_px=int(d["ring_px"]),
-            source_kind=str(d.get("source_kind", "panel")),
+            source_kind=kind,
             source_id=d.get("source_id"),
-            source_size=tuple(d.get("source_size", [0, 0])),
+            source_size=size,
             created_ms=int(d.get("created_ms", 0)),
             notes=str(d.get("notes", "")),
+            source_cell_id=d.get("source_cell_id"),
+            source_asset_version_id=d.get("source_asset_version_id"),
+            model_id=d.get("model_id"),
+            prompt_hash=d.get("prompt_hash"),
+            candidate_index=d.get("candidate_index"),
         )
 
 
-def read_house_meta() -> FrameMeta | None:
+# Back-compat alias — older callers used ``FrameMeta``. New code should use
+# ``FrameInstance`` directly. Both names map to the same dataclass so a
+# pickled instance from one continues to work as the other.
+FrameMeta = FrameInstance
+
+
+def read_house_meta() -> FrameInstance | None:
     p = house_meta_path()
     if not p.exists():
         return None
     try:
-        return FrameMeta.from_dict(json.loads(p.read_text()))
+        return FrameInstance.from_dict(json.loads(p.read_text()))
     except Exception:
         return None
 
 
-def write_house_meta(meta: FrameMeta) -> None:
+def write_house_meta(meta: FrameInstance) -> None:
     house_dir().mkdir(parents=True, exist_ok=True)
     house_meta_path().write_text(json.dumps(meta.to_dict(), indent=2))
 
@@ -114,7 +169,16 @@ def write_house_meta(meta: FrameMeta) -> None:
 
 @dataclass
 class NineSlice:
-    """In-memory 9-slice (no center sprite — center is transparent)."""
+    """In-memory 9-slice (no center sprite — center is transparent).
+
+    ``hole_mask`` and ``rim_mask`` are 1-channel ``L`` images sized to the
+    source asset (``source_size``). White = inside that region. They are
+    derived deterministically from ``ring_px`` for today's pipeline and
+    replaced by vision-extractor output once Phase A wiring is live. They
+    are persisted alongside the eight sprite PNGs and used by the
+    compositor to avoid double chrome on panels with baked-in frames.
+    """
+
     corner_tl: Image.Image
     corner_tr: Image.Image
     corner_bl: Image.Image
@@ -124,6 +188,8 @@ class NineSlice:
     edge_left: Image.Image
     edge_right: Image.Image
     ring_px: int
+    hole_mask: Image.Image | None = None
+    rim_mask: Image.Image | None = None
 
     def save(self, dest: Path) -> None:
         dest.mkdir(parents=True, exist_ok=True)
@@ -135,9 +201,21 @@ class NineSlice:
         self.edge_bottom.save(dest / "edge_bottom.png")
         self.edge_left.save(dest / "edge_left.png")
         self.edge_right.save(dest / "edge_right.png")
+        if self.hole_mask is not None:
+            self.hole_mask.save(dest / "hole_mask.png")
+        if self.rim_mask is not None:
+            self.rim_mask.save(dest / "rim_mask.png")
 
     @classmethod
     def load(cls, src: Path, ring_px: int) -> "NineSlice":
+        hole = None
+        rim = None
+        hole_p = src / "hole_mask.png"
+        rim_p = src / "rim_mask.png"
+        if hole_p.exists():
+            hole = Image.open(hole_p).convert("L")
+        if rim_p.exists():
+            rim = Image.open(rim_p).convert("L")
         return cls(
             corner_tl=Image.open(src / "corner_tl.png").convert("RGBA"),
             corner_tr=Image.open(src / "corner_tr.png").convert("RGBA"),
@@ -148,6 +226,8 @@ class NineSlice:
             edge_left=Image.open(src / "edge_left.png").convert("RGBA"),
             edge_right=Image.open(src / "edge_right.png").convert("RGBA"),
             ring_px=ring_px,
+            hole_mask=hole,
+            rim_mask=rim,
         )
 
 
@@ -162,6 +242,9 @@ def extract_9slice(source: Image.Image, ring_px: int) -> NineSlice:
         edge_right  = strip from (W-ring_px, ring_px) to (W, H-ring_px)
 
     The center is discarded (and will be transparent at composite time).
+    Hole / rim masks are derived deterministically from ``ring_px`` so
+    this remains a pure function of (image, ring_px) and the on-disk pack
+    is self-contained.
     """
     src = source.convert("RGBA")
     w, h = src.size
@@ -171,6 +254,7 @@ def extract_9slice(source: Image.Image, ring_px: int) -> NineSlice:
             f"(must be > 0 and < min(W,H)/2)"
         )
     rp = ring_px
+    hole, rim = derive_masks_from_ring((w, h), rp)
     return NineSlice(
         corner_tl=src.crop((0, 0, rp, rp)),
         corner_tr=src.crop((w - rp, 0, w, rp)),
@@ -181,7 +265,73 @@ def extract_9slice(source: Image.Image, ring_px: int) -> NineSlice:
         edge_left=src.crop((0, rp, rp, h - rp)),
         edge_right=src.crop((w - rp, rp, w, h - rp)),
         ring_px=rp,
+        hole_mask=hole,
+        rim_mask=rim,
     )
+
+
+def derive_masks_from_ring(
+    size: tuple[int, int],
+    ring_px: int,
+) -> tuple[Image.Image, Image.Image]:
+    """Deterministic hole + rim masks for today's nine-slice path.
+
+    Both are L-mode greyscale at ``size``:
+
+      - hole: white inside the rectangle inset by ``ring_px``, black on the rim.
+      - rim:  inverse of hole.
+
+    Phase A vision will replace this helper with a non-rectangular variant
+    that draws from segmentation polygons. The rest of the pipeline only
+    cares about the (hole, rim) pair, so the contract is the same either way.
+    """
+    w, h = size
+    if ring_px < 0 or ring_px * 2 > min(w, h):
+        raise ValueError(
+            f"ring_px={ring_px} invalid for size {w}×{h} "
+            f"(must be 0 ≤ ring_px ≤ min(W,H)/2)"
+        )
+    hole = Image.new("L", (w, h), 0)
+    if ring_px * 2 < min(w, h):
+        ImageDraw.Draw(hole).rectangle(
+            (ring_px, ring_px, w - ring_px - 1, h - ring_px - 1),
+            fill=255,
+        )
+    # Rim is the inverse of hole.
+    rim = Image.eval(hole, lambda v: 255 - v)
+    return hole, rim
+
+
+def derive_masks_from_segmentation(
+    size: tuple[int, int],
+    outer: Image.Image,
+    inner: Image.Image,
+) -> tuple[Image.Image, Image.Image]:
+    """Build hole + rim masks from a Phase A vision segmentation.
+
+    ``outer`` is the boolean mask for the entire frame (rim ∪ hole).
+    ``inner`` is the boolean mask for the content hole only. Both are
+    L-mode binary at ``size``. The rim is ``outer & ¬inner``; the hole
+    is ``inner``. We threshold and clip rather than trusting the raw
+    bytes so a model that returned slightly-soft edges still produces a
+    discrete pair of masks.
+    """
+    w, h = size
+    if outer.size != (w, h) or inner.size != (w, h):
+        raise ValueError(
+            "outer/inner masks must match size; "
+            f"got outer={outer.size}, inner={inner.size}, expected={size}"
+        )
+    o = outer.convert("L").point(lambda v: 255 if v >= 128 else 0)
+    i = inner.convert("L").point(lambda v: 255 if v >= 128 else 0)
+    hole = i
+    # rim = outer AND NOT inner. PIL has no per-pixel logical-and on L
+    # images, but ImageChops.subtract gives us (o - i) clipped at 0 which
+    # is the same thing for binary inputs.
+    from PIL import ImageChops  # noqa: PLC0415 — keep import lazy for module bootup.
+
+    rim = ImageChops.subtract(o, i)
+    return hole, rim
 
 
 # ────────────────────────── composition ──────────────────────────
@@ -261,17 +411,8 @@ def interior_mask(target_size: tuple[int, int], ring_px: int) -> Image.Image:
     Returned as a 1-channel L-mode PNG, not RGBA, since inpainting tools
     typically want a binary mask.
     """
-    tw, th = target_size
-    mask = Image.new("L", (tw, th), 0)
-    if tw - 2 * ring_px <= 0 or th - 2 * ring_px <= 0:
-        return mask  # frame fills entire target — nothing to inpaint
-    from PIL import ImageDraw
-    draw = ImageDraw.Draw(mask)
-    draw.rectangle(
-        (ring_px, ring_px, tw - ring_px - 1, th - ring_px - 1),
-        fill=255,
-    )
-    return mask
+    hole, _rim = derive_masks_from_ring(target_size, ring_px)
+    return hole
 
 
 def interior_mask_bytes(target_size: tuple[int, int], ring_px: int) -> bytes:
@@ -282,17 +423,60 @@ def interior_mask_bytes(target_size: tuple[int, int], ring_px: int) -> bytes:
     return buf.getvalue()
 
 
+def hole_mask_for_target(
+    slice_: NineSlice,
+    target_size: tuple[int, int],
+    *,
+    source_size: tuple[int, int] | None = None,
+) -> Image.Image:
+    """Hole mask scaled from source-asset size to a target panel size.
+
+    Falls back to a deterministic ring-derived rectangle when the slice
+    has no stored hole mask (older on-disk packs). Vision-derived frames
+    carry a non-rectangular hole and that geometry survives the resize.
+
+    ``source_size`` overrides the implicit scale source (e.g. the caller
+    passes the FrameInstance.source_size so the ring scales the same way
+    ``draw_cell`` does for inpaint).
+    """
+    src_hole = slice_.hole_mask
+    tw, th = target_size
+    if src_hole is None:
+        # Scale ring proportionally to the smaller dimension to keep ring
+        # thickness stable across panel aspect ratios.
+        sw, sh = source_size if source_size is not None else (tw, th)
+        scale = min(tw / max(sw, 1), th / max(sh, 1))
+        scaled_ring = max(1, int(round(slice_.ring_px * scale)))
+        hole, _ = derive_masks_from_ring((tw, th), scaled_ring)
+        return hole
+    return src_hole.resize((tw, th), Image.NEAREST)
+
+
 # ────────────────────────── on-disk house frame helpers ──────────────────────────
 
 
-def adopt_house_frame(slice_: NineSlice, meta: FrameMeta) -> None:
-    """Replace the active house frame with this 9-slice + metadata."""
+def adopt_house_frame(slice_: NineSlice, meta: FrameInstance) -> None:
+    """Replace the active house frame with this 9-slice + metadata.
+
+    If the slice was constructed without explicit hole/rim masks, derive
+    them from ``ring_px`` here so every adopted pack always has the full
+    on-disk surface (sprites + masks + frame.json). This keeps the
+    compositor's "is there a hole mask?" check trivially true after adopt.
+    """
     house_dir().mkdir(parents=True, exist_ok=True)
+    if slice_.hole_mask is None or slice_.rim_mask is None:
+        size = (
+            slice_.corner_tl.width + slice_.corner_tr.width + slice_.edge_top.width,
+            slice_.corner_tl.height + slice_.corner_bl.height + slice_.edge_left.height,
+        )
+        hole, rim = derive_masks_from_ring(size, slice_.ring_px)
+        slice_.hole_mask = hole
+        slice_.rim_mask = rim
     slice_.save(house_dir())
     write_house_meta(meta)
 
 
-def load_house_frame() -> tuple[NineSlice, FrameMeta] | None:
+def load_house_frame() -> tuple[NineSlice, FrameInstance] | None:
     """Load the active house frame from disk. Returns None if no frame adopted."""
     if not has_house_frame():
         return None
@@ -314,3 +498,27 @@ def compose_house_frame_for(target_size: tuple[int, int]) -> Image.Image | None:
         return None
     slice_, _ = loaded
     return compose_frame(slice_, target_size)
+
+
+def compose_house_rim_for(target_size: tuple[int, int]) -> Image.Image | None:
+    """Same as ``compose_house_frame_for`` but with the rim mask applied.
+
+    For deterministic 9-slice frames this is bit-identical to
+    ``compose_house_frame_for`` (the implicit rim is the corner+edge
+    sprites, and the center is already transparent). For Phase A vision
+    frames with non-rectangular rims, this clips the composed pixels to
+    the stored rim mask so the panel interior shows through wherever the
+    rim has cut-outs.
+
+    Returns ``None`` if no house frame is adopted.
+    """
+    loaded = load_house_frame()
+    if loaded is None:
+        return None
+    slice_, _ = loaded
+    composed = compose_frame(slice_, target_size)
+    if slice_.rim_mask is None:
+        return composed
+    rim_resized = slice_.rim_mask.resize(target_size, Image.NEAREST)
+    composed.putalpha(rim_resized)
+    return composed

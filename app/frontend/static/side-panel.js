@@ -415,123 +415,45 @@
   // the user can fine-tune ring thickness without an extra button.
 
   function renderFrameSection(data) {
+    // Slim status block — the inline picker has been replaced by the
+    // dedicated Frame Atelier (board-level page reachable from the
+    // toolbar or the link below). The side panel now only surfaces
+    // status for *this* cell and links into the Atelier; full authoring
+    // (Propose / Refine / Commit / Approach D batch) lives there.
     const f = data.frame;
 
-    // Status copy: covers all four states so the user always knows where
-    // they stand without having to expand the picker.
     let summary;
     if (!f.adopted || !f.enabled) {
-      summary = `<span class="frame-empty">no frame · pick a source below</span>`;
+      summary = `<span class="frame-empty">no frame · open the Atelier to design one</span>`;
     } else if (f.applied_to_this_cell) {
       summary = `<span class="frame-lock">◆ locked</span> from <code>${escapeHtml(f.adopted_meta?.source_id || "—")}</code> · ${f.adopted_meta?.ring_px ?? "—"}px ring`;
     } else {
-      summary = `frame adopted board-wide · this panel will pick it up on the next generate`;
+      summary = `frame adopted board-wide · this panel will pick it up on the next regenerate`;
     }
 
-    const sources = [
-      ...f.panel_sources.map(s => ({ ...s, kind: "panel" })),
-      ...(f.mockup_source ? [{ ...f.mockup_source, kind: "mockup" }] : []),
-    ];
-
-    // What's the server-recorded "currently adopted" source? We use this to
-    // mark the right card as `is-active` so what you see matches the truth.
-    const adoptedKind = f.adopted ? f.adopted_meta?.source_kind : null;
-    const adoptedId = f.adopted ? f.adopted_meta?.source_id : null;
-    const isAdopted = (s) => f.adopted && f.enabled
-                          && s.kind === adoptedKind && s.id === adoptedId;
-
-    // The first source the user can preview — used to seed the slider's
-    // preview pane when nothing is adopted yet.
-    const previewSeed = sources.find(isAdopted)
-                     || sources.find(s => s.kind === "mockup")
-                     || sources[0]
-                     || null;
-
-    const sourceCards = sources.length === 0
-      ? ""  // we still render the None card below
-      : sources.map(s => `
-          <button type="button" class="frame-source ${isAdopted(s) ? "is-active" : ""}"
-                  data-frame-source-kind="${s.kind}"
-                  data-frame-source-id="${escapeAttr(s.id)}"
-                  data-frame-source-w="${s.size[0]}"
-                  data-frame-source-h="${s.size[1]}">
-            <div class="frame-source-thumb"><img src="${s.url}" alt=""></div>
-            <span class="frame-source-label">${escapeHtml(s.label)}</span>
-            <span class="frame-source-kind">${s.kind}</span>
-          </button>
-        `).join("");
-
-    // The "None" card disables the frame board-wide. Active when there is
-    // no adopted+enabled frame.
-    const noneActive = !f.adopted || !f.enabled;
-    const noneCard = `
-      <button type="button" class="frame-source frame-source-none ${noneActive ? "is-active" : ""}"
-              data-frame-none>
-        <div class="frame-source-thumb">
-          <span class="frame-none-icon" aria-hidden="true">∅</span>
-        </div>
-        <span class="frame-source-label">None</span>
-        <span class="frame-source-kind">no frame</span>
-      </button>
-    `;
-
-    const noSourcesNote = sources.length === 0
-      ? `<p class="frame-no-sources">No panel art yet — generate at least one functional panel to extract a frame from, or use the mockup once it loads.</p>`
-      : "";
+    const showDisable = f.adopted && f.enabled;
 
     return `
       <div class="cell-panel-section frame-section" data-frame-section>
         <h4>
           <span>Frame</span>
-          <button type="button" class="frame-toggle" data-frame-toggle aria-expanded="false">
-            Show
-          </button>
+          <span class="frame-summary-inline">board-level</span>
         </h4>
         <p class="frame-summary">${summary}</p>
 
-        <div class="frame-picker" data-frame-picker hidden>
-          <p class="frame-picker-blurb">
-            One frame is shared by every functional panel. Click a source to
-            adopt it &mdash; every panel reuses the same frame. Pick
-            <em>None</em> to drop the frame entirely.
-          </p>
-
-          <div class="frame-source-grid">
-            ${sourceCards}
-            ${noneCard}
-          </div>
-          ${noSourcesNote}
-
-          ${previewSeed ? `
-          <div class="frame-ring">
-            <label class="frame-ring-row">
-              <span class="frame-ring-label">Ring thickness</span>
-              <input type="range" min="${f.min_ring_px}" max="${f.max_ring_px}"
-                     value="${f.adopted_meta?.ring_px || f.default_ring_px}"
-                     step="1" data-frame-ring>
-              <span class="frame-ring-value" data-frame-ring-value>${f.adopted_meta?.ring_px || f.default_ring_px}px</span>
-            </label>
-
-            <div class="frame-preview-row">
-              <div class="frame-preview-mount">
-                <img class="frame-preview-img" data-frame-preview-img alt=""
-                     src="">
-                <div class="frame-preview-interior"></div>
-              </div>
-              <p class="frame-preview-caption">live 9-slice preview · release slider to apply</p>
-            </div>
-          </div>
+        <div class="frame-actions">
+          <a class="panel-action" href="${BPATH}/frame">
+            <span class="arrow">→</span>
+            <span>Open Frame Atelier</span>
+            <span class="est">propose · refine · commit</span>
+          </a>
+          ${showDisable ? `
+          <button type="button" class="panel-action is-quiet" data-frame-disable>
+            <span class="arrow">×</span>
+            <span>Disable on board</span>
+            <span class="est">overlay only</span>
+          </button>
           ` : ""}
-
-          <div class="frame-actions">
-            <button type="button" class="panel-action is-placeholder" data-frame-generate
-                    aria-disabled="true"
-                    title="Coming soon: AI-generate a brand-new frame from the board's mood and mockup.">
-              <span class="arrow">→</span>
-              <span>Generate new frame</span>
-              <span class="est">soon · AI from mood</span>
-            </button>
-          </div>
         </div>
       </div>
     `;
@@ -860,11 +782,12 @@
     });
   }
 
-  // ─── Frame picker wiring ─────────────────────────────────────────────
-  // Why this lives here: the frame is a board-level resource (one shared
-  // across all panels) but it's authored per-panel — you discover it where
-  // you're already looking. The picker stays inline so the user never
-  // loses sight of the board behind them.
+  // ─── Frame status wiring ─────────────────────────────────────────────
+  // The inline picker has been replaced by the dedicated /frame Atelier
+  // (board-level Propose / Refine / Commit + Approach D progress). The
+  // side panel keeps a tiny status section so the user can see whether
+  // the frame is locked on this cell, link out to the Atelier, or hit
+  // the same "Disable on board" affordance that lived in the old block.
 
   function wireFrame(data) {
     const f = data.frame;
@@ -873,93 +796,8 @@
     const section = panel.querySelector("[data-frame-section]");
     if (!section) return;
 
-    const toggle = section.querySelector("[data-frame-toggle]");
-    const picker = section.querySelector("[data-frame-picker]");
-    const slider = section.querySelector("[data-frame-ring]");
-    const valueLabel = section.querySelector("[data-frame-ring-value]");
-
-    // The card the user is currently *previewing* (which may or may not be
-    // the same as what the server has adopted). On adopt success, this
-    // becomes the truth via refreshPanel().
-    let previewCard = section.querySelector(".frame-source.is-active:not(.frame-source-none)")
-                   || section.querySelector(".frame-source:not(.frame-source-none)");
-
-    toggle?.addEventListener("click", () => {
-      const isOpen = !picker.hidden;
-      picker.hidden = isOpen;
-      toggle.setAttribute("aria-expanded", String(!isOpen));
-      toggle.textContent = isOpen ? "Show" : "Hide";
-      if (!isOpen) refreshFramePreview();
-    });
-
-    // ─── Click-to-adopt on extract sources ───
-    section.querySelectorAll(".frame-source:not(.frame-source-none)").forEach(card => {
-      card.addEventListener("click", () => {
-        previewCard = card;
-        // Visually preview-select immediately. The server response will
-        // confirm via refreshPanel().
-        section.querySelectorAll(".frame-source").forEach(
-          c => c.classList.remove("is-active"));
-        card.classList.add("is-active");
-        refreshFramePreview();
-        adoptCard(card);
-      });
-    });
-
-    // ─── Click-to-disable on the None card ───
-    section.querySelector("[data-frame-none]")?.addEventListener("click", () => {
-      section.querySelectorAll(".frame-source").forEach(
-        c => c.classList.remove("is-active"));
-      section.querySelector("[data-frame-none]").classList.add("is-active");
-      disableFrame();
-    });
-
-    // ─── Slider: live preview during drag, re-adopt on release ───
-    let dragTimer = null;
-    slider?.addEventListener("input", () => {
-      if (valueLabel) valueLabel.textContent = `${slider.value}px`;
-      if (dragTimer) clearTimeout(dragTimer);
-      dragTimer = setTimeout(refreshFramePreview, 120);
-    });
-    slider?.addEventListener("change", () => {
-      // Fires on release. Re-adopt with the new ring thickness IF a real
-      // source is currently selected (not None).
-      const active = section.querySelector(".frame-source.is-active:not(.frame-source-none)");
-      if (active) adoptCard(active);
-    });
-
-    // Placeholder — eventual behavior: AI-generate a brand-new frame from
-    // the board's mood/mockup. Just absorbs the click for now.
-    section.querySelector("[data-frame-generate]")?.addEventListener("click", (e) => {
-      e.preventDefault();
-    });
-
-    // ─── Network actions ───
-
-    async function adoptCard(card) {
-      // Block multiple adopts in flight: lock the whole grid, unlock on
-      // settle. Cheap server side, but stops the UI from flickering.
-      section.querySelectorAll(".frame-source").forEach(c => c.setAttribute("aria-busy", "true"));
-      try {
-        const fd = new FormData();
-        fd.append("source_kind", card.getAttribute("data-frame-source-kind"));
-        fd.append("source_id", card.getAttribute("data-frame-source-id"));
-        fd.append("ring_px", slider?.value || String(f.default_ring_px));
-        fd.append("enable_after", "true");
-        const r = await fetch(f.adopt_endpoint, { method: "POST", body: fd });
-        if (!r.ok) {
-          alert("Adopt failed: " + (await r.text()));
-          return;
-        }
-        await refreshPanel();
-        refreshBoardSvg();
-      } finally {
-        section.querySelectorAll(".frame-source").forEach(c => c.removeAttribute("aria-busy"));
-      }
-    }
-
-    async function disableFrame() {
-      section.querySelectorAll(".frame-source").forEach(c => c.setAttribute("aria-busy", "true"));
+    section.querySelector("[data-frame-disable]")?.addEventListener("click", async () => {
+      if (!confirm("Disable the frame on this board? Panels keep their art; only the rim overlay turns off.")) return;
       try {
         const r = await fetch(f.disable_endpoint, { method: "POST" });
         if (!r.ok) {
@@ -968,29 +806,10 @@
         }
         await refreshPanel();
         refreshBoardSvg();
-      } finally {
-        section.querySelectorAll(".frame-source").forEach(c => c.removeAttribute("aria-busy"));
+      } catch (err) {
+        alert("Network error: " + err);
       }
-    }
-
-    function refreshFramePreview() {
-      const img = section.querySelector("[data-frame-preview-img]");
-      if (!previewCard || !img) return;
-      const ring = slider?.value || String(f.default_ring_px);
-      const w = previewCard.getAttribute("data-frame-source-w");
-      const h = previewCard.getAttribute("data-frame-source-h");
-      const displayW = 220;
-      const displayH = Math.max(120, Math.round(220 * (h / w)));
-      const url = `${f.preview_endpoint}`
-        + `?source_kind=${encodeURIComponent(previewCard.getAttribute("data-frame-source-kind"))}`
-        + `&source_id=${encodeURIComponent(previewCard.getAttribute("data-frame-source-id"))}`
-        + `&ring_px=${encodeURIComponent(ring)}`
-        + `&w=${displayW}&h=${displayH}`
-        + `&t=${Date.now()}`;
-      img.src = url;
-      img.style.width = `${displayW}px`;
-      img.style.height = `${displayH}px`;
-    }
+    });
   }
 
   // ─── Cell spinner — shown while a generation job is in flight ────────

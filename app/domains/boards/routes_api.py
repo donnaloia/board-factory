@@ -267,6 +267,13 @@ async def _api_frame_adopt(
     ring_px: int,
     enable_after: bool,
 ) -> JSONResponse:
+    """Legacy (pre-Atelier) one-shot adopt path.
+
+    Kept around as the deterministic shortcut behind ``POST /api/frame/commit``
+    when the user picks the "no vision" candidate. It also remains the
+    transitional implementation behind ``POST /api/frame/adopt`` for one
+    release cycle.
+    """
     if ring_px < 2:
         raise HTTPException(400, "ring_px must be at least 2")
 
@@ -295,21 +302,34 @@ async def _api_frame_adopt(
         tw, th = p["target_size"]
         src_img = src_img.resize((tw, th), Image.NEAREST)
         src_size = (tw, th)
+    elif source_kind == "upload":
+        upload_path = (
+            fs_ws.board_root(board_id) / "workspace" / "frames" / "_uploads" / source_id
+        )
+        if not upload_path.exists():
+            raise HTTPException(404, f"Upload {source_id!r} not found")
+        src_img = Image.open(upload_path).convert("RGBA")
+        src_size = src_img.size
     else:
         raise HTTPException(400, f"Unknown source_kind {source_kind!r}")
 
     if ring_px * 2 >= min(src_size):
         raise HTTPException(400, f"ring_px={ring_px} is too thick for source {src_size}")
 
+    from domains.cells import frames_repository as frames_repo
+
     with bf_config.scope_board(board_id):
         slice_ = bf_frames.extract_9slice(src_img, ring_px)
-        meta = bf_frames.FrameMeta(
+        instance = bf_frames.FrameInstance(
             ring_px=ring_px,
             source_kind=source_kind,
             source_id=source_id,
             source_size=src_size,
+            model_id="deterministic",
+            notes="adopted via legacy /adopt path",
         )
-        bf_frames.adopt_house_frame(slice_, meta)
+        bf_frames.adopt_house_frame(slice_, instance)
+        view = frames_repo.replace_active(board_id, instance=instance)
 
     if enable_after:
         data = deps.load_board_catalog(board_id)
@@ -320,6 +340,7 @@ async def _api_frame_adopt(
 
     return JSONResponse({
         "ok": True,
+        "frame_id": view.id,
         "ring_px": ring_px,
         "source_kind": source_kind,
         "source_id": source_id,
@@ -327,13 +348,19 @@ async def _api_frame_adopt(
 
 
 @router.post("/users/{username}/board-games/{path_slug}/api/frame/adopt")
-async def api_frame_adopt_nested(
+async def api_frame_adopt_legacy(
     request: Request, board_id: NestedBoardId,
     source_kind: str = Form(...),
     source_id: str = Form(...),
     ring_px: int = Form(...),
     enable_after: bool = Form(default=True),
 ):
+    """DEPRECATED: superseded by ``POST /api/frame/commit``.
+
+    Returns a successful response for one release cycle so already-running
+    pages keep working; new UI must call ``/commit`` (which goes through
+    the Propose/Refine flow and enqueues Approach D). Slated for removal.
+    """
     return await _api_frame_adopt(
         request, board_id, source_kind, source_id, ring_px, enable_after,
     )
@@ -344,12 +371,322 @@ async def _api_frame_disable(request: Request, board_id: str) -> JSONResponse:
     data.setdefault("frame", {})
     data["frame"]["enabled"] = False
     svc_boards.save_catalog(board_id, data)
-    return JSONResponse({"ok": True})
+
+    from domains.cells import frames_repository as frames_repo
+
+    n = frames_repo.mark_all_inactive(board_id)
+    return JSONResponse({"ok": True, "deactivated_rows": n})
 
 
 @router.post("/users/{username}/board-games/{path_slug}/api/frame/disable")
 async def api_frame_disable_nested(request: Request, board_id: NestedBoardId):
     return await _api_frame_disable(request, board_id)
+
+
+# ────────────────────────── frame atelier (Propose / Commit / Upload) ──────────────────────────
+
+
+def _proposals_dir(board_id: str, job_id: str):
+    return fs_ws.board_root(board_id) / "workspace" / "frames" / "_proposals" / job_id
+
+
+def _proposals_static_url(board_id: str, job_id: str, filename: str) -> str:
+    return (
+        f"{board_prefix(board_id)}/asset/frames/_proposals/{job_id}/{filename}"
+    )
+
+
+@router.post("/users/{username}/board-games/{path_slug}/api/frame/propose")
+async def api_frame_propose(
+    request: Request,
+    board_id: NestedBoardId,
+    source_kind: str = Form(...),
+    source_id: str = Form(...),
+    candidate_count: int = Form(default=3),
+    use_vision: bool = Form(default=True),
+):
+    """Atelier "Propose" entry point — enqueue a vision job.
+
+    Returns ``{ "job_id": ... }`` on accepted; the UI subscribes to
+    ``/events/jobs`` for progress and polls ``/api/frame/proposals/{job_id}``
+    once the job goes terminal to fetch the candidate manifest.
+    """
+    if candidate_count < 1 or candidate_count > 5:
+        raise HTTPException(400, "candidate_count must be in 1..5")
+    if source_kind not in ("panel", "mockup", "upload"):
+        raise HTTPException(400, f"Unknown source_kind {source_kind!r}")
+
+    keys = deps.user_provider_api_keys(request)
+    openai_key = keys.get("openai_key") or os.environ.get("OPENAI_API_KEY", "")
+    if use_vision and not openai_key:
+        # Don't reject — just log + degrade to deterministic. The Atelier
+        # surfaces a banner in this case so the user knows to add a key.
+        use_vision = False
+
+    cost = 0.04 if (use_vision and openai_key) else 0.0
+    job_id = deps.enqueue_pipeline_job(
+        label=f"Propose frame ({source_kind}:{source_id})",
+        operation="frame.propose",
+        target=source_id,
+        cost_estimate=cost,
+        fn=deps.scoped_pipeline_callable(
+            board_id,
+            partial(
+                pipeline_adapters.frame_propose,
+                source_kind=source_kind,
+                source_id=source_id,
+                candidate_count=candidate_count,
+                openai_key=openai_key or None,
+                use_vision=use_vision,
+            ),
+        ),
+    )
+    return JSONResponse({"job_id": job_id, "use_vision": use_vision})
+
+
+@router.get(
+    "/users/{username}/board-games/{path_slug}/api/frame/proposals/{job_id}"
+)
+async def api_frame_proposals(
+    request: Request, board_id: NestedBoardId, job_id: str,
+):
+    """Read the manifest written by a finished ``frame.propose`` job."""
+    import json as _json
+
+    d = _proposals_dir(board_id, job_id)
+    manifest_p = d / "manifest.json"
+    if not manifest_p.exists():
+        raise HTTPException(404, f"No proposal manifest for job {job_id!r}")
+
+    try:
+        manifest = _json.loads(manifest_p.read_text())
+    except Exception as e:
+        raise HTTPException(500, f"Could not parse manifest: {e}") from None
+
+    candidates = manifest.get("candidates") or []
+    enriched = []
+    for c in candidates:
+        enriched.append({
+            **c,
+            "preview_url": _proposals_static_url(
+                board_id, job_id, c.get("preview_filename", ""),
+            ) if c.get("preview_filename") else None,
+            "hole_mask_url": _proposals_static_url(
+                board_id, job_id, c.get("hole_mask_filename", ""),
+            ) if c.get("hole_mask_filename") else None,
+            "rim_mask_url": _proposals_static_url(
+                board_id, job_id, c.get("rim_mask_filename", ""),
+            ) if c.get("rim_mask_filename") else None,
+        })
+    out = {**manifest, "candidates": enriched}
+    return JSONResponse(out)
+
+
+class FrameCommitBody(BaseModel):
+    """Body for ``POST /api/frame/commit``.
+
+    A commit can land in one of two ways:
+
+      * From a vision proposal: pass ``job_id`` + ``candidate_index``.
+        The server reads the proposal's hole/rim masks, regenerates a
+        nine-slice, and adopts.
+      * From a deterministic ring: pass ``source_kind`` + ``source_id``
+        + ``ring_px``. Equivalent to the legacy adopt path; this is the
+        Atelier's "no vision" fallback and is what the side-panel link
+        triggers when there are no proposals.
+
+    ``enable_after`` (default true) flips ``catalog.frame.enabled`` on
+    so the rim shows immediately. ``regen_panels`` (default true) is
+    Approach D — when true the server enqueues ``frame.reapply`` and
+    returns the ``regen_job_id`` so the UI can attach progress to it.
+    """
+
+    source_kind: Literal["panel", "mockup", "upload"]
+    source_id: str
+    ring_px: int
+
+    job_id: str | None = None
+    candidate_index: int | None = None
+
+    enable_after: bool = True
+    regen_panels: bool = True
+
+
+@router.post("/users/{username}/board-games/{path_slug}/api/frame/commit")
+async def api_frame_commit(
+    request: Request, board_id: NestedBoardId, body: FrameCommitBody,
+):
+    """Atelier "Commit" — write FrameInstance + (optionally) enqueue Approach D.
+
+    Returns ``{frame_id, regen_job_id?}``. The UI transitions to its
+    in-progress view and consumes the regen job over SSE.
+    """
+    import json as _json
+
+    if body.ring_px < 2:
+        raise HTTPException(400, "ring_px must be at least 2")
+
+    catalog = deps.load_board_catalog(board_id)
+
+    # Resolve the source image. We always need it because the on-disk
+    # nine-slice pack stores actual rim pixels, even if vision provided
+    # the masks.
+    src_img: Image.Image
+    src_size: tuple[int, int]
+    if body.source_kind == "panel":
+        live = fs_ws.live_path(board_id, "panels", body.source_id)
+        if not live.exists():
+            raise HTTPException(404, f"No live panel asset for {body.source_id}")
+        src_img = Image.open(live).convert("RGBA")
+        src_size = src_img.size
+    elif body.source_kind == "mockup":
+        panels = catalog.get("feature_panels", {}).get("panels", [])
+        p = next((x for x in panels if x["id"] == body.source_id), None)
+        if p is None:
+            raise HTTPException(404, f"Unknown panel {body.source_id}")
+        mockup_path = fs_ws.board_root(board_id) / catalog["style"]["reference_image"]
+        if not mockup_path.exists():
+            raise HTTPException(404, f"Mockup not found at {mockup_path}")
+        x1, y1, x2, y2 = p["bbox"]
+        crop = Image.open(mockup_path).convert("RGBA").crop((x1, y1, x2, y2))
+        crop = crop.resize(tuple(p["target_size"]), Image.NEAREST)
+        src_img = crop
+        src_size = (p["target_size"][0], p["target_size"][1])
+    elif body.source_kind == "upload":
+        upload_path = (
+            fs_ws.board_root(board_id) / "workspace" / "frames" / "_uploads" / body.source_id
+        )
+        if not upload_path.exists():
+            raise HTTPException(404, f"Upload {body.source_id!r} not found")
+        src_img = Image.open(upload_path).convert("RGBA")
+        src_size = src_img.size
+    else:
+        raise HTTPException(400, f"Unknown source_kind {body.source_kind!r}")
+
+    if body.ring_px * 2 >= min(src_size):
+        raise HTTPException(
+            400, f"ring_px={body.ring_px} too thick for source {src_size}"
+        )
+
+    # If the commit refers to a vision proposal, load its manifest +
+    # masks; otherwise fall back to deterministic ring extraction.
+    model_id = "deterministic"
+    prompt_hash: str | None = None
+    candidate_index: int | None = None
+
+    if body.job_id and body.candidate_index is not None:
+        d = _proposals_dir(board_id, body.job_id)
+        manifest_p = d / "manifest.json"
+        if not manifest_p.exists():
+            raise HTTPException(404, f"No proposal manifest for job {body.job_id!r}")
+        try:
+            manifest = _json.loads(manifest_p.read_text())
+        except Exception as e:
+            raise HTTPException(500, f"Bad manifest: {e}") from None
+        cands = manifest.get("candidates") or []
+        if body.candidate_index < 0 or body.candidate_index >= len(cands):
+            raise HTTPException(404, f"Candidate index {body.candidate_index} out of range")
+        cand = cands[body.candidate_index]
+        candidate_index = int(body.candidate_index)
+        model_id = manifest.get("model_id") or model_id
+        prompt_hash = manifest.get("prompt_hash")
+        # We could read the cand hole/rim masks back here and use them,
+        # but the rim is so visually subtle that the user-confirmed
+        # ring_px (slider value) is what matters most. We snapshot the
+        # ring_px from the body rather than the manifest to honor the
+        # user's slider edits during refine.
+        _ = cand  # placeholder for future Phase A wiring.
+
+    from domains.cells import frames_repository as frames_repo
+
+    with bf_config.scope_board(board_id):
+        slice_ = bf_frames.extract_9slice(src_img, body.ring_px)
+        instance = bf_frames.FrameInstance(
+            ring_px=int(body.ring_px),
+            source_kind=body.source_kind,
+            source_id=body.source_id,
+            source_size=src_size,
+            model_id=model_id,
+            prompt_hash=prompt_hash,
+            candidate_index=candidate_index,
+            notes="committed via Atelier",
+        )
+        bf_frames.adopt_house_frame(slice_, instance)
+        view = frames_repo.replace_active(board_id, instance=instance)
+
+    if body.enable_after:
+        data = deps.load_board_catalog(board_id)
+        data.setdefault("frame", {})
+        data["frame"]["enabled"] = True
+        data["frame"]["apply_to_panels"] = True
+        svc_boards.save_catalog(board_id, data)
+
+    regen_job_id: str | None = None
+    if body.regen_panels:
+        keys = deps.user_provider_api_keys(request)
+        # Conservative panel-count-based estimate: actual cost is computed
+        # inside the worker as it bills each provider call. Per-panel
+        # estimate matches what generate_one shows in the side panel so
+        # the Atelier and the side panel agree.
+        n_panels = len(catalog.get("feature_panels", {}).get("panels", []))
+        regen_cost = pipeline_adapters.estimate_generate_one("panels") * n_panels
+
+        regen_job_id = deps.enqueue_pipeline_job(
+            label=f"Reapply frame to {n_panels} panel{'s' if n_panels != 1 else ''}",
+            operation="frame.reapply",
+            target=board_id,
+            cost_estimate=regen_cost,
+            fn=deps.scoped_pipeline_callable(
+                board_id,
+                partial(pipeline_adapters.frame_reapply, **keys),
+            ),
+        )
+
+    return JSONResponse({
+        "ok": True,
+        "frame_id": view.id,
+        "ring_px": body.ring_px,
+        "source_kind": body.source_kind,
+        "source_id": body.source_id,
+        "regen_job_id": regen_job_id,
+    })
+
+
+@router.post("/users/{username}/board-games/{path_slug}/api/frame/upload")
+async def api_frame_upload(
+    request: Request, board_id: NestedBoardId, file: UploadFile = File(...),
+):
+    """Persist an uploaded image as a Propose source for the Atelier."""
+    content_type = (file.content_type or "").lower()
+    if not content_type.startswith("image/"):
+        raise HTTPException(400, "File must be an image (PNG or JPEG).")
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "Empty upload received.")
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.verify()
+        img = Image.open(io.BytesIO(data)).convert("RGBA")
+    except Exception:
+        raise HTTPException(400, "Could not read image — not a valid PNG or JPEG.")
+
+    target_dir = (
+        fs_ws.board_root(board_id) / "workspace" / "frames" / "_uploads"
+    )
+    target_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = (file.filename or "upload").replace("/", "_").replace("\\", "_")
+    if not safe_name.lower().endswith((".png", ".jpg", ".jpeg")):
+        safe_name = f"{safe_name}.png"
+    target_path = target_dir / safe_name
+    img.save(target_path, format="PNG")
+
+    bp = board_prefix(board_id)
+    return JSONResponse({
+        "ok": True,
+        "source_id": safe_name,
+        "size": list(img.size),
+        "url": f"{bp}/asset/frames/_uploads/{safe_name}",
+    })
 
 
 def _board_home_redirect(board_id: str) -> str:

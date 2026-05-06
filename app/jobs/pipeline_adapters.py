@@ -443,3 +443,285 @@ def export(job: Job, cancel: threading.Event) -> float:
     do_export(catalog, _sink(job))
     check_cancel(cancel)
     return 0.0
+
+
+# ────────────────────────── frame customization ──────────────────────────
+
+
+# Canonical proposal layout under each board's workspace:
+#
+#   workspace/frames/_proposals/<job_id>/
+#     manifest.json     — list of candidates with bbox/ring/score/notes
+#     candidate_<i>.png       — overlay-on-source preview for the Atelier UI
+#     candidate_<i>_hole.png  — L-mode hole mask
+#     candidate_<i>_rim.png   — L-mode rim mask
+#
+# Routes serve these directly via the existing static-asset path.
+
+
+def frame_propose(
+    job: Job,
+    cancel: threading.Event,
+    *,
+    source_kind: str,
+    source_id: str,
+    candidate_count: int = 3,
+    openai_key: str | None = None,
+    use_vision: bool = True,
+) -> float:
+    """Atelier "Propose" step — vision (or deterministic) frame candidates.
+
+    Writes a manifest + preview overlays so the UI can poll
+    ``GET /api/frame/proposals/<job_id>`` for the candidate list as soon
+    as the job goes terminal. Falls back to ``MockFrameVision`` when
+    ``use_vision`` is false or no key is available, so users without an
+    OpenAI key still get the Atelier flow with the deterministic 9-slice
+    candidates today's pipeline already supports.
+    """
+    import json as _json
+
+    from boardfactory import config as bf_config
+    from boardfactory import frames_inference as fi
+    from boardfactory.providers.vision import (
+        MockFrameVision,
+        OpenAIFrameVision,
+    )
+
+    sink = _sink(job)
+    sink.start("propose frame", total=4)
+
+    catalog = _load_catalog()
+    bid = bf_config.active_board()
+    if not bid:
+        raise RuntimeError("No active board for frame_propose")
+
+    src_img, src_size, panel_size = _load_frame_source(catalog, source_kind, source_id)
+    sink.step(f"source loaded ({src_size[0]}×{src_size[1]})")
+    check_cancel(cancel)
+
+    # Pick the provider. Vision off -> deterministic candidates; vision on
+    # but no key -> log + fall back so the UI still works without a key.
+    provider = None
+    if use_vision and openai_key:
+        try:
+            provider = OpenAIFrameVision(api_key=openai_key)
+        except RuntimeError as e:
+            sink.log(f"vision disabled: {e}")
+            provider = None
+    if provider is None:
+        provider = MockFrameVision()
+        sink.log(f"using {provider.name} provider for proposals")
+
+    raw_candidates = provider.segment_frame(
+        src_img, candidate_count=candidate_count
+    )
+    sink.step(f"vision returned {len(raw_candidates)} candidate(s)")
+    check_cancel(cancel)
+
+    cleaned: list[fi.CandidateGeometry] = []
+    if not raw_candidates:
+        # Always offer at least the deterministic shortcut so the user can
+        # commit something today. Ring sized to ~1/16 of the smaller side.
+        smallest = min(src_size)
+        ring = max(2, smallest // 16)
+        cleaned.append(
+            fi.candidate_from_ring(
+                source_size=src_size, ring_px=ring, score=0.6,
+                notes="deterministic fallback (vision returned 0 candidates)",
+            )
+        )
+    else:
+        for c in raw_candidates:
+            try:
+                cleaned.append(
+                    fi.candidate_from_outer_inner(
+                        source_size=src_size,
+                        outer=c.outer_mask,
+                        inner=c.inner_mask,
+                        score=c.score,
+                        notes=c.notes,
+                    )
+                )
+            except Exception as e:  # noqa: BLE001 — drop bad candidates, keep going.
+                sink.log(f"discarded candidate: {e}")
+
+    if not cleaned:
+        raise RuntimeError("no usable frame candidates produced")
+    sink.step(f"cleaned {len(cleaned)} candidate(s)")
+    check_cancel(cancel)
+
+    # Persist proposals on disk as JSON + preview PNGs so the Atelier can
+    # pick them up via a regular HTTP fetch (no SSE polling for payload).
+    out_dir = bf_config.WORKSPACE / "frames" / "_proposals" / job.id
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    manifest: list[dict] = []
+    for i, cand in enumerate(cleaned):
+        overlay = fi.overlay_for_review(src_img, cand.rim_mask, cand.hole_mask)
+        overlay_p = out_dir / f"candidate_{i}.png"
+        overlay.save(overlay_p)
+
+        hole_p = out_dir / f"candidate_{i}_hole.png"
+        rim_p = out_dir / f"candidate_{i}_rim.png"
+        cand.hole_mask.save(hole_p)
+        cand.rim_mask.save(rim_p)
+
+        manifest.append({
+            "index": i,
+            "bbox": list(cand.bbox),
+            "ring_px": cand.ring_px,
+            "score": cand.score,
+            "notes": cand.notes,
+            "model_id": getattr(provider, "model_id", provider.name),
+            "preview_filename": overlay_p.name,
+            "hole_mask_filename": hole_p.name,
+            "rim_mask_filename": rim_p.name,
+        })
+
+    (out_dir / "manifest.json").write_text(_json.dumps({
+        "job_id": job.id,
+        "source_kind": source_kind,
+        "source_id": source_id,
+        "source_size": list(src_size),
+        "panel_size": list(panel_size),
+        "provider": provider.name,
+        "model_id": getattr(provider, "model_id", provider.name),
+        "candidates": manifest,
+    }, indent=2))
+
+    sink.step(f"wrote {len(manifest)} proposal(s) to {out_dir.name}")
+
+    realized_cost = provider.cost_estimate(len(cleaned))
+    if realized_cost > 0:
+        cost_ledger.record("frame.propose", source_id, len(cleaned), realized_cost)
+    job.log.append(
+        f"proposed {len(manifest)} frame candidate(s) "
+        f"({source_kind}:{source_id}) via {provider.name}"
+    )
+
+    return float(realized_cost)
+
+
+def frame_reapply(
+    job: Job,
+    cancel: threading.Event,
+    *,
+    pixellab_key: str | None = None,
+    openai_key: str | None = None,
+) -> float:
+    """Atelier "Commit" follow-up — Approach D batch regen for panels.
+
+    Iterates every panel the catalog enables for frames; per panel,
+    snapshots the previous live into history (tagged ``frame_rework_pre``)
+    and inpaints a new interior under the freshly-adopted rim. Cancels
+    cleanly between panels so the user can stop the batch without losing
+    the panels already done.
+
+    Cost: estimated upfront on enqueue (see ``estimate_reapply_cost``);
+    actual cost is the sum of per-panel costs.
+    """
+    from boardfactory.ops import applicable_panels, reapply_to_panel
+
+    catalog = _load_catalog()
+    sink = _sink(job)
+
+    panel_ids = applicable_panels(catalog)
+    if not panel_ids:
+        sink.log("no panels in scope for Approach D — nothing to do")
+        sink.start("reapply frame to panels", total=1)
+        sink.step("no-op")
+        return 0.0
+
+    provider = _resolve_provider(pixellab_key, openai_key, catalog=catalog)
+    sink.start("reapply frame to panels", total=len(panel_ids))
+    sink.log(
+        f"approach D: rewriting {len(panel_ids)} panel interior(s) "
+        f"under the new house frame (provider={provider.name})"
+    )
+
+    spent = 0.0
+    successes = 0
+    failures: list[str] = []
+    for pid in panel_ids:
+        check_cancel(cancel)
+        result = reapply_to_panel(catalog, pid, provider, sink)
+        spent += float(result.spent_usd)
+        if result.skipped:
+            sink.log(f"panel:{pid} skipped (no live yet)")
+            continue
+        if result.error:
+            failures.append(f"panel:{pid}: {result.error}")
+            sink.log(f"panel:{pid} FAILED: {result.error}")
+            continue
+        if result.promoted_filename:
+            successes += 1
+
+    if spent > 0:
+        cost_ledger.record("frame.reapply", None, successes, spent)
+
+    summary = f"reapplied frame to {successes} / {len(panel_ids)} panel(s)"
+    if failures:
+        summary += f" — {len(failures)} failure(s)"
+    job.log.append(f"{summary}  (spent ${spent:.2f})")
+    if failures:
+        for line in failures[:10]:
+            job.log.append(line)
+
+    return spent
+
+
+def _load_frame_source(
+    catalog,
+    source_kind: str,
+    source_id: str,
+) -> "tuple[object, tuple[int, int], tuple[int, int]]":
+    """Load a frame source image. Returns (PIL image, source_size, panel_size).
+
+    ``panel_size`` is the typical functional-panel target size, used by
+    the Atelier to compute the "render at typical size" preview tile.
+    """
+    from pathlib import Path
+
+    from PIL import Image
+
+    from boardfactory import config as bf_config
+
+    panel_size: tuple[int, int] = (260, 240)
+    panels = list(catalog.all_panels())
+    if panels:
+        panel_size = panels[0].target_size
+
+    if source_kind == "panel":
+        from boardfactory import assets as bf_assets
+
+        live = bf_assets.live_path("panels", source_id)
+        if not live.exists():
+            raise RuntimeError(f"no live panel asset for {source_id!r}")
+        img = Image.open(live).convert("RGBA")
+        return img, img.size, panel_size
+
+    if source_kind == "mockup":
+        panel = next((p for p in panels if p.id == source_id), None)
+        if panel is None:
+            raise RuntimeError(f"unknown panel {source_id!r} for mockup source")
+        mockup_path = bf_config.BOARD_ROOT / catalog.style.reference_image
+        if not mockup_path.exists():
+            raise RuntimeError(f"mockup not found at {mockup_path}")
+        x1, y1, x2, y2 = panel.bbox
+        crop = Image.open(mockup_path).convert("RGBA").crop((x1, y1, x2, y2))
+        crop = crop.resize(panel.target_size, Image.NEAREST)
+        return crop, crop.size, panel.target_size
+
+    if source_kind == "upload":
+        upload_path = (
+            Path(bf_config.WORKSPACE)
+            / "frames"
+            / "_uploads"
+            / source_id
+        )
+        if not upload_path.exists():
+            raise RuntimeError(f"upload not found at {upload_path}")
+        img = Image.open(upload_path).convert("RGBA")
+        return img, img.size, panel_size
+
+    raise RuntimeError(f"unknown source_kind {source_kind!r}")
