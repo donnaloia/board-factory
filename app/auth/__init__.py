@@ -29,6 +29,9 @@ Files in this package
     auth, quota). Fully self-contained — uses the user's saved API key
     via :func:`auth.services.find_by_id`.
 
+``routes_html`` / ``routes_api``
+    Login/register/forgot pages vs session + ``/api/profile`` HTTP.
+
 Other domains import explicitly:
 
     from auth.middleware import AuthMiddleware, current_user, require_user

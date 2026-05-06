@@ -97,12 +97,12 @@ erDiagram
 
 | Table | Purpose | Key design notes |
 |---|---|---|
-| `users` | Authenticated identities. | The `0007_seed_dev_admin_user` migration inserts a default `admin@admin.com` row when the table is empty so a fresh checkout has a working login. |
+| `users` | Authenticated identities. | Create the first user via **Register** on a fresh install, or restore a dev database snapshot that already includes users. |
 | `user_secrets` | Per-user, per-provider secret material (OpenAI / PixelLab keys). | Stored as ciphertext, decrypted at request time when starting a pipeline job. Multiple `kind` values per user are supported. |
 | `browser_sessions` | Server-side sessions for the cookie auth middleware. | TTL handled at the application layer via `last_seen_ms`. |
 | `owned_boards` | Many-to-one mapping from board slug → owning user. | Boards on disk without an `owned_boards` row are not visible. `backfill_owned_boards_if_empty` attaches every disk board to the oldest user when the table is empty. |
-| `board_games` | One row per board. The catalog **is** `body_json` — a single Pydantic-validated JSON blob holding `project`, `board_size`, `style`, `centerpiece`, `board_spaces`, `feature_panels`, `frame`, and `generation`. | This was previously split across one parent row + three child tables (`board_space_layout_rows`, `board_space_designs`, `board_feature_panels`). The 0011 migration collapsed them into `body_json` because the catalog is an aggregate root with strong cross-field invariants — split tables added schema-evolution cost without unlocking any granular query. The palette columns sit alongside because there is a separate writer (`services.workspace_palette`) that materializes them to disk on job start. |
-| `asset_versions` | Index of every PNG ever pushed into `workspace/history/`. | Written by `services.asset_index.on_asset_event`, which `app/boot.py` registers on the `boardfactory.assets` listener bus. The unique `(board_id, rel_path)` index makes inserts idempotent so backfills can re-run. The `live` PNG (`live/<cat>/<id>.png`) is detected by byte equality against history files at read time — there is no separate `asset_live` pointer table. |
+| `board_games` | One row per board. Column-typed header fields and `body_json` (perimeter layout, frame, etc.); per-cell data lives in `cells`. | The catalog is an aggregate; `body_json` is validated with Pydantic. Palette columns are written by the style-lock / workspace flow. |
+| `asset_versions` | Index of every PNG in `workspace/history/`, with `cell_id` linking to `cells`. | Inserts are idempotent on `(board_uuid, rel_path)`; the app sets `cells.live_asset_version_id` to the row that was promoted to `live/`. |
 | `job_runs` | Persisted terminal snapshots of every job. | `JobRunner` keeps active jobs in memory; on completion, `services.job_runs.persist_terminal` writes the row so the tray survives process restarts. Queued or in-flight jobs at restart time are lost — there's no broker. |
 | `cost_entries` | One row per provider call that spent money. | `cost_ledger.summary()` aggregates these into the lifetime + session-since-startup costs the UI shows. Pure local-compute steps (style_lock, cleanup, states, compositor, export) do not write rows. |
 
@@ -130,18 +130,9 @@ letting the row count (rather than the byte count) drive every query.
 | `owned_boards.user_id → users.id` | `ON DELETE CASCADE`. Removing a user releases their board ownership records (the on-disk board directory is unaffected). |
 | `asset_versions.board_id`, `cost_entries`, `job_runs` | **No** database FK to `board_games`. The application layer enforces consistency; this lets us reseed Postgres while keeping `data/boards/` on disk intact, and lets us record cost / job rows for boards that don't yet have a catalog row. |
 
-## Migration history (most recent first)
+## Migrations
 
-| Revision | What changed |
-|---|---|
-| `0011_body_json` | Collapsed the 5-table catalog into a single `body_json` column on `board_games` and dropped `board_space_layout_rows`, `board_space_designs`, `board_feature_panels`, plus the per-field scalar columns. |
-| `0010_drop_board_catalogs` | Dropped the legacy `board_catalogs` JSON-mirror table — `board_games` is the only catalog source now. |
-| `0009_drop_asset_live` | Dropped the `asset_live` pointer table; the canonical `live/` PNG is detected from disk via `live_path`. |
-| `0008_space_kind` | Added `space_kind` to space designs (still part of the catalog body today). |
-| `0007_seed_dev_admin_user` | Seeds the default dev admin when `users` is empty. |
-| `0006_workspace_palette_asset_live` | Added the palette columns to `board_games` (and the now-removed `asset_live`). |
-| `0005_owned_boards` | Introduced `owned_boards`. |
-| `0004_board_game_relational` | Added the original normalized child tables (later collapsed by 0011). |
-| `0003_phase34_catalog_assets` | Added `board_catalogs` (later dropped) and `asset_versions`. |
-| `0002_phase2_core_tables` | Added `users`, `user_secrets`, `browser_sessions`, `job_runs`, `cost_entries`. |
-| `0001_baseline` | Initial schema. |
+Schema is applied with a **single** Alembic revision, `0001_full_schema`, which
+creates all application tables from the SQLAlchemy ORM. There is no long
+revision chain in the repo. See `app/migrations/README` and `db/snapshots/README.md`
+for empty-DB vs snapshot-restore workflows.

@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session as SASession
 
 from auth.secret_crypto import decrypt_text, encrypt_text
 from infrastructure.db import session_scope
-from models.core import BrowserSessionRecord, UserRecord, UserSecretRecord
+from auth.models import BrowserSessionRecord, UserRecord, UserSecretRecord
 
 
 SECRET_KIND_PIXELLAB = "pixellab_api_key"

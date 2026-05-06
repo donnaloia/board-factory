@@ -13,7 +13,7 @@ def _write_png(path: Path, color=(60, 80, 40)) -> None:
 
 
 def test_cell_status_no_live_no_history(seeded_board, isolated_repo):
-    from cells import services as svc_cells
+    from domains.cells import services as svc_cells
 
     status = svc_cells.cell_status(seeded_board.id, "spaces", "corner_tl")
     assert status.approved is False
@@ -22,7 +22,7 @@ def test_cell_status_no_live_no_history(seeded_board, isolated_repo):
 
 
 def test_cell_status_with_live_png(seeded_board, path_slug, test_user, isolated_repo):
-    from cells import services as svc_cells
+    from domains.cells import services as svc_cells
     from infrastructure.files import workspace as fs_ws
 
     _write_png(fs_ws.live_path(seeded_board.id, "spaces", "corner_tl"))
@@ -34,8 +34,8 @@ def test_cell_status_with_live_png(seeded_board, path_slug, test_user, isolated_
 
 
 def test_missing_ids_excludes_cells_with_live(seeded_board, isolated_repo):
-    from cells import services as svc_cells
-    from boards import services as svc_catalog
+    from domains.cells import services as svc_cells
+    from domains.boards import services as svc_catalog
     from infrastructure.files import workspace as fs_ws
 
     catalog = svc_catalog.load_catalog(seeded_board.id)
@@ -49,8 +49,8 @@ def test_missing_ids_excludes_cells_with_live(seeded_board, isolated_repo):
 
 
 def test_collect_board_stats(seeded_board, isolated_repo):
-    from cells import services as svc_cells
-    from boards import services as svc_catalog
+    from domains.cells import services as svc_cells
+    from domains.boards import services as svc_catalog
     from infrastructure.files import workspace as fs_ws
 
     catalog = svc_catalog.load_catalog(seeded_board.id)

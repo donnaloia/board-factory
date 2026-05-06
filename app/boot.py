@@ -50,13 +50,7 @@ def _run_deferred_maintenance() -> None:
     logger.info("boot: deferred maintenance starting")
     try:
         try:
-            from assets import repository as assets_repo  # noqa: PLC0415
-
-            assets_repo.backfill_all_boards_with_catalog()
-        except Exception as exc:
-            print(f"[boot] asset index backfill skipped: {exc}")
-        try:
-            from boards import palette as _wpl  # noqa: PLC0415
+            from domains.boards import palette as _wpl  # noqa: PLC0415
 
             _wpl.migrate_palette_from_disk_all_boards()
         except Exception as exc:
@@ -77,8 +71,8 @@ def apply() -> None:
 
     register_pipeline_hooks()
 
-    # Large scans (PNG history walk, disk migrations) run in a daemon thread so
-    # uvicorn can accept connections immediately — avoiding "browser spins forever".
+    # Disk migrations (palette, etc.) run in a daemon thread so uvicorn can accept
+    # connections immediately — avoiding "browser spins forever".
     if os.environ.get("BOARDFACTORY_SYNC_DEFERRED_BOOTSTRAP", "").strip() in (
         "1",
         "true",

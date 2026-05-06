@@ -1,4 +1,4 @@
-.PHONY: up down down-force down-nuclear logs shell rebuild clean protect-keys unprotect-keys test db-upgrade db-current db-snapshot db-restore
+.PHONY: up down down-force down-nuclear logs shell rebuild clean protect-keys unprotect-keys test db-upgrade db-current db-stamp db-snapshot db-restore backfill-live-fk
 
 # Compose labels use this project id (defaults to this repo directory name). Override if you use COMPOSE_PROJECT_NAME.
 COMPOSE_LABEL_PROJECT ?= board-factory
@@ -55,17 +55,36 @@ unprotect-keys:
 # Run the test suite inside the running board-factory container. The image must
 # be up first (`make up`).
 test:
-	docker compose exec board-factory pip install --no-cache-dir -q -r /repo/app/requirements.txt
-	docker compose exec board-factory sh -c 'cd /app && PYTHONPATH=/app:/repo/pipeline python -m pytest -q /repo/app/tests/'
+	docker compose exec -T board-factory pip install --no-cache-dir -q -r /repo/app/requirements.txt
+	docker compose exec -T board-factory sh -c 'cd /app && PYTHONPATH=/app:/repo/pipeline python -m pytest -q /repo/app/tests/'
 
 # Apply Alembic migrations against the configured Postgres database.
 # Safe to run repeatedly.
 db-upgrade:
-	docker compose exec board-factory sh -c 'cd /repo/app && alembic upgrade head'
+	docker compose exec -T board-factory sh -c 'cd /repo/app && alembic upgrade head'
+
+# Reconcile ``workspace/history`` → ``asset_versions``, then attach NULL
+# ``cells.live_asset_version_id`` to the newest version per cell. Idempotent.
+backfill-live-fk:
+	docker compose exec -T board-factory sh -c 'cd /app && PYTHONPATH=/app:/repo/pipeline python -c "\
+from assets.repository import backfill_all_boards_with_catalog; \
+from domains.cells.repository import backfill_live_asset_version_ids; \
+backfill_all_boards_with_catalog(); \
+print(backfill_live_asset_version_ids())"'
 
 # Print which migration the DB is currently on.
 db-current:
-	docker compose exec board-factory sh -c 'cd /repo/app && alembic current'
+	docker compose exec -T board-factory sh -c 'cd /repo/app && alembic current'
+
+# After squashing migrations: point alembic_version at the new baseline. We use
+# psql instead of ``alembic stamp`` because Alembic refuses to run when the DB
+# still references a deleted revision id (e.g. 0020_cells_live_asset_version).
+db-stamp:
+	docker compose exec -T postgres psql \
+	  -U "$${POSTGRES_USER:-boardfactory}" \
+	  -d "$${POSTGRES_DB:-boardfactory}" \
+	  -v ON_ERROR_STOP=1 \
+	  -c "UPDATE alembic_version SET version_num = '0001_full_schema';"
 
 # ── Postgres snapshot (optional; see db/snapshots/README.md) ───────────────
 # Plain-SQL dump for small dev DBs. Uses compose service `postgres`; override

@@ -5,11 +5,11 @@ from __future__ import annotations
 import pytest
 
 from infrastructure.db import session_scope
-from models.core import CellRecord
+from domains.cells.models import CellRecord
 
 
 def test_seeded_board_creates_one_cell_per_design_and_panel(isolated_repo, seeded_board, board_id):
-    from cells import repository as cells_repo
+    from domains.cells import repository as cells_repo
 
     cells = cells_repo.list_for_board(board_id)
     kinds = {c.kind for c in cells}
@@ -24,7 +24,7 @@ def test_seeded_board_creates_one_cell_per_design_and_panel(isolated_repo, seede
 
 
 def test_find_id_resolves_category_to_kind(isolated_repo, seeded_board, board_id):
-    from cells import repository as cells_repo
+    from domains.cells import repository as cells_repo
 
     cell_id = cells_repo.find_id(board_id, "spaces", "corner_tl")
     assert cell_id is not None
@@ -37,7 +37,7 @@ def test_find_id_resolves_category_to_kind(isolated_repo, seeded_board, board_id
 
 def test_update_prompt_round_trips_to_db(isolated_repo, seeded_board, board_id):
     from sqlalchemy import select
-    from cells import repository as cells_repo
+    from domains.cells import repository as cells_repo
 
     assert cells_repo.update_prompt(board_id, "spaces", "corner_tl", "shiny new prompt") is True
     with session_scope() as session:
@@ -53,7 +53,7 @@ def test_update_prompt_round_trips_to_db(isolated_repo, seeded_board, board_id):
 
 
 def test_update_space_kind_validates_value(isolated_repo, seeded_board, board_id):
-    from cells import repository as cells_repo
+    from domains.cells import repository as cells_repo
 
     assert cells_repo.update_space_kind(board_id, "corner_tl", "event") is True
     assert cells_repo.update_space_kind(board_id, "corner_tl", "standard") is True
@@ -68,8 +68,8 @@ def test_save_catalog_preserves_cell_ids_for_unchanged_cells(
     """``_replace_cells`` must keep ``cells.id`` stable across a no-op save
     so ``asset_versions.cell_id`` survives a board edit. Regression guard for
     the asset history → cell linkage."""
-    from cells import repository as cells_repo
-    from boards import services as svc_catalog
+    from domains.cells import repository as cells_repo
+    from domains.boards import services as svc_catalog
 
     before = {(c.kind, c.slug): c.id for c in cells_repo.list_for_board(board_id)}
     cat = svc_catalog.load_catalog(board_id)

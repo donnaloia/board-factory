@@ -185,7 +185,7 @@ def test_build_cell_side_panel_payload_does_not_block_on_running_writer(
     """
     from boardfactory import config as bf_config
 
-    from routes import deps as route_deps
+    from infrastructure import deps as route_deps
 
     # Pick a real space id from the seeded catalog so we exercise the full
     # build_cell_side_panel_payload path (history listing + frame meta).

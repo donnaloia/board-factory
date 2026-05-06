@@ -188,7 +188,7 @@ def isolated_repo(tmp_path, monkeypatch, _test_database_url):
     storage_db.override_database_url(_test_database_url)
 
     from boardfactory import config as _bf_config
-    from boards import repository as boards_repo
+    from domains.boards import repository as boards_repo
 
     _bf_config.set_board_root_resolver(boards_repo.store_board_root)
 
@@ -244,8 +244,8 @@ def seeded_board(isolated_repo, path_slug, test_user):
 
     from boardfactory import boards as bf_boards
 
-    from boards import services as bd
-    from boards import repository as bo
+    from domains.boards import services as bd
+    from domains.boards import repository as bo
     from infrastructure import board_store as bs
 
     bu = str(_uuid.uuid4())

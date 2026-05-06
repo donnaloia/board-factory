@@ -36,7 +36,7 @@ def test_pipeline_module_loads_under_isolated_repo(isolated_repo):
 
 
 def test_seeded_board_creates_catalog(seeded_board, isolated_repo):
-    from boards import services as bd
+    from domains.boards import services as bd
     from infrastructure import board_store as bs
 
     assert bd.load_catalog_dict(seeded_board.id) is not None

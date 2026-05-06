@@ -33,5 +33,5 @@ COPY app/                    /app/
 
 EXPOSE 8473
 CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8473", \
-     "--reload", "--reload-dir", "/app", "--reload-dir", "/app/routes", "--reload-dir", "/repo/pipeline/boardfactory", \
+     "--reload", "--reload-dir", "/app", "--reload-dir", "/app/infrastructure", "--reload-dir", "/repo/pipeline/boardfactory", \
      "--timeout-graceful-shutdown", "2"]

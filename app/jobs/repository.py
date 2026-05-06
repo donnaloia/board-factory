@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 
 from infrastructure.db import session_scope
-from models.core import JobRunRecord
+from jobs.models import JobRunRecord
 
 if TYPE_CHECKING:
     from jobs.runner import Job

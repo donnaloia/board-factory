@@ -30,7 +30,7 @@ The dump includes **users, password hashes, sessions, and API key fields** store
 ## Restore on a fresh clone
 
 1. `make up` and wait for Postgres to be healthy.
-2. **Either** run migrations once (`make db-upgrade`) **or** skip if you will only restore — a full `pg_dump` already contains tables and `alembic_version`.
+2. **Either** run migrations once (`make db-upgrade`) on an **empty** database **or** skip migrations if you will only restore — a full `pg_dump` already contains tables and `alembic_version`. After a **squashed** baseline migration, regenerate snapshots so `alembic_version.version_num` matches the current single revision (`0001_full_schema`); older dumps may reference deleted revision IDs.
 3. Apply the snapshot:
 
    ```bash

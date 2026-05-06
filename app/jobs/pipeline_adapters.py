@@ -40,7 +40,7 @@ ANALYZE_COST_USD: float = 0.08
 def _load_catalog():
     from boardfactory import config
 
-    from boards import services as bd
+    from domains.boards import services as bd
 
     bid = config.active_board()
     if not bid:
@@ -187,7 +187,7 @@ def analyze(job: Job, cancel: threading.Event, *, openai_key: str) -> float:
     bid = config.active_board()
     if not bid:
         raise RuntimeError("No active board")
-    import boards.services as svc_catalog  # noqa: PLC0415
+    import domains.boards.services as svc_catalog  # noqa: PLC0415
 
     data = svc_catalog.load_catalog(bid)
 
@@ -240,7 +240,7 @@ def style(job: Job, cancel: threading.Event) -> float:
 
         bid = _cfg.active_board()
         if bid:
-            from boards import palette as _wp
+            from domains.boards import palette as _wp
 
             _wp.persist_palette_from_style_dir(bid)
     except Exception:

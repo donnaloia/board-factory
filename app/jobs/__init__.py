@@ -23,6 +23,9 @@ Files in this package
     ``cost_entries`` table writer + lifetime/session aggregation
     queries. Called by workers when they invoke a paid provider.
 
+``routes_api``
+    HTTP for ``/jobs``, ``/events/jobs`` (SSE), ``/api/cost-summary``.
+
 Other domains import explicitly:
 
     from jobs.runner import Job, get_runner, JobProgressSink

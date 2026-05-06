@@ -16,8 +16,8 @@ flowchart TB
   Browser["Browser<br/>(jobs.js · SSE)"]:::http
 
   subgraph Web["FastAPI process — app/"]
-    Route["routes/board.py<br/>POST /b/{id}/actions/…"]:::http
-    Deps["routes/deps.enqueue_pipeline_job<br/>(wraps fn with config.scope_board)"]:::http
+    Route["boards/routes_api.py<br/>POST …/actions/…"]:::http
+    Deps["infrastructure/deps.enqueue_pipeline_job<br/>(wraps fn with config.scope_board)"]:::http
     Adapter["pipeline_adapters.py<br/>analyze · style · generate_one ·<br/>generate_missing · generate_all ·<br/>clean_one · states · preview · export"]:::worker
     Runner["jobs.JobRunner<br/>(asyncio + executor + SSE pub/sub)"]:::worker
     Sink["jobs.JobProgressSink<br/>(start · step · log)"]:::worker
@@ -72,8 +72,8 @@ flowchart TB
 
 | Layer | Responsibility | Key files |
 |---|---|---|
-| **Browser** | Submits `POST /b/<id>/actions/…`, then opens `/jobs/stream` (Server-Sent Events) for live progress. | `app/static/jobs.js`, `app/static/side-panel.js` |
-| **Route** | Auth check, request validation, builds the worker callable via `functools.partial`, calls `enqueue_pipeline_job`. Returns either a `303` redirect or `{job_id}` JSON depending on `Accept`. | `app/routes/board.py` |
+| **Browser** | Submits `POST /users/<u>/board-games/<slug>/actions/…`, then opens `/jobs/stream` (Server-Sent Events) for live progress. | `app/frontend/static/jobs.js`, `app/frontend/static/side-panel.js` |
+| **Route** | Auth check, request validation, builds the worker callable via `functools.partial`, calls `enqueue_pipeline_job`. Returns either a `303` redirect or `{job_id}` JSON depending on `Accept`. | `app/domains/boards/routes_api.py` |
 | **Job Runner** | One per process. Owns the in-memory job registry, dispatches each job to a worker thread (`run_in_executor`), supports cancel via `threading.Event`, and pubs status changes to all SSE subscribers. Persists terminal snapshots to `job_runs`. | `app/jobs.py`, `app/services/job_runs.py` |
 | **Adapter** | Plain functions matching the runner's `(job, cancel_event) → cost_usd` shape. Loads the catalog from the DB, validates the mockup, builds the provider, calls into the pipeline, records cost, surfaces logs into `job.log`. | `app/pipeline_adapters.py` |
 | **Orchestrate** | "Generate everything missing" loops over `draw_cell` once per cell, advancing the outer progress bar between calls. | `pipeline/boardfactory/ops/orchestrate.py` |
@@ -85,7 +85,7 @@ flowchart TB
 
 ## Per-job lifecycle
 
-1. The browser posts to a route under `/b/<board_id>/actions/…`.
+1. The browser posts to a route under `/users/<username>/board-games/<path_slug>/actions/…`.
 2. The route ensures the requesting user owns the board, builds a `partial`
    binding (e.g. `partial(pipeline_adapters.generate_one, category="spaces", asset_id=…)`),
    and calls `deps.enqueue_pipeline_job`. The runner returns a job id immediately.

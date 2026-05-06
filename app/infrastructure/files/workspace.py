@@ -100,11 +100,6 @@ def live_rel(category: str, asset_id: str) -> str:
     return f"workspace/live/{category}/{asset_id}.png"
 
 
-def live_source_rel(category: str, asset_id: str) -> str:
-    """JSON pointer: which history file was last promoted to live (see ``live_prompt``)."""
-    return f"workspace/meta/live_source/{category}/{asset_id}.json"
-
-
 def live_path(board_id: str, category: str, asset_id: str) -> Path:
     """Promoted PNG for one cell. Local-only; for S3 use ``live_rel`` + the store."""
     return _local_store().local_path(board_id, live_rel(category, asset_id))

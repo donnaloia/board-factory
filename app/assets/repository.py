@@ -19,22 +19,30 @@ import hashlib
 import json
 import time
 from pathlib import PurePosixPath
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from infrastructure import board_store as bs
 from infrastructure.db import session_scope
-from models.core import AssetVersionRecord, BoardGameRecord, CellRecord
+from assets.models import AssetVersionRecord
+from domains.boards.models import BoardGameRecord
+from domains.cells.models import CellRecord
 
 
 # ── pipeline event handler ────────────────────────────────────────────
 
 
-def on_asset_event(kind: str, board_id: str, **kw: object) -> None:
-    """Registered with ``boardfactory.assets`` — index new history rows in SQL."""
-    if kind != "history_push":
-        return
+def on_asset_event(kind: str, board_id: str, **kw: Any) -> None:
+    """Registered with ``boardfactory.assets`` — index rows + live pointer updates."""
+    if kind == "history_push":
+        _on_history_push(board_id, kw)
+    elif kind == "live_promote":
+        _apply_live_promote(board_id, kw)
+
+
+def _on_history_push(board_id: str, kw: dict[str, Any]) -> None:
     basename = kw.get("basename")
     rel_path = kw.get("rel_path")
     category = kw.get("category")
@@ -60,6 +68,70 @@ def on_asset_event(kind: str, board_id: str, **kw: object) -> None:
         sh,
         mj,
     )
+
+
+def _apply_live_promote(board_id: str, kw: dict[str, Any]) -> None:
+    category = kw.get("category")
+    asset_id = kw.get("asset_id")
+    history_filename = kw.get("history_filename")
+    if not isinstance(category, str) or not isinstance(asset_id, str):
+        return
+    if not isinstance(history_filename, str):
+        return
+    rel = f"history/{category}/{asset_id}/{history_filename}"
+    with session_scope() as session:
+        av = session.scalar(
+            select(AssetVersionRecord).where(
+                AssetVersionRecord.board_uuid == board_id,
+                AssetVersionRecord.rel_path == rel,
+            )
+        )
+        if av is None:
+            return
+        cell = session.get(CellRecord, av.cell_id)
+        if cell is None:
+            return
+        cell.live_asset_version_id = av.id
+
+
+def prompt_from_asset_version_meta(meta_json: str | None) -> str | None:
+    """Return stored prompt from ``asset_versions.meta_json`` when present."""
+    if not meta_json:
+        return None
+    try:
+        data = json.loads(meta_json)
+    except Exception:
+        return None
+    if not isinstance(data, dict) or "prompt" not in data:
+        return None
+    p = data.get("prompt")
+    if p is None:
+        return None
+    return str(p)
+
+
+def merged_prompt_for_live_asset_row(
+    board_id: str,
+    category: str,
+    asset_id: str,
+    av: AssetVersionRecord,
+) -> str | None:
+    """Sidebar prompt for the history row referenced by ``cells.live_asset_version_id``.
+
+    Uses ``meta_json`` first, then :func:`boardfactory.assets.read_meta` so legacy
+    ``.meta.json`` sidecars still contribute when the DB row omits ``prompt``.
+    """
+    p = prompt_from_asset_version_meta(av.meta_json)
+    if p is not None:
+        return p
+    from boardfactory import assets as bf_assets  # noqa: PLC0415
+    from boardfactory import config as bf_config  # noqa: PLC0415
+
+    with bf_config.set_active_board(board_id):
+        meta = bf_assets.read_meta(category, asset_id, av.basename)
+    if meta.get("prompt") is not None:
+        return str(meta["prompt"])
+    return None
 
 
 # ── inserts ───────────────────────────────────────────────────────────
