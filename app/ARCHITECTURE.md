@@ -18,8 +18,8 @@ A domain is a noun the product reasons about. Today:
 | --- | --- |
 | `domains/boards/`    | Board entity, ownership, paths, catalog config (style, generation, frame, layout), style-lock palette. |
 | `home/`      | Root ``/`` board picker HTML + ``/api/boards`` create/delete JSON. |
+| `domains/cards/` | Card Factory — decks/sets, layout templates, routes & services linking to `board_games` for palette/style; jobs delegate to `pipeline/cardfactory/`. |
 | `domains/cells/`     | Spaces, feature panels, centerpiece; ``live_asset_version_id`` references ``asset_versions`` for sidebar metadata. |
-| `assets/`    | Per-cell history rows, live PNGs, asset URLs, the `/asset/...` HTTP routes. |
 | `auth/`      | Users, sessions, API-key secrets, the auth middleware, provider-status checks. |
 | `jobs/`      | The async job runner, pipeline adapters, cost ledger, terminal-job snapshots. |
 

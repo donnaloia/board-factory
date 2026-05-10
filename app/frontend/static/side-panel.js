@@ -416,9 +416,9 @@
 
   function renderFrameSection(data) {
     // Slim status block — the inline picker has been replaced by the
-    // dedicated Frame Atelier (board-level page reachable from the
-    // toolbar or the link below). The side panel now only surfaces
-    // status for *this* cell and links into the Atelier; full authoring
+    // dedicated Frame Atelier (board-level page reachable from the link
+    // below). The side panel surfaces status for *this* cell and links into
+    // the Atelier; full authoring
     // (Propose / Refine / Commit / Approach D batch) lives there.
     const f = data.frame;
 

@@ -146,6 +146,22 @@ def estimate_generate_one(category: str, target: str | None = None) -> float:
 estimate_regen_one = estimate_generate_one
 
 
+def estimate_frame_reapply_wall_seconds(panel_count: int) -> int:
+    """Heuristic wall-clock duration for an Approach D batch (queued → last panel).
+
+    Uses ``BOARDFACTORY_FRAME_REAPPLY_SEC_PER_PANEL`` seconds per panel (default ``22``).
+    Provider latency varies; this is only for UI hints next to the Adopt button.
+    """
+    import math
+    import os
+
+    if panel_count <= 0:
+        return 0
+    per = float(os.environ.get("BOARDFACTORY_FRAME_REAPPLY_SEC_PER_PANEL", "22"))
+    per = max(per, 1.0)
+    return int(math.ceil(panel_count * per))
+
+
 def estimate_generate_all(
     missing_space_count: int,
     missing_panel_count: int,
@@ -515,6 +531,7 @@ def frame_propose(
     raw_candidates = provider.segment_frame(
         src_img, candidate_count=candidate_count
     )
+    vision_prompt_hash = raw_candidates[0].prompt_hash if raw_candidates else None
     sink.step(f"vision returned {len(raw_candidates)} candidate(s)")
     check_cancel(cancel)
 
@@ -547,6 +564,31 @@ def frame_propose(
 
     if not cleaned:
         raise RuntimeError("no usable frame candidates produced")
+
+    # Vision often traces an inner decorative frame (small bbox in the middle).
+    # Offer a full-tile deterministic candidate first so Refine opens on edges,
+    # not an accidental inset crop.
+    _MIN_COVERAGE_FRAC = 0.72
+    max_frac = max(
+        fi.bbox_area_fraction(c.bbox, src_size) for c in cleaned
+    )
+    if max_frac < _MIN_COVERAGE_FRAC:
+        smallest = min(src_size)
+        ring = max(2, smallest // 16)
+        cleaned.insert(
+            0,
+            fi.candidate_from_ring(
+                source_size=src_size,
+                ring_px=ring,
+                score=0.55,
+                notes="full tile edges (auto — vision bboxes were inset)",
+            ),
+        )
+        sink.log(
+            "prepended full-tile candidate — vision outer bbox covered "
+            f"{max_frac * 100:.0f}% of image (< {_MIN_COVERAGE_FRAC * 100:.0f}%)"
+        )
+
     sink.step(f"cleaned {len(cleaned)} candidate(s)")
     check_cancel(cancel)
 
@@ -586,6 +628,7 @@ def frame_propose(
         "panel_size": list(panel_size),
         "provider": provider.name,
         "model_id": getattr(provider, "model_id", provider.name),
+        "prompt_hash": vision_prompt_hash,
         "candidates": manifest,
     }, indent=2))
 
@@ -666,6 +709,53 @@ def frame_reapply(
     if failures:
         for line in failures[:10]:
             job.log.append(line)
+
+    return spent
+
+
+def frame_reapply_one(
+    job: Job,
+    cancel: threading.Event,
+    *,
+    panel_id: str,
+    pixellab_key: str | None = None,
+    openai_key: str | None = None,
+) -> float:
+    """Reapply the adopted house frame to exactly one panel (Approach D subset).
+
+    Used when the user adopts from Frame Atelier and wants one inpaint before
+    returning to the board editor.
+    """
+    from boardfactory.ops import reapply_to_panel
+
+    catalog = _load_catalog()
+    sink = _sink(job)
+    provider = _resolve_provider(pixellab_key, openai_key, catalog=catalog)
+
+    sink.start("reapply frame to one panel", total=1)
+    sink.log(
+        f"single-panel reapply: panel:{panel_id} (provider={provider.name})",
+    )
+
+    check_cancel(cancel)
+    result = reapply_to_panel(catalog, panel_id, provider, sink)
+
+    spent = float(result.spent_usd)
+    if result.skipped:
+        sink.step("skipped")
+        job.log.append(f"reapply_one skipped panel:{panel_id} (no live)")
+        return 0.0
+    if result.error:
+        sink.step("failed")
+        job.log.append(f"panel:{panel_id} FAILED: {result.error}")
+        raise RuntimeError(result.error)
+
+    sink.step("done")
+    job.log.append(
+        f"reapplied frame to panel:{panel_id}  (spent ${spent:.2f})",
+    )
+    if spent > 0:
+        cost_ledger.record("frame.reapply_one", panel_id, 1, spent)
 
     return spent
 

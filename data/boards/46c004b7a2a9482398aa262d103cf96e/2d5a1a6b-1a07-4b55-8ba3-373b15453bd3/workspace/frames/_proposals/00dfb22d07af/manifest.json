@@ -1,0 +1,33 @@
+{
+  "job_id": "00dfb22d07af",
+  "source_kind": "panel",
+  "source_id": "panel_left_bot",
+  "source_size": [
+    260,
+    240
+  ],
+  "panel_size": [
+    260,
+    240
+  ],
+  "provider": "openai",
+  "model_id": "gpt-4o",
+  "candidates": [
+    {
+      "index": 0,
+      "bbox": [
+        8,
+        12,
+        253,
+        229
+      ],
+      "ring_px": 12,
+      "score": 0.95,
+      "notes": "Rectangular outer frame with a slightly symmetrical inner content edge.",
+      "model_id": "gpt-4o",
+      "preview_filename": "candidate_0.png",
+      "hole_mask_filename": "candidate_0_hole.png",
+      "rim_mask_filename": "candidate_0_rim.png"
+    }
+  ]
+}

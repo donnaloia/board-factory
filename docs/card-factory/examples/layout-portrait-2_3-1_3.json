@@ -1,0 +1,39 @@
+{
+  "schema_version": "1",
+  "id": "portrait-two-band-v1",
+  "label": "Portrait — main art upper 2/3, procedural stats lower 1/3",
+  "coordinate_space": "interior_normalized",
+  "regions": [
+    {
+      "id": "main_art",
+      "role": "illustration",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 1,
+        "height": 0.6666666666666666
+      }
+    },
+    {
+      "id": "stats",
+      "role": "procedural_stats",
+      "rect": {
+        "x": 0,
+        "y": 0.6666666666666666,
+        "width": 1,
+        "height": 0.3333333333333333
+      },
+      "typography": {
+        "max_lines": 3,
+        "padding": {
+          "top": 0.12,
+          "right": 0.08,
+          "bottom": 0.1,
+          "left": 0.08
+        },
+        "horizontal_align": "center",
+        "vertical_align": "center"
+      }
+    }
+  ]
+}

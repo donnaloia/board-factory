@@ -36,7 +36,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from . import config
 
@@ -334,6 +334,48 @@ def derive_masks_from_segmentation(
     return hole, rim
 
 
+def expand_hole_within_outer(
+    hole: Image.Image,
+    outer: Image.Image,
+    px: int,
+) -> Image.Image:
+    """Dilate the hole mask up to ``px`` steps, clipped to the frame footprint ``outer``.
+
+    White inpaint regions grow slightly into pixels that were classified as rim so
+    baked-in sidebars / nested chrome (often mis-tagged as preserve) get regenerated.
+    """
+    if px <= 0:
+        return hole.convert("L")
+    h = hole.convert("L").point(lambda v: 255 if v >= 128 else 0)
+    o = outer.convert("L").point(lambda v: 255 if v >= 128 else 0)
+    for _ in range(px):
+        h = h.filter(ImageFilter.MaxFilter(3))
+        h = ImageChops.multiply(h, o)
+    return h
+
+
+def outer_union_mask_at_target(
+    slice_: NineSlice,
+    target_size: tuple[int, int],
+    *,
+    source_size: tuple[int, int] | None = None,
+) -> Image.Image | None:
+    """Binary mask of (hole ∪ rim) at panel size — region covered by the adopted frame."""
+    tw, th = target_size
+    src_hole = slice_.hole_mask
+    if src_hole is None:
+        sw, sh = source_size if source_size is not None else (tw, th)
+        scale = min(tw / max(sw, 1), th / max(sh, 1))
+        scaled_ring = max(1, int(round(slice_.ring_px * scale)))
+        hole, rim = derive_masks_from_ring((tw, th), scaled_ring)
+        return ImageChops.lighter(hole.convert("L"), rim.convert("L"))
+    hole_t = src_hole.resize((tw, th), Image.NEAREST)
+    if slice_.rim_mask is None:
+        return hole_t.convert("L")
+    rim_t = slice_.rim_mask.resize((tw, th), Image.NEAREST)
+    return ImageChops.lighter(hole_t.convert("L"), rim_t.convert("L"))
+
+
 # ────────────────────────── composition ──────────────────────────
 
 
@@ -383,9 +425,14 @@ def _tile_horizontal(canvas: Image.Image, sprite: Image.Image,
     x = x_start
     end = x_start + run
     while x < end:
-        chunk = sprite if (end - x) >= sw else sprite.crop((0, 0, end - x, sprite.height))
+        remaining = end - x
+        chunk = (
+            sprite
+            if remaining >= sw
+            else sprite.crop((0, 0, remaining, sprite.height))
+        )
         canvas.paste(chunk, (x, y), chunk)
-        x += sw
+        x += chunk.width
 
 
 def _tile_vertical(canvas: Image.Image, sprite: Image.Image,
@@ -396,9 +443,14 @@ def _tile_vertical(canvas: Image.Image, sprite: Image.Image,
     y = y_start
     end = y_start + run
     while y < end:
-        chunk = sprite if (end - y) >= sh else sprite.crop((0, 0, sprite.width, end - y))
+        remaining = end - y
+        chunk = (
+            sprite
+            if remaining >= sh
+            else sprite.crop((0, 0, sprite.width, remaining))
+        )
         canvas.paste(chunk, (x, y), chunk)
-        y += sh
+        y += chunk.height
 
 
 # ────────────────────────── interior masking (for inpainting) ──────────────────────────
@@ -428,6 +480,7 @@ def hole_mask_for_target(
     target_size: tuple[int, int],
     *,
     source_size: tuple[int, int] | None = None,
+    expand_px: int = 0,
 ) -> Image.Image:
     """Hole mask scaled from source-asset size to a target panel size.
 
@@ -438,6 +491,9 @@ def hole_mask_for_target(
     ``source_size`` overrides the implicit scale source (e.g. the caller
     passes the FrameInstance.source_size so the ring scales the same way
     ``draw_cell`` does for inpaint).
+
+    ``expand_px`` dilates the regenerate region slightly into the rim band
+    (see :func:`expand_hole_within_outer`).
     """
     src_hole = slice_.hole_mask
     tw, th = target_size
@@ -447,14 +503,37 @@ def hole_mask_for_target(
         sw, sh = source_size if source_size is not None else (tw, th)
         scale = min(tw / max(sw, 1), th / max(sh, 1))
         scaled_ring = max(1, int(round(slice_.ring_px * scale)))
-        hole, _ = derive_masks_from_ring((tw, th), scaled_ring)
-        return hole
-    return src_hole.resize((tw, th), Image.NEAREST)
+        hole, rim = derive_masks_from_ring((tw, th), scaled_ring)
+        m = hole
+    else:
+        m = src_hole.resize((tw, th), Image.NEAREST)
+
+    if expand_px > 0:
+        outer = outer_union_mask_at_target(
+            slice_, target_size, source_size=source_size,
+        )
+        if outer is not None:
+            m = expand_hole_within_outer(m, outer, expand_px)
+    return m
+
+
+def hole_mask_png_bytes_for_target(
+    slice_: NineSlice,
+    target_size: tuple[int, int],
+    *,
+    source_size: tuple[int, int] | None = None,
+    expand_px: int = 0,
+) -> bytes:
+    """PNG bytes for ``hole_mask_for_target`` — inpaint region matching adopted rim."""
+    m = hole_mask_for_target(
+        slice_, target_size, source_size=source_size, expand_px=expand_px,
+    )
+    buf = io.BytesIO()
+    m.save(buf, format="PNG")
+    return buf.getvalue()
 
 
 # ────────────────────────── on-disk house frame helpers ──────────────────────────
-
-
 def adopt_house_frame(slice_: NineSlice, meta: FrameInstance) -> None:
     """Replace the active house frame with this 9-slice + metadata.
 

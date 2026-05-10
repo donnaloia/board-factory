@@ -4158,6 +4158,33 @@ body.modal-open {
   margin-top: 2px;
 }
 
+.atelier-guide {
+  max-width: 52rem;
+  margin: 0 0 24px;
+  padding: 16px 20px 18px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--paper-2);
+}
+.atelier-guide .micro-h {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0 0 10px;
+}
+.atelier-guide-steps {
+  margin: 0 0 0 1.1em;
+  padding: 0;
+  font-family: var(--serif);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+.atelier-guide-steps li { margin: 0 0 0.5em; }
+.atelier-guide-steps li:last-child { margin-bottom: 0; }
+
 /* Generic pane (propose / refine / commit) */
 
 .atelier-pane { display: grid; gap: 24px; }
@@ -4352,6 +4379,10 @@ body.modal-open {
   border: 1px solid var(--rule);
   border-radius: 2px;
 }
+/* Author `display:grid` wins over `[hidden]` otherwise — panel stayed visible on load. */
+.atelier-vision-status[hidden] {
+  display: none !important;
+}
 .atelier-vision-summary {
   margin: 0;
   font-family: var(--sans);
@@ -4459,6 +4490,58 @@ body.modal-open {
   color: var(--ink-3);
 }
 
+.atelier-extraction-heading {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.atelier-extraction-heading .micro-h {
+  margin: 0;
+}
+.atelier-extraction-sub {
+  margin: 0;
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-2);
+  max-width: 52ch;
+}
+.atelier-mask-legend {
+  margin: 6px 0 0;
+  padding: 10px 12px;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  max-width: 52ch;
+}
+.atelier-mask-legend li {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 10px;
+  align-items: start;
+}
+.atelier-legend-swatch {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  margin-top: 2px;
+}
+.atelier-legend-swatch.swatch-rim {
+  background: rgba(255, 80, 200, 0.65);
+}
+.atelier-legend-swatch.swatch-hole {
+  background: rgba(40, 180, 255, 0.55);
+}
+
 .atelier-stage {
   display: grid; gap: 12px;
 }
@@ -4470,6 +4553,10 @@ body.modal-open {
   min-height: 360px;
   overflow: hidden;
 }
+.atelier-stage-frame.is-ring-syncing {
+  outline: 1px dashed var(--brass-deep);
+  outline-offset: 3px;
+}
 .atelier-stage-source {
   display: block;
   max-width: 100%;
@@ -4478,12 +4565,29 @@ body.modal-open {
 }
 .atelier-stage-overlay {
   position: absolute;
+  left: 0;
+  top: 0;
   pointer-events: none;
+  z-index: 1;
 }
 .atelier-stage-overlay.is-hidden { opacity: 0; }
+.atelier-bbox-outline {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px dashed var(--brass-bright);
+  pointer-events: none;
+  z-index: 2;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
 .atelier-stage-handles {
   position: absolute;
   inset: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+.atelier-stage-handles.is-busy {
+  opacity: 0.7;
+  pointer-events: none;
 }
 .atelier-stage-handles .handle {
   position: absolute;
@@ -4491,9 +4595,12 @@ body.modal-open {
   background: var(--brass-bright);
   border: 2px solid var(--paper);
   box-shadow: 0 0 0 1px var(--brass-deep);
-  cursor: nwse-resize;
   transform: translate(-50%, -50%);
+  pointer-events: auto;
+  touch-action: none;
 }
+.atelier-stage-handles .handle.handle-tl,
+.atelier-stage-handles .handle.handle-br { cursor: nwse-resize; }
 .atelier-stage-handles .handle.handle-tr,
 .atelier-stage-handles .handle.handle-bl { cursor: nesw-resize; }
 .atelier-stage-toolbar {
@@ -4567,6 +4674,14 @@ body.modal-open {
   border: 1px solid var(--rule);
   overflow: hidden;
 }
+.atelier-preview-caption {
+  font-family: var(--sans);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-3);
+  margin: 0 0 10px;
+  max-width: 34em;
+}
 .atelier-preview-interior {
   position: absolute; inset: 0;
   background: repeating-conic-gradient(#1c1c22 0% 25%, #15151a 0% 50%) 0 0 / 14px 14px;
@@ -4624,6 +4739,10 @@ body.modal-open {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
   gap: 16px;
+}
+/* Our ``display: grid`` wins over the HTML ``[hidden]`` default — collapse when hidden. */
+.atelier-progress-grid[hidden] {
+  display: none !important;
 }
 .atelier-progress-cell {
   display: grid; gap: 6px;

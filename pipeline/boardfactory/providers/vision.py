@@ -183,17 +183,38 @@ _OPENAI_SYSTEM = (
 
 _OPENAI_USER_TMPL = """The image attached is a single tile from a board-game UI panel ({w}×{h} px).
 
+CONTEXT
+When the artwork is a single rectangular tile shown edge-to-edge, prefer the
+OUTERMOST decorative bezel that runs close to the left/right/top/bottom edges of
+the image (within a few percent). Only trace a smaller inset rectangle when the
+tile clearly shows separate nested frames (e.g. an inner ornate border inside a
+larger outer frame that reaches the edges).
+
+CRITICAL — INNER POLYGON ("inner_polygon")
+"inner_polygon" is the INNER EDGE of the decorative **rim** — i.e. the full
+**aperture** of the frame: every pixel that should show the board/content
+through the new frame must lie **inside** this polygon. It must NOT be a tight
+box around only the "hero" subject (e.g. a cupcake) if there are still
+separate side panels, rating strips, heart bands, or other UI chrome between
+that subject and the real frame rim. Those intermediate strips belong **inside
+the hole** (they will be regenerated), not inside the preserved rim. Trace
+inner_polygon along the boundary between **finished rim ornament** and **anything
+that should be replaced** — including legacy borders baked into the tile.
+
 TASK
 Find the decorative outer ring/frame around the central content. There may be
 multiple plausible rings (a thin metallic edge AND an outer wooden frame, for
 example). For each plausible ring, return BOTH:
   - "outer_polygon": closed polygon tracing the OUTER edge of the rim
-  - "inner_polygon": closed polygon tracing the INNER edge of the rim
-                     (i.e. the boundary of the central content "hole")
+  - "inner_polygon": closed polygon tracing the INNER edge of that rim — the
+                     full content opening (hole), not a crop around one icon only.
 
 Coordinates MUST be normalized in the range 0.0..1.0 with the origin at the
 top-left of the image. The polygons should each have 4..32 vertices and be
-ordered (clockwise OR counter-clockwise — pick one and stick to it).
+ordered (clockwise OR counter-clockwise — pick one and stick to it). Do not
+default to axis-aligned rectangles unless the visible frame is genuinely
+rectangular; trace curved, chamfered, or irregular rims with enough vertices
+to follow the art.
 
 CONFIDENCE
 For each candidate, include a "score" in 0.0..1.0 reflecting how confident you
@@ -208,10 +229,10 @@ OUTPUT
 {{
   "candidates": [
     {{
-      "outer_polygon": [[0.02,0.03],[0.98,0.03],[0.98,0.97],[0.02,0.97]],
-      "inner_polygon": [[0.10,0.12],[0.90,0.12],[0.90,0.88],[0.10,0.88]],
+      "outer_polygon": [[0.05,0.08],[0.52,0.04],[0.95,0.11],[0.97,0.89],[0.48,0.96],[0.03,0.88]],
+      "inner_polygon": [[0.14,0.22],[0.50,0.16],[0.86,0.24],[0.88,0.76],[0.50,0.84],[0.12,0.74]],
       "score": 0.92,
-      "notes": "outer wood, square corners"
+      "notes": "hexagonal-ish bezel; inner hole follows chamfers"
     }}
   ]
 }}

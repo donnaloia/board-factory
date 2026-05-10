@@ -1,4 +1,4 @@
-.PHONY: up down down-force down-nuclear logs shell rebuild clean protect-keys unprotect-keys test db-upgrade db-current db-stamp db-snapshot db-restore backfill-live-fk
+.PHONY: up down down-force down-nuclear logs shell rebuild clean protect-keys unprotect-keys test test-pipeline db-upgrade db-current db-stamp db-snapshot db-restore backfill-live-fk
 
 # Compose labels use this project id (defaults to this repo directory name). Override if you use COMPOSE_PROJECT_NAME.
 COMPOSE_LABEL_PROJECT ?= board-factory
@@ -57,6 +57,11 @@ unprotect-keys:
 test:
 	docker compose exec -T board-factory pip install --no-cache-dir -q -r /repo/app/requirements.txt
 	docker compose exec -T board-factory sh -c 'cd /app && PYTHONPATH=/app:/repo/pipeline python -m pytest -q /repo/app/tests/'
+
+# Pipeline-only tests (no app/tests/conftest DB fixture). Conf-cut avoids picking up app conftest.
+test-pipeline:
+	docker compose exec -T board-factory pip install --no-cache-dir -q -r /repo/app/requirements.txt
+	docker compose exec -T board-factory sh -c 'PYTHONPATH=/app:/repo/pipeline python -m pytest -q /repo/pipeline/boardfactory/tests/ --confcutdir=/repo/pipeline'
 
 # Apply Alembic migrations against the configured Postgres database.
 # Safe to run repeatedly.

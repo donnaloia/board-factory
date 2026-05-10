@@ -1,0 +1,14 @@
+{
+  "ring_px": 25,
+  "source_kind": "panel",
+  "source_id": "panel_cright_bot",
+  "source_size": [
+    260,
+    240
+  ],
+  "created_ms": 1778194879441,
+  "notes": "committed via Atelier",
+  "model_id": "gpt-4o",
+  "prompt_hash": "d2ee32bae66ed23f",
+  "candidate_index": 0
+}
