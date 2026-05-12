@@ -72,10 +72,19 @@ class CellRecord(Base):
         nullable=True,
     )
 
+    #: Space-design row only: optional ``cells.id`` of a ``kind=panel`` cell to
+    #: associate for land → UI / animation (see ``docs/project-export-spec.md`` §10).
+    triggers_functional_cell_id: Mapped[str | None] = mapped_column(
+        PG_UUID(as_uuid=False),
+        ForeignKey("cells.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     __table_args__ = (
         sa.UniqueConstraint("board_uuid", "kind", "slug", name="uq_cells_board_kind_slug"),
         Index("ix_cells_board_kind", "board_uuid", "kind"),
         Index("ix_cells_live_asset_version_id", "live_asset_version_id"),
+        Index("ix_cells_triggers_functional_cell_id", "triggers_functional_cell_id"),
         sa.CheckConstraint(
             "kind IN ('space','panel','centerpiece')",
             name="ck_cells_kind_enum",

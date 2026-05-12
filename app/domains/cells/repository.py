@@ -117,6 +117,99 @@ def update_space_kind(board_id: str, slug: str, space_kind: str) -> bool:
         return True
 
 
+def patch_space_cell_metadata(
+    board_id: str,
+    slug: str,
+    *,
+    space_kind: str | None = None,
+    update_space_kind: bool = False,
+    triggers_functional_cell_id: str | None = None,
+    update_triggers: bool = False,
+) -> bool:
+    """Patch ``space_kind`` and/or ``triggers_functional_cell_id`` on a space-design cell.
+
+    Only fields with ``update_*`` True are written. For triggers, pass
+    ``triggers_functional_cell_id=None`` with ``update_triggers=True`` to clear.
+    Validates target row is ``kind='panel'`` on the same board when non-null.
+    """
+    if space_kind is not None and space_kind not in ("standard", "event"):
+        raise ValueError(f"invalid space_kind: {space_kind!r}")
+
+    with session_scope() as session:
+        row = session.scalar(
+            select(CellRecord).where(
+                CellRecord.board_uuid == board_id,
+                CellRecord.kind == "space",
+                CellRecord.slug == slug,
+            )
+        )
+        if row is None:
+            return False
+
+        if update_space_kind and space_kind is not None:
+            row.space_kind = space_kind
+
+        if update_triggers:
+            if triggers_functional_cell_id is None:
+                row.triggers_functional_cell_id = None
+            else:
+                tgt = session.scalar(
+                    select(CellRecord).where(
+                        CellRecord.id == triggers_functional_cell_id,
+                        CellRecord.board_uuid == board_id,
+                        CellRecord.kind == "panel",
+                    )
+                )
+                if tgt is None:
+                    raise ValueError(
+                        "triggers_functional_cell_id must reference a panel cell on this board"
+                    )
+                if tgt.id == row.id:
+                    raise ValueError("cannot link a space cell to itself")
+                row.triggers_functional_cell_id = triggers_functional_cell_id
+
+        return True
+
+
+def list_panel_cells_for_board(board_id: str) -> list[CellRecord]:
+    """All functional (panel) cells for a board, ordered for UI dropdowns."""
+    with session_scope() as session:
+        return list(
+            session.scalars(
+                select(CellRecord)
+                .where(
+                    CellRecord.board_uuid == board_id,
+                    CellRecord.kind == "panel",
+                )
+                .order_by(CellRecord.position_index, CellRecord.slug)
+            )
+        )
+
+
+def export_land_triggers_by_design_slug(board_id: str) -> dict[str, str]:
+    """Return ``{space_design_slug: panel_slug}`` for space rows with a land-trigger FK.
+
+    One entry per space **design** row (``cells.slug`` matches catalog design id).
+    Used by project export ``interaction_graph`` (see ``docs/project-export-spec.md`` §10).
+    """
+    from sqlalchemy.orm import aliased
+
+    Panel = aliased(CellRecord)
+    with session_scope() as session:
+        rows = session.execute(
+            select(CellRecord.slug, Panel.slug)
+            .join(Panel, CellRecord.triggers_functional_cell_id == Panel.id)
+            .where(
+                CellRecord.board_uuid == board_id,
+                CellRecord.kind == "space",
+                CellRecord.triggers_functional_cell_id.is_not(None),
+                Panel.board_uuid == board_id,
+                Panel.kind == "panel",
+            )
+        ).all()
+        return {str(a): str(b) for a, b in rows}
+
+
 # ────────────────────────── backfill live FK ──────────────────────────
 
 

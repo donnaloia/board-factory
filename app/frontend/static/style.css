@@ -988,6 +988,8 @@ h3 { font-family: var(--sans);  font-weight: 500; font-size: 11px; margin: 0 0 1
   background: var(--paper-2);
   padding: 28px 28px 32px;
   min-height: 400px;
+  min-width: 0;
+  overflow-x: hidden;
   font-family: var(--sans);
   font-size: 13px;
   border-left: 1px solid var(--rule);
@@ -1054,6 +1056,7 @@ h3 { font-family: var(--sans);  font-weight: 500; font-size: 11px; margin: 0 0 1
 .cell-panel-section {
   padding: 18px 0;
   border-bottom: 1px solid var(--rule);
+  min-width: 0;
 }
 .cell-panel-section:last-child { border-bottom: 0; }
 
@@ -1281,25 +1284,69 @@ h3 { font-family: var(--sans);  font-weight: 500; font-size: 11px; margin: 0 0 1
 
 .cell-meta {
   display: grid;
-  grid-template-columns: auto 1fr;
+  /* minmax(0, 1fr) so long <select> options / monospace lines don’t force column past panel width */
+  grid-template-columns: auto minmax(0, 1fr);
   column-gap: 16px; row-gap: 4px;
+  min-width: 0;
   font-family: var(--mono);
   font-size: 11px;
   color: var(--ink-2);
 }
 .cell-meta dt { color: var(--ink-3); }
-.cell-meta dd { margin: 0; color: var(--ink); }
-.cell-meta .space-kind-dd select {
-  display: block;
-  max-width: 100%;
-  margin: 0.15rem 0 0.35rem;
-  padding: 0.25rem 0.4rem;
-  font: inherit;
+.cell-meta dd { margin: 0; color: var(--ink); min-width: 0; }
+.cell-meta .space-kind-dd,
+.cell-meta .land-trigger-dd {
+  min-width: 0;
 }
-.cell-meta .space-kind-hint {
+
+/* Dark selects — native OS menus stay light on some platforms; panel chrome matches app. */
+.cell-meta .space-kind-dd select,
+.cell-meta .land-trigger-dd select {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0.15rem 0 0.35rem;
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--ink);
+  background: var(--paper-3);
+  border: 1px solid var(--rule-strong);
+  border-radius: 5px;
+  color-scheme: dark;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+}
+.cell-meta .space-kind-dd select:hover,
+.cell-meta .land-trigger-dd select:hover {
+  background: var(--paper-2);
+  border-color: rgba(243, 240, 234, 0.22);
+}
+.cell-meta .space-kind-dd select:focus,
+.cell-meta .land-trigger-dd select:focus {
+  border-color: var(--brass);
+  box-shadow: 0 0 0 1px rgba(200, 153, 91, 0.28);
+}
+.cell-meta .space-kind-dd select:disabled,
+.cell-meta .land-trigger-dd select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.cell-meta .space-kind-hint,
+.cell-meta .land-trigger-hint {
   margin: 0.35rem 0 0;
   font-size: 0.8rem;
   line-height: 1.35;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+.cell-meta .land-trigger-hint code {
+  overflow-wrap: anywhere;
+  word-break: break-all;
 }
 
 /* Live preview at the top of the panel */

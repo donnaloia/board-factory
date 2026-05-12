@@ -52,6 +52,9 @@ unprotect-keys:
 	  echo "docker-compose.yml is back to normal git tracking."
 
 # ── Tests ───────────────────────────────────────────────────────────────────
+# App tests (app/tests/) require Postgres + BOARDFACTORY_DATABASE_URL + PYTHONPATH.
+# Always run via this target or an equivalent `docker compose exec board-factory …`;
+# do not run pytest on the host for the app suite.
 # Run the test suite inside the running board-factory container. The image must
 # be up first (`make up`).
 test:

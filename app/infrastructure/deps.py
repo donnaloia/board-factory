@@ -367,6 +367,36 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
         if cell_p:
             active_prompt = cell_p
 
+    functional_targets: list[dict] = []
+    triggers_functional: dict | None = None
+    triggers_functional_cell_id: str | None = None
+    if category == "spaces":
+        functional_targets = [
+            {
+                "cell_id": c.id,
+                "id": c.slug,
+                "title": c.slug.replace("_", " "),
+            }
+            for c in cells_repo.list_panel_cells_for_board(board_id)
+        ]
+        if cell_row is not None:
+            triggers_functional_cell_id = cell_row.triggers_functional_cell_id
+            if cell_row.space_kind:
+                spec["space_kind"] = cell_row.space_kind
+            if cell_row.triggers_functional_cell_id:
+                with session_scope() as session:
+                    tgt = session.get(CellRecord, cell_row.triggers_functional_cell_id)
+                    if (
+                        tgt is not None
+                        and tgt.board_uuid == board_id
+                        and tgt.kind == "panel"
+                    ):
+                        triggers_functional = {
+                            "cell_id": tgt.id,
+                            "id": tgt.slug,
+                            "title": tgt.slug.replace("_", " "),
+                        }
+
     if active_prompt is None or not str(active_prompt).strip():
         active_prompt = catalog_prompt
     frame_block = catalog.get("frame", {}) or {}
@@ -449,6 +479,9 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
         "asset_id": asset_id,
         "spec": spec,
         "space_design_ids": space_design_ids,
+        "functional_targets": functional_targets,
+        "triggers_functional_cell_id": triggers_functional_cell_id,
+        "triggers_functional": triggers_functional,
         "live_url": live_url,
         "has_live": store.exists(board_id, live_rel),
         "history": history,

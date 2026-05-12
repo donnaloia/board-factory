@@ -358,12 +358,24 @@
           ${spec.kind === "space"
             ? (() => {
                 const sk = spec.space_kind || "standard";
+                const ft = Array.isArray(data.functional_targets) ? data.functional_targets : [];
+                const noneSel = !data.triggers_functional_cell_id ? " selected" : "";
+                const opts = ft.map(f => {
+                  const sel = data.triggers_functional_cell_id === f.cell_id ? " selected" : "";
+                  return `<option value="${escapeAttr(f.cell_id)}"${sel}>${escapeHtml(f.id)}</option>`;
+                }).join("");
                 return `<dt>Space kind</dt><dd class="space-kind-dd">
                   <select data-space-kind aria-label="Space kind">
                     <option value="standard" ${sk === "event" ? "" : "selected"}>Standard track</option>
                     <option value="event" ${sk === "event" ? "selected" : ""}>Event / special</option>
                   </select>
                   <p class="muted space-kind-hint">Framing for generation — applies to every board cell that uses this design.</p>
+                </dd>
+                <dt>Land trigger</dt><dd class="land-trigger-dd">
+                  <select data-land-trigger aria-label="On land, trigger functional cell">
+                    <option value=""${noneSel}>None</option>${opts}
+                  </select>
+                  <p class="muted land-trigger-hint">Per design — all tiles using this design share the link. Used for project export <code>interaction_graph</code>.</p>
                 </dd>`;
               })()
             : ""}
@@ -550,6 +562,33 @@
           alert("Network error: " + err);
         } finally {
           spaceKindEl.disabled = false;
+          await refreshPanel();
+        }
+      });
+    }
+
+    const landTriggerEl = panel.querySelector("[data-land-trigger]");
+    if (landTriggerEl && current.category === "spaces") {
+      landTriggerEl.addEventListener("change", async () => {
+        const raw = landTriggerEl.value;
+        const value = raw === "" ? null : raw;
+        landTriggerEl.disabled = true;
+        try {
+          const res = await fetch(
+            `${BPATH}/api/cell/${current.category}/${current.asset_id}`,
+            {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json", Accept: "application/json" },
+              body: JSON.stringify({ triggers_functional_cell_id: value }),
+            },
+          );
+          if (!res.ok) {
+            alert("Could not save land trigger: " + (await res.text()).slice(0, 200));
+          }
+        } catch (err) {
+          alert("Network error: " + err);
+        } finally {
+          landTriggerEl.disabled = false;
           await refreshPanel();
         }
       });

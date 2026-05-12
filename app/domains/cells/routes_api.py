@@ -1,7 +1,7 @@
 """HTTP routes for the cells domain under ``/users/.../board-games/...``.
 
   * GET    – read the side-panel payload for one cell
-  * PATCH  – update mutable per-cell metadata (currently `space_kind`)
+  * PATCH  – update mutable per-cell metadata (`space_kind`, `triggers_functional_cell_id`)
   * POST   – promote a history file to live for one cell
 """
 
@@ -39,13 +39,44 @@ async def _api_patch_cell(
     if category != "spaces":
         raise HTTPException(400, "Only perimeter spaces support PATCH metadata.")
     body = await request.json()
-    space_kind = body.get("space_kind")
-    if space_kind not in ("standard", "event"):
+    if not isinstance(body, dict):
+        raise HTTPException(400, "JSON body must be an object")
+    has_space_kind = "space_kind" in body
+    has_triggers = "triggers_functional_cell_id" in body
+    if not has_space_kind and not has_triggers:
         raise HTTPException(
             400,
-            'JSON body must include "space_kind": "standard" or "event"',
+            'JSON body must include at least one of: "space_kind", '
+            '"triggers_functional_cell_id"',
         )
-    if not cells_repo.update_space_kind(board_id, asset_id, space_kind):
+    if has_space_kind:
+        sk = body["space_kind"]
+        if sk not in ("standard", "event"):
+            raise HTTPException(
+                400,
+                '"space_kind" must be "standard" or "event" when present',
+            )
+    if has_triggers:
+        tid = body["triggers_functional_cell_id"]
+        if tid is not None and not isinstance(tid, str):
+            raise HTTPException(
+                400,
+                '"triggers_functional_cell_id" must be a string UUID or null',
+            )
+    try:
+        ok = cells_repo.patch_space_cell_metadata(
+            board_id,
+            asset_id,
+            space_kind=body.get("space_kind") if has_space_kind else None,
+            update_space_kind=has_space_kind,
+            triggers_functional_cell_id=body.get("triggers_functional_cell_id")
+            if has_triggers
+            else None,
+            update_triggers=has_triggers,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    if not ok:
         raise HTTPException(404, f"Unknown space design: {asset_id}")
     return JSONResponse(deps.build_cell_side_panel_payload(board_id, category, asset_id))
 

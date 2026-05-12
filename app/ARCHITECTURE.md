@@ -109,6 +109,8 @@ cross-cutting code that doesn't belong to any one domain:
 * `infrastructure/deps` — Auth guards, board URL resolution, template context
                       dicts, job enqueue, side-panel JSON builders, etc. Used by
                       every domain router; not a route table.
+* `exporter/` — **Geometry**, **`interaction_graph`**, **asset wiring**, **polish**, **``project.json``**;
+                      **GET** ``…/export/project-bundle.zip`` lives on **boards** routes (temp zip, no exporter routes). See ``docs/project-export-spec.md`` §9.
 
 ## Composition root
 

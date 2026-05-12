@@ -6,13 +6,16 @@ import base64
 import io
 import json as _json_std
 import os
+import shutil
+import tempfile
 from dataclasses import replace
 from functools import partial
+from pathlib import Path
 from typing import Literal
 
 import httpx
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 from PIL import Image, ImageChops
 from pydantic import BaseModel, field_validator
 
@@ -30,6 +33,8 @@ from domains.boards import services as svc_boards
 from domains.cells import services as svc_cells
 from assets import services as asset_urls
 from domains.boards import mockup_prompt as mockup_prompt_svc
+from exporter import run_board_export
+from exporter.state import BoardExportOptions
 from infrastructure import board_store as bs
 from infrastructure.files import workspace as fs_ws
 
@@ -1206,6 +1211,40 @@ async def _action_export(request: Request, board_id: str) -> JSONResponse | Redi
 @router.post("/users/{username}/board-games/{path_slug}/actions/export")
 async def action_export_nested(request: Request, board_id: NestedBoardId):
     return await _action_export(request, board_id)
+
+
+@router.get("/users/{username}/board-games/{path_slug}/export/project-bundle.zip")
+def download_project_bundle_zip(board_id: NestedBoardId):
+    """Portable ``project.json`` + ``assets/`` via ``app/exporter``.
+
+    The bundle tree and intermediate zip exist only inside a process-local
+    ``tempfile.TemporaryDirectory``; the handler returns bytes in memory after
+    the directory is destroyed (no accumulation under the board store).
+
+    This is **not** the pipeline ``POST …/actions/export`` (approved tiles to
+    ``export/``); that job stays separate.
+    """
+    cat = deps.load_board_catalog(board_id)
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        res = run_board_export(
+            board_id,
+            cat,
+            options=BoardExportOptions(store=bs.get_store(), bundle_root=root),
+        )
+        if not res.ok:
+            raise HTTPException(422, detail={"export_errors": list(res.errors)})
+        arc_path = shutil.make_archive(str(root / "bundle"), "zip", root_dir=str(root))
+        data = Path(arc_path).read_bytes()
+    safe = board_id.replace("-", "")[:12] or "board"
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="project-export-{safe}.zip"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 async def _action_regen_one(
