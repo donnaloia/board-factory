@@ -17,8 +17,8 @@ from __future__ import annotations
 import html
 from typing import Iterable
 
-from domains.cells.geometry import resolve_position
-from domains.cells.status import CellStatus
+from domains.spaces.geometry import resolve_position
+from domains.spaces.status import CellStatus
 
 
 # ────────────────────────── SVG helpers ──────────────────────────

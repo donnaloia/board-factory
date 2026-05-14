@@ -310,9 +310,12 @@ For the backend internals, see [docs/architecture.md](docs/architecture.md) and 
 | `make protect-keys`   | `git update-index --skip-worktree` on `docker-compose.yml`             |
 | `make unprotect-keys` | Undo protect-keys                                                      |
 | `make test`           | Run pytest inside **board-factory** (container must be up)             |
+| `make test-pipeline`  | Pipeline-only pytest (no app DB fixture) inside **board-factory**      |
 | `make db-upgrade`     | `alembic upgrade head` (same DB URL as the app)                        |
 | `make db-current`     | Show current Alembic revision                                          |
 | `make db-stamp`       | Set `alembic_version` to `0001_full_schema` (via Postgres; needed after squashing migration files) |
+
+**Tests:** Always run **`app/tests/`** via **`make test`** (or the same `docker compose exec …` invocation the Makefile uses). Host-side `pytest` is unsupported: the suite expects Postgres, `BOARDFACTORY_DATABASE_URL`, and `PYTHONPATH` as in Compose.
 
 
 ## Configuration

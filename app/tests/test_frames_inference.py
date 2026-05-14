@@ -34,6 +34,13 @@ def test_morph_close_fills_one_pixel_gap():
     assert out.getpixel((7, 2)) == 255
 
 
+def test_bbox_area_fraction():
+    from boardfactory import frames_inference as fi
+
+    assert fi.bbox_area_fraction((0, 0, 100, 100), (100, 100)) == 1.0
+    assert fi.bbox_area_fraction((25, 25, 75, 75), (100, 100)) == 0.25
+
+
 def test_grid_snap_bbox_rounds_outward_at_lower_right():
     from boardfactory import frames_inference as fi
 
@@ -65,6 +72,7 @@ def test_candidate_from_outer_inner_round_trip_matches_ring():
 
     cand = fi.candidate_from_outer_inner(
         source_size=size, outer=outer, inner=inner,
+        hole_expand_px=0,
     )
     assert cand.bbox[0] == 0 and cand.bbox[1] == 0
     assert cand.bbox[2] == 64 and cand.bbox[3] == 64

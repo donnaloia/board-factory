@@ -4,15 +4,14 @@
 // from /events/jobs SSE; we never open a second EventSource here.
 //
 // Phases:
-//   1. Propose — pick a source (panel / mockup / upload), POST /api/frame/propose,
+//   1. Propose — pick a source (panel / upload), POST /api/frame/propose,
 //      consume vision-job progress, then GET /api/frame/proposals/<job_id> to
 //      hydrate the candidate list.
-//   2. Refine — show the chosen candidate's overlay over the source image,
-//      offer a ring-thickness slider that drives a live preview at typical
-//      panel size (the existing /api/frame/preview.png endpoint stays the
-//      source of truth so the rim renders the same way the compositor would).
+//   2. Refine — overlay + draggable corner handles → POST /api/frame/refine
+//      (``frames_inference.fit_to_window``); ring slider + preview at typical size.
 //   3. Commit — POST /api/frame/commit with the selected candidate +
-//      ring_px, optionally enable + enqueue frame.reapply (Approach D),
+//      ring_px, optionally enable + enqueue frame.reapply (Approach D)
+//      or frame.reapply_one for the source panel only (then redirect to board),
 //      then surface batch progress per panel via the same SSE bus.
 
 (function () {
@@ -27,6 +26,10 @@
   const typicalW = parseInt(root.dataset.typicalW, 10) || 260;
   const typicalH = parseInt(root.dataset.typicalH, 10) || 240;
   const nPanels = parseInt(root.dataset.nPanels, 10) || 0;
+  const batchUsd = parseFloat(root.dataset.reapplyBatchUsd || "0");
+  const batchSec = parseInt(root.dataset.reapplyBatchSec || "0", 10);
+  const singleUsd = parseFloat(root.dataset.reapplySingleUsd || "0");
+  const singleSec = parseInt(root.dataset.reapplySingleSec || "0", 10);
 
   const dom = {
     phases: root.querySelectorAll(".atelier-phases .phase"),
@@ -50,8 +53,11 @@
     rerunVision: root.querySelector("[data-rerun-vision]"),
     stageSource: root.querySelector("[data-stage-source]"),
     stageOverlay: root.querySelector("[data-stage-overlay]"),
+    bboxOutline: root.querySelector("[data-bbox-outline]"),
+    stageFrame: root.querySelector(".atelier-stage-frame"),
     stageHandles: root.querySelector("[data-stage-handles]"),
     toggleOverlay: root.querySelector("[data-toggle-overlay]"),
+    maskDiagnostic: root.querySelector("[data-mask-diagnostic]"),
     snapToGrid: root.querySelector("[data-snap-to-grid]"),
     ringSlider: root.querySelector("[data-ring-slider]"),
     ringValue: root.querySelector("[data-ring-value]"),
@@ -62,12 +68,16 @@
     previewImg: root.querySelector("[data-preview-img]"),
     enableAfter: root.querySelector("[data-enable-after]"),
     regenPanels: root.querySelector("[data-regen-panels]"),
+    regenSingleWrap: root.querySelector("[data-regen-single-wrap]"),
+    regenSinglePanel: root.querySelector("[data-regen-single-panel]"),
     commit: root.querySelector("[data-commit]"),
     commitCostEst: root.querySelector("[data-commit-cost-est]"),
     progressTitle: root.querySelector("[data-progress-title]"),
     progressSummary: root.querySelector("[data-progress-summary]"),
     progressBar: root.querySelector("[data-progress-bar]"),
     progressGrid: root.querySelector("[data-progress-grid]"),
+    progressEyebrow: root.querySelector("[data-progress-eyebrow]"),
+    progressCard: root.querySelector("[data-progress-card]"),
     cancelRegen: root.querySelector("[data-cancel-regen]"),
     progressDone: root.querySelector("[data-progress-done]"),
     disable: root.querySelector("[data-disable]"),
@@ -85,14 +95,40 @@
     showOverlay: true,
     ringPx: defaultRing,
     regenJobId: null,
+    regenRedirectToBoard: false,
     panelStates: new Map(),      // panel_id -> "queued" | "running" | "done" | "failed"
+    overlayUrl: null,
+    dragSession: null,           // { handle, opp, startBBox, previewUrl, previewRingPx }
   };
+
+  if (dom.toggleOverlay && state.showOverlay) {
+    dom.toggleOverlay.textContent = "Hide rim/hole overlay";
+  }
 
   const fmtMoney = (n) => {
     if (!n) return "free";
     if (n < 0.01) return "$" + n.toFixed(4);
     return "$" + n.toFixed(2);
   };
+
+  /** Server seconds → ``est 5 min`` / ``est 45s`` (matches commit-adopt pill format). */
+  function fmtEstDuration(sec) {
+    const s = Math.max(0, parseInt(sec, 10) || 0);
+    if (s === 0) return "est 0s";
+    if (s < 90) return `est ${s}s`;
+    const min = Math.ceil(s / 60);
+    return `est ${min} min`;
+  }
+
+  /** ``$0.54 total · est 5 min`` — or ``free · est …`` when cost is zero. */
+  function commitEstLine(usd, sec) {
+    const time = fmtEstDuration(sec);
+    const money = fmtMoney(usd);
+    if (money === "free") {
+      return `free · ${time}`;
+    }
+    return `${money} total · ${time}`;
+  }
 
   // Convenience for the "do you have a key?" copy.
   const visionAvailable = () => hasOpenAIKey && dom.useVision.checked;
@@ -122,8 +158,19 @@
         g.hidden = g.dataset.sourceGrid !== which;
       });
       state.activeTab = which;
+      syncRegenSingleOption();
     });
   });
+
+  function syncRegenSingleOption() {
+    if (!dom.regenSingleWrap || !dom.regenSinglePanel) return;
+    const isPanel = Boolean(
+      state.selectedSource && state.selectedSource.kind === "functional"
+        && state.activeTab === "panel",
+    );
+    dom.regenSingleWrap.hidden = !isPanel;
+    if (!isPanel) dom.regenSinglePanel.checked = false;
+  }
 
   // ─────────── source selection ───────────
 
@@ -144,10 +191,12 @@
         };
         dom.runVision.disabled = false;
         updateVisionCostEstimate();
+        syncRegenSingleOption();
       });
     });
   }
   wireSourceCards();
+  syncRegenSingleOption();
 
   function updateVisionCostEstimate() {
     if (!visionAvailable() || !state.selectedSource) {
@@ -231,6 +280,7 @@
       };
       dom.runVision.disabled = false;
       updateVisionCostEstimate();
+      syncRegenSingleOption();
     });
   }
 
@@ -340,6 +390,11 @@
   // ─────────── refine ───────────
 
   function enterRefinePhase(manifest) {
+    hide(dom.visionStatus);
+    dom.runVision.disabled = false;
+    dom.visionBar.classList.remove("indeterminate");
+    dom.visionBar.style.right = "100%";
+
     show(dom.refinePane);
     show(dom.commitPane);
     setActivePhase("refine");
@@ -383,13 +438,7 @@
       dom.stageSource.src = state.selectedSource.url;
     }
     if (cand.preview_url) {
-      // Layer the candidate overlay PNG above the source. We use a single
-      // <img> for now (the canvas is reserved for handle drag previews
-      // once Phase B ships).
-      dom.stageOverlay.style.backgroundImage = `url(${cand.preview_url})`;
-      dom.stageOverlay.style.backgroundSize = "contain";
-      dom.stageOverlay.style.backgroundRepeat = "no-repeat";
-      dom.stageOverlay.style.backgroundPosition = "center";
+      paintOverlayFromUrl(cand.preview_url);
     }
     dom.metaSource.textContent =
       `${state.selectedSource.kind}:${state.selectedSource.id}`;
@@ -400,6 +449,7 @@
 
     refreshPreview();
     refreshCommitEstimate();
+    positionHandles();
   }
 
   function clampRing(v) {
@@ -409,29 +459,165 @@
   }
 
   let previewTimer = null;
+  let ringOverlayTimer = null;
+  /** Bumped when ring slider schedules sync or user grabs a handle — stale async completes ignore. */
+  let ringSyncToken = 0;
+
+  function mergeRefineResponse(data) {
+    const cand = state.candidates.find((c) => c.index === state.activeCandidateIndex);
+    if (!cand || !data.bbox) return;
+    cand.bbox = data.bbox;
+    if (typeof data.ring_px === "number") {
+      cand.ring_px = data.ring_px;
+      state.ringPx = clampRing(data.ring_px);
+      dom.ringSlider.value = String(state.ringPx);
+      dom.ringValue.textContent = state.ringPx;
+    }
+    if (data.notes != null) cand.notes = data.notes;
+    if (data.preview_url) {
+      cand.preview_url = data.preview_url;
+      paintOverlayFromUrl(data.preview_url);
+    }
+    refreshCandidateListThumb();
+    refreshPreview();
+  }
+
+  async function postRefine(bbox, { quiet } = { quiet: false }) {
+    if (
+      state.proposalJobId == null
+      || state.activeCandidateIndex === null
+      || !state.selectedSource
+    ) {
+      return null;
+    }
+    let res;
+    try {
+      res = await fetch(`${boardBase}/api/frame/refine`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          job_id: state.proposalJobId,
+          candidate_index: state.activeCandidateIndex,
+          bbox,
+          source_kind: state.selectedSource.kind,
+          source_id: state.selectedSource.id,
+          ring_px: state.ringPx,
+        }),
+      });
+    } catch (e) {
+      if (!quiet) alert("Could not save: " + e);
+      return null;
+    }
+    if (!res.ok) {
+      const errText = await res.text();
+      if (!quiet) {
+        alert("Could not save: " + errText);
+      } else {
+        dom.ringValue.setAttribute("title", errText.slice(0, 200) || "Ring refine failed");
+      }
+      return null;
+    }
+    dom.ringValue.removeAttribute("title");
+    return res.json();
+  }
+
+  async function runRingOverlaySync(expectedToken) {
+    if (state.dragSession) return;
+    if (state.proposalJobId == null || state.activeCandidateIndex === null) return;
+    const cand = state.candidates.find((c) => c.index === state.activeCandidateIndex);
+    if (!cand || !cand.bbox) return;
+    if (dom.stageFrame) dom.stageFrame.classList.add("is-ring-syncing");
+    try {
+      const data = await postRefine(cand.bbox, { quiet: true });
+      if (expectedToken !== ringSyncToken) return;
+      if (data) mergeRefineResponse(data);
+    } finally {
+      if (expectedToken === ringSyncToken && dom.stageFrame) {
+        dom.stageFrame.classList.remove("is-ring-syncing");
+      }
+    }
+  }
+
+  function scheduleRingOverlaySync() {
+    const token = ++ringSyncToken;
+    if (ringOverlayTimer) clearTimeout(ringOverlayTimer);
+    ringOverlayTimer = setTimeout(() => {
+      ringOverlayTimer = null;
+      runRingOverlaySync(token);
+    }, 380);
+  }
+
+  function cancelPendingRingOverlaySync() {
+    ringSyncToken++;
+    if (ringOverlayTimer) {
+      clearTimeout(ringOverlayTimer);
+      ringOverlayTimer = null;
+    }
+    if (dom.stageFrame) dom.stageFrame.classList.remove("is-ring-syncing");
+  }
+
   dom.ringSlider.addEventListener("input", () => {
     state.ringPx = clampRing(dom.ringSlider.value);
     dom.ringValue.textContent = state.ringPx;
     if (previewTimer) clearTimeout(previewTimer);
     previewTimer = setTimeout(refreshPreview, 120);
+    scheduleRingOverlaySync();
   });
 
+  let previewFetchGen = 0;
+
   function refreshPreview() {
-    if (!state.selectedSource) return;
-    const url = `${boardBase}/api/frame/preview.png`
-      + `?source_kind=${encodeURIComponent(state.selectedSource.kind)}`
+    if (!state.selectedSource || !dom.previewImg) return;
+    const gen = ++previewFetchGen;
+    let q = `?source_kind=${encodeURIComponent(state.selectedSource.kind)}`
       + `&source_id=${encodeURIComponent(state.selectedSource.id)}`
       + `&ring_px=${state.ringPx}`
       + `&w=${typicalW}&h=${typicalH}`
       + `&t=${Date.now()}`;
-    dom.previewImg.src = url;
+    if (state.proposalJobId && state.activeCandidateIndex !== null) {
+      q += `&job_id=${encodeURIComponent(state.proposalJobId)}`
+        + `&candidate_index=${encodeURIComponent(state.activeCandidateIndex)}`;
+    }
+    const bboxCand =
+      state.activeCandidateIndex !== null
+        ? state.candidates.find((c) => c.index === state.activeCandidateIndex)
+        : null;
+    if (
+      bboxCand && Array.isArray(bboxCand.bbox) && bboxCand.bbox.length === 4
+    ) {
+      const [bx1, by1, bx2, by2] = bboxCand.bbox;
+      q += `&x1=${encodeURIComponent(bx1)}&y1=${encodeURIComponent(by1)}`
+        + `&x2=${encodeURIComponent(bx2)}&y2=${encodeURIComponent(by2)}`;
+    }
+    if (dom.maskDiagnostic && dom.maskDiagnostic.checked) {
+      q += "&mask_diagnostic=1";
+    }
+    const url = `${boardBase}/api/frame/preview.png${q}`;
+    fetch(url, { cache: "no-store", credentials: "same-origin" })
+      .then((res) => {
+        if (gen !== previewFetchGen) return null;
+        return res.ok ? res.blob() : null;
+      })
+      .then((blob) => {
+        if (!blob || gen !== previewFetchGen) return;
+        const prev = dom.previewImg.dataset.objectUrl;
+        if (prev) URL.revokeObjectURL(prev);
+        const ou = URL.createObjectURL(blob);
+        dom.previewImg.dataset.objectUrl = ou;
+        dom.previewImg.src = ou;
+      })
+      .catch(() => {});
+  }
+
+  if (dom.maskDiagnostic) {
+    dom.maskDiagnostic.addEventListener("change", () => refreshPreview());
   }
 
   // Overlay toggle.
   dom.toggleOverlay.addEventListener("click", () => {
     state.showOverlay = !state.showOverlay;
     dom.toggleOverlay.classList.toggle("is-active", state.showOverlay);
-    dom.toggleOverlay.textContent = state.showOverlay ? "Show overlay" : "Hide overlay";
+    dom.toggleOverlay.textContent = state.showOverlay ? "Hide rim/hole overlay" : "Show rim/hole overlay";
     dom.stageOverlay.classList.toggle("is-hidden", !state.showOverlay);
   });
 
@@ -443,26 +629,212 @@
     dom.runVision.disabled = false;
   });
 
-  // Handles. For now they only show the stored candidate's bbox; full
-  // drag-to-edit lands in Phase B (the ``frames_inference.fit_to_window``
-  // helper is already in place server-side for that).
-  function positionHandles() {
+  function syncOverlayCanvasLayout() {
+    if (!dom.stageOverlay || !dom.stageSource || !dom.stageFrame) return;
+    const fr = dom.stageFrame.getBoundingClientRect();
+    const ir = dom.stageSource.getBoundingClientRect();
+    dom.stageOverlay.style.left = `${ir.left - fr.left}px`;
+    dom.stageOverlay.style.top = `${ir.top - fr.top}px`;
+    dom.stageOverlay.style.width = `${ir.width}px`;
+    dom.stageOverlay.style.height = `${ir.height}px`;
+  }
+
+  function paintOverlayFromUrl(url) {
+    state.overlayUrl = url;
+    if (!url || !dom.stageOverlay || !dom.stageSource) return;
+    const canvas = dom.stageOverlay;
+    if (!canvas.getContext) return;
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      syncOverlayCanvasLayout();
+      const rect = dom.stageSource.getBoundingClientRect();
+      const w = rect.width;
+      const h = rect.height;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      positionHandles();
+    };
+    img.onerror = () => {};
+    img.src = url;
+  }
+
+  function snapCoord(v) {
+    const g = dom.snapToGrid && dom.snapToGrid.checked ? 4 : 1;
+    return Math.round(v / g) * g;
+  }
+
+  function clientToSource(clientX, clientY) {
+    const ir = dom.stageSource.getBoundingClientRect();
+    const sw = state.selectedSource.w;
+    const sh = state.selectedSource.h;
+    return {
+      x: ((clientX - ir.left) / ir.width) * sw,
+      y: ((clientY - ir.top) / ir.height) * sh,
+    };
+  }
+
+  function oppositeCorner(handle, bbox) {
+    const [x1, y1, x2, y2] = bbox;
+    if (handle === "tl") return [x2, y2];
+    if (handle === "tr") return [x1, y2];
+    if (handle === "bl") return [x2, y1];
+    return [x1, y1];
+  }
+
+  function bboxForHandleDrag(handle, nx, ny, opp, sw, sh) {
+    const rp = state.ringPx;
+    const minW = Math.min(2 * rp + 4, sw);
+    const minH = Math.min(2 * rp + 4, sh);
+    const [ox, oy] = opp;
+    let x1; let y1; let x2; let y2;
+    if (handle === "tl") {
+      x2 = ox; y2 = oy;
+      x1 = snapCoord(Math.min(nx, x2 - minW));
+      y1 = snapCoord(Math.min(ny, y2 - minH));
+    } else if (handle === "tr") {
+      x1 = ox; y2 = oy;
+      x2 = snapCoord(Math.max(nx, x1 + minW));
+      y1 = snapCoord(Math.min(ny, y2 - minH));
+    } else if (handle === "bl") {
+      x2 = ox; y1 = oy;
+      x1 = snapCoord(Math.min(nx, x2 - minW));
+      y2 = snapCoord(Math.max(ny, y1 + minH));
+    } else {
+      x1 = ox; y1 = oy;
+      x2 = snapCoord(Math.max(nx, x1 + minW));
+      y2 = snapCoord(Math.max(ny, y1 + minH));
+    }
+    x1 = Math.max(0, Math.min(sw - minW, x1));
+    y1 = Math.max(0, Math.min(sh - minH, y1));
+    x2 = Math.max(x1 + minW, Math.min(sw, x2));
+    y2 = Math.max(y1 + minH, Math.min(sh, y2));
+    return [
+      Math.round(x1), Math.round(y1), Math.round(x2), Math.round(y2),
+    ];
+  }
+
+  async function persistRefineBBox(bbox) {
+    const data = await postRefine(bbox, { quiet: false });
+    if (!data) return false;
+    mergeRefineResponse(data);
+    return true;
+  }
+
+  function refreshCandidateListThumb() {
+    const cand = state.candidates.find((c) => c.index === state.activeCandidateIndex);
+    if (!cand || !cand.preview_url) return;
+    const li = dom.candidateList.querySelector(`li[data-candidate-index="${cand.index}"]`);
+    const thumb = li && li.querySelector(".cand-thumb img");
+    if (thumb) thumb.src = cand.preview_url;
+  }
+
+  function onHandlePointerMove(ev) {
+    const sess = state.dragSession;
+    if (!sess || !state.selectedSource) return;
+    const sw = state.selectedSource.w;
+    const sh = state.selectedSource.h;
+    const { x, y } = clientToSource(ev.clientX, ev.clientY);
+    const next = bboxForHandleDrag(sess.handle, x, y, sess.opp, sw, sh);
+    const cand = state.candidates.find((c) => c.index === state.activeCandidateIndex);
+    if (cand) cand.bbox = next;
+    positionHandles();
+  }
+
+  async function onHandlePointerUp(ev) {
+    const sess = state.dragSession;
+    state.dragSession = null;
+    try {
+      ev.currentTarget.releasePointerCapture(ev.pointerId);
+    } catch (_e) {
+      /* ignore */
+    }
+    ev.currentTarget.removeEventListener("pointermove", onHandlePointerMove);
+    ev.currentTarget.removeEventListener("pointerup", onHandlePointerUp);
+    ev.currentTarget.removeEventListener("pointercancel", onHandlePointerUp);
+
+    if (!sess) return;
+    const cand = state.candidates.find((c) => c.index === state.activeCandidateIndex);
+    if (!cand) return;
+    const same = cand.bbox.every((v, i) => v === sess.startBBox[i]);
+    if (same) return;
+    dom.stageHandles.classList.add("is-busy");
+    const ok = await persistRefineBBox(cand.bbox);
+    dom.stageHandles.classList.remove("is-busy");
+    if (!ok) {
+      cand.bbox = sess.startBBox;
+      state.ringPx = sess.previewRingPx;
+      dom.ringSlider.value = String(state.ringPx);
+      dom.ringValue.textContent = state.ringPx;
+      if (sess.previewUrl) paintOverlayFromUrl(sess.previewUrl);
+      positionHandles();
+    }
+  }
+
+  function onHandlePointerDown(ev) {
+    if (ev.button !== 0) return;
+    const handle = ev.currentTarget.dataset.handle;
+    const cand = state.candidates.find((c) => c.index === state.activeCandidateIndex);
+    if (!cand || !state.selectedSource || !handle) return;
+    ev.preventDefault();
+    cancelPendingRingOverlaySync();
+    const bbox = [...cand.bbox];
+    const opp = oppositeCorner(handle, bbox);
+    state.dragSession = {
+      handle,
+      opp,
+      startBBox: bbox,
+      previewUrl: cand.preview_url,
+      previewRingPx: state.ringPx,
+    };
+    ev.currentTarget.setPointerCapture(ev.pointerId);
+    ev.currentTarget.addEventListener("pointermove", onHandlePointerMove);
+    ev.currentTarget.addEventListener("pointerup", onHandlePointerUp);
+    ev.currentTarget.addEventListener("pointercancel", onHandlePointerUp);
+  }
+
+  function wireHandleDrag() {
     if (!dom.stageHandles) return;
+    dom.stageHandles.querySelectorAll(".handle").forEach((el) => {
+      el.addEventListener("pointerdown", onHandlePointerDown);
+    });
+  }
+
+  /** Corner handles — drag to resize bbox; persisted via ``POST /api/frame/refine``. */
+  function positionHandles() {
+    if (!dom.stageHandles || !dom.stageFrame || !dom.stageSource) return;
     const cand = state.candidates.find((c) => c.index === state.activeCandidateIndex);
     if (!cand || !state.selectedSource) {
       dom.stageHandles.style.display = "none";
+      if (dom.bboxOutline) dom.bboxOutline.style.display = "none";
       return;
     }
     dom.stageHandles.style.display = "";
-    const box = dom.stageSource.getBoundingClientRect();
+    syncOverlayCanvasLayout();
+    const fr = dom.stageFrame.getBoundingClientRect();
+    const ir = dom.stageSource.getBoundingClientRect();
+    const offLeft = ir.left - fr.left;
+    const offTop = ir.top - fr.top;
     const sw = state.selectedSource.w;
     const sh = state.selectedSource.h;
-    if (!sw || !sh) return;
+    if (!sw || !sh) {
+      if (dom.bboxOutline) dom.bboxOutline.style.display = "none";
+      return;
+    }
     const [x1, y1, x2, y2] = cand.bbox;
-    const sx = box.width / sw;
-    const sy = box.height / sh;
+    const sx = ir.width / sw;
+    const sy = ir.height / sh;
 
-    const px = (x, y) => `translate(${(x * sx).toFixed(1)}px, ${(y * sy).toFixed(1)}px)`;
+    const px = (x, y) =>
+      `translate(${(offLeft + x * sx).toFixed(1)}px, ${(offTop + y * sy).toFixed(1)}px)`;
     const tl = dom.stageHandles.querySelector(".handle-tl");
     const tr = dom.stageHandles.querySelector(".handle-tr");
     const bl = dom.stageHandles.querySelector(".handle-bl");
@@ -471,33 +843,77 @@
     if (tr) tr.style.transform = `${px(x2, y1)}`;
     if (bl) bl.style.transform = `${px(x1, y2)}`;
     if (br) br.style.transform = `${px(x2, y2)}`;
+
+    /* Dashed outline is only the axis-aligned *crop window*, not the rim silhouette.
+       When the pink/cyan vision overlay is on, hide it so the organic masks read clearly. */
+    if (dom.bboxOutline) {
+      if (state.showOverlay) {
+        dom.bboxOutline.style.display = "none";
+      } else {
+        dom.bboxOutline.style.display = "block";
+        dom.bboxOutline.style.left = `${offLeft + x1 * sx}px`;
+        dom.bboxOutline.style.top = `${offTop + y1 * sy}px`;
+        dom.bboxOutline.style.width = `${Math.max(0, (x2 - x1) * sx)}px`;
+        dom.bboxOutline.style.height = `${Math.max(0, (y2 - y1) * sy)}px`;
+      }
+    }
   }
 
+  wireHandleDrag();
+
   if (dom.stageSource) {
-    dom.stageSource.addEventListener("load", positionHandles);
-    window.addEventListener("resize", positionHandles);
+    dom.stageSource.addEventListener("load", () => {
+      if (state.overlayUrl) paintOverlayFromUrl(state.overlayUrl);
+      else positionHandles();
+    });
+    window.addEventListener("resize", () => {
+      if (state.overlayUrl) paintOverlayFromUrl(state.overlayUrl);
+      else positionHandles();
+    });
+  }
+
+  if (dom.snapToGrid) {
+    dom.snapToGrid.addEventListener("change", () => {
+      if (state.dragSession) return;
+      positionHandles();
+    });
   }
 
   // ─────────── commit ───────────
 
   function refreshCommitEstimate() {
     if (!nPanels) {
-      dom.commitCostEst.textContent = "free · 0 panels";
+      dom.commitCostEst.textContent = "free · —";
+      return;
+    }
+    if (dom.regenSinglePanel && dom.regenSinglePanel.checked) {
+      dom.commitCostEst.textContent = commitEstLine(singleUsd, singleSec);
       return;
     }
     if (!dom.regenPanels.checked) {
       dom.commitCostEst.textContent = "free · adopt only";
       return;
     }
-    const perPanel = 0.022;     // mirror estimate_generate_one("panels")
-    dom.commitCostEst.textContent = `${fmtMoney(perPanel * nPanels)} · ${nPanels} panel${nPanels === 1 ? "" : "s"}`;
+    dom.commitCostEst.textContent = commitEstLine(batchUsd, batchSec);
   }
-  dom.regenPanels.addEventListener("change", refreshCommitEstimate);
+  dom.regenPanels.addEventListener("change", () => {
+    if (dom.regenPanels.checked && dom.regenSinglePanel) dom.regenSinglePanel.checked = false;
+    refreshCommitEstimate();
+  });
+  if (dom.regenSinglePanel) {
+    dom.regenSinglePanel.addEventListener("change", () => {
+      if (dom.regenSinglePanel.checked) dom.regenPanels.checked = false;
+      refreshCommitEstimate();
+    });
+  }
   refreshCommitEstimate();
 
   dom.commit.addEventListener("click", async () => {
     if (!state.selectedSource) return;
     dom.commit.disabled = true;
+    const singlePanel =
+      Boolean(dom.regenSinglePanel && dom.regenSinglePanel.checked)
+      && state.selectedSource && state.selectedSource.kind === "functional";
     const body = {
       source_kind: state.selectedSource.kind,
       source_id: state.selectedSource.id,
@@ -505,7 +921,8 @@
       job_id: state.proposalJobId || null,
       candidate_index: state.activeCandidateIndex !== null ? state.activeCandidateIndex : null,
       enable_after: dom.enableAfter.checked,
-      regen_panels: dom.regenPanels.checked,
+      regen_panels: dom.regenPanels.checked && !singlePanel,
+      regen_single_panel_id: singlePanel ? state.selectedSource.id : null,
     };
     let res;
     try {
@@ -527,6 +944,7 @@
     const data = await res.json();
     if (data.regen_job_id) {
       state.regenJobId = data.regen_job_id;
+      state.regenRedirectToBoard = Boolean(data.regen_single_panel);
       enterProgressPhase();
     } else {
       window.location.reload();
@@ -535,13 +953,83 @@
 
   // ─────────── approach D progress ───────────
 
+  /** Worker logs use ``panels:<id>`` (draw_cell); skip/fail lines use ``panel:<id>``. */
+  function inferPanelCellFromLine(line) {
+    const t = String(line || "").trim();
+    let m = t.match(/^promoted\s+\S+\s+->\s+live\/panels\/([\w/_-]+)/);
+    if (m) return { pid: m[1], st: "done" };
+    m = t.match(/^FAIL\s+panels\/([\w/_-]+)/);
+    if (m) return { pid: m[1], st: "failed" };
+    m = t.match(/^panel:([\w/_-]+)\s+FAILED/i);
+    if (m) return { pid: m[1], st: "failed" };
+    m = t.match(/^skip\s+panel:([\w/_-]+)/);
+    if (m) return { pid: m[1], st: "skipped" };
+    m = t.match(/^panel:([\w/_-]+)\s+skipped/i);
+    if (m) return { pid: m[1], st: "skipped" };
+    m = t.match(/^panel:([\w/_-]+)\s+\(skipped\)/i);
+    if (m) return { pid: m[1], st: "skipped" };
+    m = t.match(/^panels:([\w/_-]+)\s+\(\d+\/\d+\)/);
+    if (m) return { pid: m[1], st: "running" };
+    m = t.match(/^draw\s+panels\/([\w/_-]+)\b/);
+    if (m) return { pid: m[1], st: "running" };
+    return null;
+  }
+
+  function panelCellLabel(st) {
+    switch (st) {
+      case "waiting": return "Waiting…";
+      case "running": return "In progress";
+      case "done": return "Done";
+      case "skipped": return "Skipped";
+      case "failed": return "Failed";
+      default: return st;
+    }
+  }
+
+  function refreshBatchSummary(j) {
+    const done = Array.from(state.panelStates.values()).filter((s) => s === "done").length;
+    const running = Array.from(state.panelStates.values()).filter((s) => s === "running").length;
+    const failed = Array.from(state.panelStates.values()).filter((s) => s === "failed").length;
+    const pct = typeof j.progress === "number" ? Math.round(j.progress * 100) : null;
+    const touched = Array.from(state.panelStates.values()).some((s) => s !== "waiting");
+    if (!touched && (j.status === "queued" || j.status === "running")) {
+      dom.progressSummary.textContent = pct != null && pct > 0
+        ? `Starting batch… ${pct}%`
+        : "Starting batch…";
+      return;
+    }
+    const parts = [`${done} of ${nPanels} done`];
+    if (running) parts.push(`${running} in progress`);
+    if (failed) parts.push(`${failed} failed`);
+    dom.progressSummary.textContent = parts.join(" · ");
+  }
+
+  function resetProgressGridWaiting() {
+    if (!dom.progressGrid || state.regenRedirectToBoard) return;
+    dom.progressGrid.querySelectorAll("[data-panel-id]").forEach((cell) => {
+      const pid = cell.getAttribute("data-panel-id");
+      if (!pid) return;
+      state.panelStates.set(pid, "waiting");
+      cell.classList.remove("is-running", "is-done", "is-failed", "is-skipped");
+      const label = cell.querySelector(".atelier-progress-state");
+      if (label) label.textContent = panelCellLabel("waiting");
+    });
+  }
+
   function enterProgressPhase() {
     setActivePhase("commit");
-    dom.progressTitle.textContent = "Reapplying frame…";
-    dom.progressSummary.textContent = `0 of ${nPanels} panels regenerated.`;
+    const single = state.regenRedirectToBoard;
+    dom.progressTitle.textContent = single ? "Regenerating panel…" : "Reapplying frame…";
+    dom.progressSummary.textContent = single
+      ? "Applying the new frame to this panel…"
+      : "Starting batch…";
     dom.progressBar.classList.add("indeterminate");
     dom.progressBar.style.right = "100%";
     state.panelStates.clear();
+    if (dom.progressEyebrow) dom.progressEyebrow.textContent = single ? "One panel" : "Approach D";
+    if (dom.progressCard) dom.progressCard.classList.toggle("is-single-regen", Boolean(single));
+    if (dom.progressGrid) dom.progressGrid.hidden = Boolean(single);
+    if (!single) resetProgressGridWaiting();
     show(dom.progressOverlay);
     hide(dom.progressDone);
   }
@@ -553,24 +1041,24 @@
         dom.progressBar.classList.remove("indeterminate");
         dom.progressBar.style.right = `${(100 - ratio * 100).toFixed(1)}%`;
       }
+      if (state.regenRedirectToBoard) {
+        dom.progressSummary.textContent = "Applying the new frame to this panel…";
+        return;
+      }
       const tail = j.log_tail || [];
-      const lastFew = tail.slice(-5);
-      // Try to detect "panel:<id>" mentions in the log to flip cell state.
-      lastFew.forEach((line) => {
-        const m = line.match(/panel:([\w/_-]+)/);
-        if (!m) return;
-        const pid = m[1];
-        const stateGuess = /skipped/.test(line) ? "skipped"
-          : /FAIL/.test(line) ? "failed"
-          : /promoted/.test(line) ? "done"
-          : "running";
-        markPanel(pid, stateGuess);
+      tail.forEach((line) => {
+        const hit = inferPanelCellFromLine(line);
+        if (hit) markPanel(hit.pid, hit.st);
       });
-      const done = Array.from(state.panelStates.values()).filter((s) => s === "done").length;
-      dom.progressSummary.textContent = `${done} of ${nPanels} panels regenerated.`;
+      refreshBatchSummary(j);
       return;
     }
     if (j.status === "done") {
+      if (state.regenRedirectToBoard) {
+        const home = boardBase ? `${boardBase.replace(/\/?$/, "")}/` : "/";
+        window.location.href = home;
+        return;
+      }
       dom.progressBar.classList.remove("indeterminate");
       dom.progressBar.style.right = "0%";
       dom.progressTitle.textContent = "Frame applied.";
@@ -579,7 +1067,7 @@
       hide(dom.cancelRegen);
       show(dom.progressDone);
     } else if (j.status === "killed") {
-      dom.progressTitle.textContent = "Reapply cancelled.";
+      dom.progressTitle.textContent = "Regeneration cancelled.";
       hide(dom.cancelRegen);
       show(dom.progressDone);
     } else if (j.status === "failed") {
@@ -592,7 +1080,7 @@
 
   function markPanel(pid, st) {
     state.panelStates.set(pid, st);
-    const cell = dom.progressGrid.querySelector(`[data-panel-id="${CSS.escape(pid)}"]`);
+    const cell = dom.progressGrid && dom.progressGrid.querySelector(`[data-panel-id="${CSS.escape(pid)}"]`);
     if (!cell) return;
     cell.classList.remove("is-running", "is-done", "is-failed", "is-skipped");
     if (st === "running") cell.classList.add("is-running");
@@ -600,7 +1088,20 @@
     if (st === "failed") cell.classList.add("is-failed");
     if (st === "skipped") cell.classList.add("is-skipped");
     const label = cell.querySelector(".atelier-progress-state");
-    if (label) label.textContent = st;
+    if (label) label.textContent = panelCellLabel(st);
+    if (st === "done") {
+      const img = cell.querySelector(".atelier-progress-thumb img");
+      if (img && img.src) {
+        try {
+          const u = new URL(img.src, window.location.href);
+          u.searchParams.set("t", String(Date.now()));
+          img.src = u.toString();
+        } catch {
+          const base = img.src.split("?")[0];
+          img.src = `${base}?t=${Date.now()}`;
+        }
+      }
+    }
   }
 
   dom.cancelRegen.addEventListener("click", async () => {

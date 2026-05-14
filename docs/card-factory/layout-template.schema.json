@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://board-factory.local/schemas/card-layout-template-v1.json",
+  "title": "Card Factory layout template",
+  "description": "Normalized rectangles inside the committed frame's interior hull. Coordinates are fractions of the interior width/height (origin top-left). Pipeline maps roles to masks M_art, M_stats, etc.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "coordinate_space", "regions"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1",
+      "description": "Bump when breaking layout-template semantics change."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$",
+      "description": "Stable id stored as layout_template_id on manifests and deck rows."
+    },
+    "label": {
+      "type": "string",
+      "description": "Human-readable name for UI pickers."
+    },
+    "coordinate_space": {
+      "type": "string",
+      "enum": ["interior_normalized"],
+      "description": "interior_normalized: x,y,width,height are 0..1 fractions of the inner hull bbox."
+    },
+    "regions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "role", "rect"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "description": "Stable within this template; used in logs and manifests."
+          },
+          "role": {
+            "type": "string",
+            "enum": ["illustration", "procedural_stats", "spacer", "reserved"],
+            "description": "illustration → masked AI gen (M_art). procedural_stats → PIL/bitmap text band (M_stats). spacer/reserved → optional gaps or future UI."
+          },
+          "rect": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["x", "y", "width", "height"],
+            "properties": {
+              "x": { "type": "number", "minimum": 0, "maximum": 1 },
+              "y": { "type": "number", "minimum": 0, "maximum": 1 },
+              "width": { "type": "number", "minimum": 0, "maximum": 1 },
+              "height": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          },
+          "typography": {
+            "type": "object",
+            "description": "Hints for procedural_stats regions only; fractions are relative to that region's rect.",
+            "additionalProperties": false,
+            "properties": {
+              "max_lines": { "type": "integer", "minimum": 1, "maximum": 12 },
+              "padding": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "top": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "right": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "bottom": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "left": { "type": "number", "minimum": 0, "maximum": 1 }
+                }
+              },
+              "horizontal_align": {
+                "type": "string",
+                "enum": ["left", "center", "right"]
+              },
+              "vertical_align": {
+                "type": "string",
+                "enum": ["top", "center", "bottom"]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

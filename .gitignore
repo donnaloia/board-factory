@@ -46,4 +46,8 @@ __pycache__/
 boards/.boardfactory.db-journal
 boards/.boardfactory.db-wal
 boards/.boardfactory.db-shm
+# Local only: map DB board_id -> on-disk folder when names differ (see
+# boardfactory.config.board_disk_map). Copy from .board_disk_map.json.example.
+data/boards/.board_disk_map.json
+
 .pytest_cache/

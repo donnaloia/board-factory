@@ -35,13 +35,13 @@ from boardfactory import boards as bf_boards
 from boardfactory.schemas import Catalog
 
 from domains.boards import repository as boards_repo
-from domains.cells.geometry import resolve_position
+from domains.spaces.geometry import resolve_position
 from infrastructure import board_store as bs
 from infrastructure.db import session_scope
 from infrastructure.files import workspace as fs_ws
 from assets.models import AssetVersionRecord
 from domains.boards.models import BoardGameRecord, OwnedBoardRecord
-from domains.cells.models import CellRecord
+from domains.spaces.models import CellRecord
 
 
 # ────────────────────────── exceptions ──────────────────────────
@@ -123,11 +123,11 @@ def _row_to_catalog_dict(row: BoardGameRecord, cells: list[CellRecord]) -> dict[
     }
 
     spaces = sorted(
-        (c for c in cells if c.kind == "space"),
+        (c for c in cells if c.kind == "perimeter"),
         key=lambda c: c.position_index,
     )
     panels = sorted(
-        (c for c in cells if c.kind == "panel"),
+        (c for c in cells if c.kind == "functional"),
         key=lambda c: c.position_index,
     )
     cp_cells = [c for c in cells if c.kind == "centerpiece"]
@@ -222,13 +222,13 @@ def _replace_cells(session, board_id: str, cat: Catalog) -> None:
     desired_keys: set[tuple[str, str]] = set()
 
     for idx, design in enumerate(cat.board_spaces.designs):
-        key = ("space", design.id)
+        key = ("perimeter", design.id)
         desired_keys.add(key)
         existing_row = by_natural_key.get(key)
         if existing_row is None:
             session.add(CellRecord(
                 board_uuid=board_id,
-                kind="space",
+                kind="perimeter",
                 slug=design.id,
                 position_index=idx,
                 prompt=design.prompt,
@@ -242,7 +242,7 @@ def _replace_cells(session, board_id: str, cat: Catalog) -> None:
             existing_row.positions_json = list(design.positions)
 
     for idx, panel in enumerate(cat.feature_panels.panels):
-        key = ("panel", panel.id)
+        key = ("functional", panel.id)
         desired_keys.add(key)
         existing_row = by_natural_key.get(key)
         bx1, by1, bx2, by2 = panel.bbox
@@ -250,7 +250,7 @@ def _replace_cells(session, board_id: str, cat: Catalog) -> None:
         if existing_row is None:
             session.add(CellRecord(
                 board_uuid=board_id,
-                kind="panel",
+                kind="functional",
                 slug=panel.id,
                 position_index=idx,
                 prompt=panel.prompt,
@@ -547,7 +547,7 @@ def reassign_space_position(
         cell_from = session.scalar(
             select(CellRecord).where(
                 CellRecord.board_uuid == board_id,
-                CellRecord.kind == "space",
+                CellRecord.kind == "perimeter",
                 CellRecord.slug == from_design_id,
             )
         )
@@ -654,7 +654,7 @@ def reassign_space_position(
                 cell_new = session.scalar(
                     select(CellRecord).where(
                         CellRecord.board_uuid == board_id,
-                        CellRecord.kind == "space",
+                        CellRecord.kind == "perimeter",
                         CellRecord.slug == new_design_id,
                     )
                 )
@@ -983,7 +983,7 @@ def _clone_board_relational(
         for c in cells_src:
             nid = str(uuid.uuid4())
             cell_map[str(c.id)] = nid
-            if c.kind == "space":
+            if c.kind == "perimeter":
                 session.add(
                     CellRecord(
                         id=nid,

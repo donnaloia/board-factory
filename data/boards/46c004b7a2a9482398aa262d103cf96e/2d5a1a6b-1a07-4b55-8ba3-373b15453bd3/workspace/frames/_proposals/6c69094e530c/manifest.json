@@ -1,0 +1,49 @@
+{
+  "job_id": "6c69094e530c",
+  "source_kind": "panel",
+  "source_id": "panel_right_bot",
+  "source_size": [
+    260,
+    240
+  ],
+  "panel_size": [
+    260,
+    240
+  ],
+  "provider": "openai",
+  "model_id": "gpt-4o",
+  "candidates": [
+    {
+      "index": 0,
+      "bbox": [
+        0,
+        0,
+        252,
+        236
+      ],
+      "ring_px": 38,
+      "score": 0.95,
+      "notes": "outermost decorative bezel with square corners \u00b7 refined \u00b7 refined \u00b7 refined \u00b7 refined \u00b7 refined \u00b7 refined \u00b7 refined \u00b7 refined \u00b7 refined \u00b7 refined \u00b7 refined \u00b7 refined \u00b7 refined \u00b7 refined \u00b7 refined",
+      "model_id": "gpt-4o",
+      "preview_filename": "candidate_0.png",
+      "hole_mask_filename": "candidate_0_hole.png",
+      "rim_mask_filename": "candidate_0_rim.png"
+    },
+    {
+      "index": 1,
+      "bbox": [
+        3,
+        0,
+        260,
+        240
+      ],
+      "ring_px": 9,
+      "score": 0.85,
+      "notes": "thin metallic edge inside wooden frame",
+      "model_id": "gpt-4o",
+      "preview_filename": "candidate_1.png",
+      "hole_mask_filename": "candidate_1_hole.png",
+      "rim_mask_filename": "candidate_1_rim.png"
+    }
+  ]
+}

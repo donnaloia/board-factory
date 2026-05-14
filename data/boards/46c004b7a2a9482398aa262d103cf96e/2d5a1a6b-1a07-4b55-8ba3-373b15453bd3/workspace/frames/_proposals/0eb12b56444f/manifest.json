@@ -1,0 +1,33 @@
+{
+  "job_id": "0eb12b56444f",
+  "source_kind": "panel",
+  "source_id": "panel_cleft_top",
+  "source_size": [
+    260,
+    240
+  ],
+  "panel_size": [
+    260,
+    240
+  ],
+  "provider": "openai",
+  "model_id": "gpt-4o",
+  "candidates": [
+    {
+      "index": 0,
+      "bbox": [
+        0,
+        0,
+        260,
+        240
+      ],
+      "ring_px": 31,
+      "score": 0.95,
+      "notes": "outer ornate frame with round corners \u00b7 refined \u00b7 refined \u00b7 refined \u00b7 refined \u00b7 refined \u00b7 refined \u00b7 refined",
+      "model_id": "gpt-4o",
+      "preview_filename": "candidate_0.png",
+      "hole_mask_filename": "candidate_0_hole.png",
+      "rim_mask_filename": "candidate_0_rim.png"
+    }
+  ]
+}

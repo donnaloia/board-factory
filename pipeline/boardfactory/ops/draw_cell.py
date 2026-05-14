@@ -21,7 +21,7 @@ implemented in `orchestrate.py` as a loop of `draw_cell` calls.
 from __future__ import annotations
 
 import io
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from PIL import Image
@@ -39,6 +39,30 @@ from ..providers import PixelArtProvider
 from ..providers.pixel.pixellab import png_bytes
 from ..schemas import Catalog
 from .progress import ProgressSink
+
+
+_INPAINT_WIPE_PROMPT = (
+    "Flat neutral placeholder inside the masked region only: single solid "
+    "mid-tone pixel fill; remove every prior border, sidebar, icon strip, "
+    "rating bar, heart motif, or decorative band. No picture-frame chrome "
+    "inside the mask."
+)
+
+
+def _inpaint_two_pass_raws(
+    spec: DrawSpec,
+    provider: PixelArtProvider,
+    sink: ProgressSink,
+) -> list[bytes]:
+    """Two-step inpaint: neutral wipe then real prompt (costs 2 provider rounds)."""
+    sink.log("inpaint pass 1/2: wipe legacy chrome in masked interior")
+    wipe_spec = replace(spec, prompt=_INPAINT_WIPE_PROMPT, candidates=1)
+    first_round = _provider_call(wipe_spec, provider)
+    if not first_round:
+        return []
+    sink.log("inpaint pass 2/2: apply panel prompt")
+    second_spec = replace(spec, reference_bytes=first_round[0])
+    return _provider_call(second_spec, provider)
 
 
 # ────────────────────────── data model ──────────────────────────
@@ -182,16 +206,24 @@ def spec_for_panel(
         if loaded is None:
             # Defensive — has_house_frame just returned True.
             raise RuntimeError("Frame inpaint requested but no house frame is on disk")
-        _, meta = loaded
-        # ring_px is in source-asset pixels — scale to this panel's target size.
-        src_w, src_h = meta.source_size
+        slice_, meta = loaded
         tw, th = target_size
-        scale = min(tw / src_w, th / src_h) if src_w and src_h else 1.0
-        scaled_ring = max(1, int(round(meta.ring_px * scale)))
+        mask_bytes = frames.hole_mask_png_bytes_for_target(
+            slice_,
+            (tw, th),
+            source_size=meta.source_size,
+            expand_px=config.frame_hole_expand_px(),
+        )
+        # Only for frame inpaint — not for img2img (no frame) panel generation.
+        interior_suffix = (
+            "Fill only the interior: clear pixel-art playfield and subject matter; "
+            "no ornate picture frame, wafer border, rating bars, or duplicate rim chrome."
+        )
+        inpaint_prompt = f"{full_prompt} {interior_suffix}"
         return DrawSpec(
             category="panels",
             asset_id=panel.id,
-            prompt=full_prompt,
+            prompt=inpaint_prompt,
             base_prompt=base,
             size=target_size,
             candidates=config.panel_candidates(),
@@ -199,7 +231,7 @@ def spec_for_panel(
             palette=palette,
             style_reference=None,
             reference_bytes=live_path.read_bytes(),
-            mask_bytes=frames.interior_mask_bytes(target_size, scaled_ring),
+            mask_bytes=mask_bytes,
         )
 
     # img2img against the mockup region for this panel.
@@ -330,7 +362,10 @@ def draw_cell(
     )
 
     try:
-        raws = _provider_call(spec, provider)
+        if spec.mode == "inpaint" and config.frame_inpaint_two_pass():
+            raws = _inpaint_two_pass_raws(spec, provider, sink)
+        else:
+            raws = _provider_call(spec, provider)
     except Exception as e:
         sink.log(f"FAIL {spec.category}/{spec.asset_id}: {e}")
         return DrawResult(
@@ -338,7 +373,12 @@ def draw_cell(
         )
 
     # Bill from images actually produced (providers may batch internally or cap per HTTP call).
-    spent_usd = provider.cost_estimate(spec.size, len(raws))
+    if spec.mode == "inpaint" and config.frame_inpaint_two_pass():
+        spent_usd = provider.cost_estimate(spec.size, 1) + provider.cost_estimate(
+            spec.size, len(raws)
+        )
+    else:
+        spent_usd = provider.cost_estimate(spec.size, len(raws))
 
     new_basenames: list[str] = []
     extras = {

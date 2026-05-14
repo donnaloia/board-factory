@@ -8,7 +8,7 @@ feature lives in one folder."
 ## Domains
 
 Bounded-context packages live under **`domains/`** (import paths like
-``domains.boards``, ``domains.cells``). Other top-level folders such as
+``domains.boards``, ``domains.spaces``). Other top-level folders such as
 ``home/`` and ``auth/`` are still domain-shaped but not nested under
 ``domains/`` yet.
 
@@ -18,8 +18,8 @@ A domain is a noun the product reasons about. Today:
 | --- | --- |
 | `domains/boards/`    | Board entity, ownership, paths, catalog config (style, generation, frame, layout), style-lock palette. |
 | `home/`      | Root ``/`` board picker HTML + ``/api/boards`` create/delete JSON. |
-| `domains/cells/`     | Spaces, feature panels, centerpiece; ``live_asset_version_id`` references ``asset_versions`` for sidebar metadata. |
-| `assets/`    | Per-cell history rows, live PNGs, asset URLs, the `/asset/...` HTTP routes. |
+| `domains/cards/` | Card Factory — decks/sets, layout templates, routes & services linking to `board_games` for palette/style; jobs delegate to `pipeline/cardfactory/`. |
+| `domains/spaces/`     | Spaces, feature panels, centerpiece; ``live_asset_version_id`` references ``asset_versions`` for sidebar metadata. |
 | `auth/`      | Users, sessions, API-key secrets, the auth middleware, provider-status checks. |
 | `jobs/`      | The async job runner, pipeline adapters, cost ledger, terminal-job snapshots. |
 
@@ -82,8 +82,8 @@ The dependency graph is acyclic:
 ```
 auth   <─── (depended on by everything; depends on nothing)
 
-domains.boards <─── domains.cells, assets, jobs
-domains.cells  <─── assets, jobs
+domains.boards <─── domains.spaces, assets, jobs
+domains.spaces  <─── assets, jobs
 assets <── jobs
 jobs   ──> orchestrator; depends on everything
 ```
@@ -91,8 +91,8 @@ jobs   ──> orchestrator; depends on everything
 Practical rules:
 
 * `auth/` never imports from another domain.
-* `domains/boards/` never imports `domains/cells/` **services** or **repository**
-  (catalog assembly may use shared ORM types from ``domains.cells.models``).
+* `domains/boards/` never imports `domains/spaces/` **services** or **repository**
+  (catalog assembly may use shared ORM types from ``domains.spaces.models``).
 * For behavior in another domain, call that domain's ``services.py``, not its
   ``repository.py``, unless the shared-ORM exception above applies.
 
@@ -109,6 +109,8 @@ cross-cutting code that doesn't belong to any one domain:
 * `infrastructure/deps` — Auth guards, board URL resolution, template context
                       dicts, job enqueue, side-panel JSON builders, etc. Used by
                       every domain router; not a route table.
+* `exporter/` — **Geometry**, **`interaction_graph`**, **asset wiring**, **polish**, **``project.json``**;
+                      **GET** ``…/export/project-bundle.zip`` lives on **boards** routes (temp zip, no exporter routes). See ``docs/project-export-spec.md`` §9.
 
 ## Composition root
 

@@ -72,6 +72,19 @@ Build a **system to clone the demo cake board** (or defined seed template) **for
 
 ---
 
+### 13. Unify `cells.kind` terminology: `space` → `perimeter`, `panel` → `functional`
+
+**Goal:** align DB discriminator values and product language — **`cells.kind`** today uses **`space`** (perimeter / board-space designs) and **`panel`** (feature UI regions); rename to **`perimeter`** and **`functional`** (keep **`centerpiece`** or rename in same pass if desired).
+
+**Work:**
+
+- **Migration:** update `cells.kind` CHECK constraint and **rewrite existing rows** (`space` → `perimeter`, `panel` → `functional`); chase any **FKs / CHECKs** that embed the old literals (e.g. `frame_instances.source_kind`, pipeline or job enums, raw SQL).  
+- **Codebase sweep:** Python, templates, static JS, routes (`/panels/…` vs future naming), `board_svg` categories, `domains.spaces`, `domains.boards`, `jobs/pipeline_adapters`, pipeline `boardfactory`, docs (`project-export-spec`, ARCHITECTURE), and **any API** that exposes `kind` to the client.  
+- **Docs & naming clarity:** document (model docstrings, `ARCHITECTURE.md`, cells README or inline comments) that **`cells.kind`** is the discriminator for **perimeter vs functional UI vs centerpiece** — not **`space_kind`**, which only distinguishes **`standard` / `event`** on **space-type** rows and says nothing about “panel vs perimeter.”** There is **no** `space.kind` column; avoid that label in APIs and specs so it is not confused with **`cells.kind`** or **`space_kind`**. Align any JSON that accidentally used `space.kind` with the real ORM fields.  
+- **Compatibility (optional):** short-lived read shim or API version bump if external consumers depend on old strings.
+
+---
+
 ## Completed (titles only)
 
 ### 3. Side panel scroll position when switching cells

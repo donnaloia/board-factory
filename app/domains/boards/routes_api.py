@@ -4,28 +4,37 @@ from __future__ import annotations
 
 import base64
 import io
+import json as _json_std
 import os
+import shutil
+import tempfile
+from dataclasses import replace
 from functools import partial
+from pathlib import Path
 from typing import Literal
 
 import httpx
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
-from PIL import Image
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
+from PIL import Image, ImageChops
+from pydantic import BaseModel, field_validator
 
 from auth.middleware import current_user, require_user
 from jobs import pipeline_adapters
 from boardfactory import config as bf_config
 from boardfactory import frames as bf_frames
+from boardfactory import frames_inference as bf_frames_inference
 from boardfactory.providers.pixel.pixellab import list_pixellab_presets
+from boardfactory.schemas import Catalog
 
 from domains.boards.routes_common import NestedBoardId, board_prefix
 from infrastructure import deps
 from domains.boards import services as svc_boards
-from domains.cells import services as svc_cells
+from domains.spaces import services as svc_spaces
 from assets import services as asset_urls
 from domains.boards import mockup_prompt as mockup_prompt_svc
+from exporter import run_board_export
+from exporter.state import BoardExportOptions
 from infrastructure import board_store as bs
 from infrastructure.files import workspace as fs_ws
 
@@ -57,44 +66,260 @@ def frame_overlay(request: Request, board_id: NestedBoardId, w: int = 0, h: int 
     )
 
 
+def _try_load_proposal_masks(
+    board_id: str,
+    job_id: str,
+    candidate_index: int,
+    source_kind: str,
+    source_id: str,
+) -> tuple[Image.Image, Image.Image] | None:
+    """Return ``(hole_mask, rim_mask)`` at full source resolution, or ``None``."""
+    manifest_p = (
+        fs_ws.board_root(board_id)
+        / "workspace"
+        / "frames"
+        / "_proposals"
+        / job_id
+        / "manifest.json"
+    )
+    if not manifest_p.exists():
+        return None
+    try:
+        man = _json_std.loads(manifest_p.read_text())
+    except (OSError, ValueError, TypeError):
+        return None
+    if man.get("source_id") != source_id:
+        return None
+    if not bf_frames.frame_source_kinds_match(man.get("source_kind"), source_kind):
+        return None
+    cands = man.get("candidates") or []
+    if not (0 <= candidate_index < len(cands)):
+        return None
+    cand = cands[candidate_index]
+    hole_f = cand.get("hole_mask_filename")
+    rim_f = cand.get("rim_mask_filename")
+    if not hole_f or not rim_f:
+        return None
+    d = fs_ws.board_root(board_id) / "workspace" / "frames" / "_proposals" / job_id
+    hp, rp = d / str(hole_f), d / str(rim_f)
+    if not hp.exists() or not rp.exists():
+        return None
+    return Image.open(hp).convert("L"), Image.open(rp).convert("L")
+
+
+def _compose_masked_frame_preview(
+    src_rgba: Image.Image,
+    hole_m: Image.Image,
+    rim_m: Image.Image,
+    interior: Image.Image,
+) -> Image.Image:
+    """Same-size preview: alternate interior under ``hole_m``, source rim under ``rim_m``."""
+    w, h = src_rgba.size
+    int_layer = (
+        interior.resize((w, h), Image.NEAREST)
+        if interior.size != (w, h) else interior.convert("RGBA")
+    )
+    r, g, b, a = int_layer.split()
+    new_a = ImageChops.multiply(a, hole_m)
+    int_layer = Image.merge("RGBA", (r, g, b, new_a))
+    rim_layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    rim_layer.paste(src_rgba, (0, 0), rim_m)
+    return Image.alpha_composite(int_layer, rim_layer)
+
+
 @router.get("/users/{username}/board-games/{path_slug}/api/frame/preview.png")
 def api_frame_preview(
     request: Request, board_id: NestedBoardId, source_kind: str, source_id: str,
     ring_px: int, w: int = 260, h: int = 240,
+    job_id: str | None = None,
+    candidate_index: int | None = None,
+    x1: int | None = None,
+    y1: int | None = None,
+    x2: int | None = None,
+    y2: int | None = None,
 ):
-    """Live preview: extract 9-slice + recompose at target size, no disk write."""
+    """Live preview at typical panel size.
+
+    When a vision proposal is available (``job_id`` + ``candidate_index`` + masks on
+    disk), the preview composites **actual rim/hole masks** from AI — irregular
+    contours, not only a rectangular nine-slice. Otherwise it falls back to the
+    geometric nine-slice path (upload-only / no proposal).
+
+    Crop order for the source tile matches refine (query bbox, else manifest).
+
+    **Hole interior:** Another live UI space cover-cropped to the thumbnail when
+    possible; else the rim source fills the hole region.
+
+    **mask_diagnostic=1:** Return rim/hole tint overlay only (same palette as
+    proposal cards) so preserve vs regenerate regions are obvious before commit.
+    """
+    mask_diagnostic = (
+        request.query_params.get("mask_diagnostic", "").lower() in ("1", "true", "yes")
+    )
+
     if ring_px < 2:
         raise HTTPException(400, "ring_px must be at least 2")
 
     catalog = deps.load_board_catalog(board_id)
-    if source_kind == "panel":
-        live = fs_ws.live_path(board_id, "panels", source_id)
-        if not live.exists():
-            raise HTTPException(404)
-        src_img = Image.open(live).convert("RGBA")
-    elif source_kind == "mockup":
-        panels = catalog.get("feature_panels", {}).get("panels", [])
-        p = next((x for x in panels if x["id"] == source_id), None)
-        if p is None:
-            raise HTTPException(404)
-        mockup_path = fs_ws.board_root(board_id) / catalog["style"]["reference_image"]
-        if not mockup_path.exists():
-            raise HTTPException(404)
-        bx1, by1, bx2, by2 = p["bbox"]
-        src_img = Image.open(mockup_path).convert("RGBA").crop((bx1, by1, bx2, by2))
-        src_img = src_img.resize(tuple(p["target_size"]), Image.NEAREST)
-    else:
-        raise HTTPException(400)
+    src_img, src_size = _load_atelier_source(board_id, catalog, source_kind, source_id)
+    full_src = src_img
+    fw, fh = full_src.size
+    crop_rect = (0, 0, fw, fh)
 
-    if ring_px * 2 >= min(src_img.size):
-        raise HTTPException(400, f"ring_px={ring_px} too thick for source")
+    def _crop_src_to_bbox(img: Image.Image, bx1: int, by1: int, bx2: int, by2: int) -> Image.Image:
+        W, H = img.size
+        bx1 = max(0, min(W, bx1))
+        by1 = max(0, min(H, by1))
+        bx2 = max(0, min(W, bx2))
+        by2 = max(0, min(H, by2))
+        if bx2 <= bx1 or by2 <= by1:
+            return img
+        return img.crop((bx1, by1, bx2, by2))
 
-    slice_ = bf_frames.extract_9slice(src_img, ring_px)
+    if None not in (x1, y1, x2, y2):
+        bx1, by1, bx2, by2 = int(x1), int(y1), int(x2), int(y2)
+        crop_rect = (
+            max(0, min(fw, bx1)),
+            max(0, min(fh, by1)),
+            max(0, min(fw, bx2)),
+            max(0, min(fh, by2)),
+        )
+        src_img = _crop_src_to_bbox(full_src, *crop_rect)
+    elif job_id is not None and candidate_index is not None:
+        manifest_p = (
+            fs_ws.board_root(board_id)
+            / "workspace"
+            / "frames"
+            / "_proposals"
+            / job_id
+            / "manifest.json"
+        )
+        if manifest_p.exists():
+            try:
+                man = _json_std.loads(manifest_p.read_text())
+                if (
+                    bf_frames.frame_source_kinds_match(man.get("source_kind"), source_kind)
+                    and man.get("source_id") == source_id
+                ):
+                    cands = man.get("candidates") or []
+                    if 0 <= candidate_index < len(cands):
+                        bb = cands[candidate_index].get("bbox")
+                        if isinstance(bb, (list, tuple)) and len(bb) == 4:
+                            bx1, by1, bx2, by2 = (
+                                int(bb[0]), int(bb[1]), int(bb[2]), int(bb[3])
+                            )
+                            crop_rect = (
+                                max(0, min(fw, bx1)),
+                                max(0, min(fh, by1)),
+                                max(0, min(fw, bx2)),
+                                max(0, min(fh, by2)),
+                            )
+                            src_img = _crop_src_to_bbox(full_src, *crop_rect)
+            except (OSError, ValueError, TypeError, KeyError, IndexError):
+                pass
+
+    mask_hole: Image.Image | None = None
+    mask_rim: Image.Image | None = None
+    if job_id is not None and candidate_index is not None:
+        mpair = _try_load_proposal_masks(
+            board_id, job_id, candidate_index, source_kind, source_id,
+        )
+        if mpair is not None:
+            mh, mr = mpair
+            if mh.size == (fw, fh) == mr.size:
+                cx1, cy1, cx2, cy2 = crop_rect
+                mask_hole = mh.crop((cx1, cy1, cx2, cy2))
+                mask_rim = mr.crop((cx1, cy1, cx2, cy2))
+
+    sw, sh = src_img.size
+    use_masks = (
+        mask_hole is not None
+        and mask_rim is not None
+        and mask_hole.size == (sw, sh)
+        and mask_rim.size == (sw, sh)
+    )
+
+    if use_masks:
+        src_rs = (
+            src_img.resize((w, h), Image.NEAREST)
+            if (sw, sh) != (w, h) else src_img
+        )
+        hole_rs = mask_hole.resize((w, h), Image.NEAREST)
+        rim_rs = mask_rim.resize((w, h), Image.NEAREST)
+        interior = src_rs
+        alt_sid = _pick_alternate_live_space_id(board_id, catalog, source_id)
+        if alt_sid:
+            alt_path = fs_ws.live_path(board_id, "spaces", alt_sid)
+            try:
+                if alt_path.exists():
+                    interior = _cover_resize_nearest(
+                        Image.open(alt_path).convert("RGBA"),
+                        w,
+                        h,
+                    )
+            except (OSError, ValueError):
+                pass
+        if mask_diagnostic:
+            out = bf_frames_inference.overlay_for_review(src_rs, rim_rs, hole_rs)
+        else:
+            out = _compose_masked_frame_preview(src_rs, hole_rs, rim_rs, interior)
+        buf = io.BytesIO()
+        out.save(buf, format="PNG")
+        return StreamingResponse(
+            io.BytesIO(buf.getvalue()),
+            media_type="image/png",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    eff_ring = ring_px
+    if (sw, sh) != (w, h):
+        scale = min(w / sw, h / sh)
+        eff_ring = max(2, min(int(round(ring_px * scale)), min(w, h) // 2 - 1))
+        if eff_ring * 2 >= min(w, h):
+            raise HTTPException(
+                400,
+                f"ring_px={ring_px} too thick when scaled to preview {w}×{h}",
+            )
+        src_img = src_img.resize((w, h), Image.NEAREST)
+        sw, sh = w, h
+    elif eff_ring * 2 >= min(sw, sh):
+        raise HTTPException(400, f"ring_px={ring_px} too thick for source {src_size}")
+
+    slice_ = bf_frames.extract_9slice(src_img, eff_ring)
+    rp = slice_.ring_px
     composed = bf_frames.compose_frame(slice_, (w, h))
+
+    base = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    hole_w = w - 2 * rp
+    hole_h = h - 2 * rp
+    if hole_w > 0 and hole_h > 0 and sw - 2 * rp > 0 and sh - 2 * rp > 0:
+        inner: Image.Image | None = None
+        alt_sid = _pick_alternate_live_space_id(board_id, catalog, source_id)
+        if alt_sid:
+            alt_path = fs_ws.live_path(board_id, "spaces", alt_sid)
+            try:
+                if alt_path.exists():
+                    inner = _cover_resize_nearest(
+                        Image.open(alt_path).convert("RGBA"),
+                        hole_w,
+                        hole_h,
+                    )
+            except (OSError, ValueError):
+                inner = None
+        if inner is None:
+            inner = src_img.crop((rp, rp, sw - rp, sh - rp))
+            if inner.size != (hole_w, hole_h):
+                inner = inner.resize((hole_w, hole_h), Image.NEAREST)
+        base.paste(inner, (rp, rp))
+
+    out = Image.alpha_composite(base, composed)
     buf = io.BytesIO()
-    composed.save(buf, format="PNG")
-    return StreamingResponse(io.BytesIO(buf.getvalue()), media_type="image/png",
-                             headers={"Cache-Control": "no-store"})
+    out.save(buf, format="PNG")
+    return StreamingResponse(
+        io.BytesIO(buf.getvalue()),
+        media_type="image/png",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.get("/users/{username}/board-games/{path_slug}/api/generation")
@@ -277,46 +502,17 @@ async def _api_frame_adopt(
     if ring_px < 2:
         raise HTTPException(400, "ring_px must be at least 2")
 
-    catalog = deps.load_board_catalog(board_id)
-    src_img: Image.Image
-    src_size: tuple[int, int]
-
-    if source_kind == "panel":
-        live = fs_ws.live_path(board_id, "panels", source_id)
-        if not live.exists():
-            raise HTTPException(404, f"No live panel asset for {source_id}")
-        src_img = Image.open(live).convert("RGBA")
-        src_size = src_img.size
-    elif source_kind == "mockup":
-        panels = catalog.get("feature_panels", {}).get("panels", [])
-        p = next((x for x in panels if x["id"] == source_id), None)
-        if p is None:
-            raise HTTPException(404, f"Unknown panel {source_id}")
-        ref_rel = catalog["style"]["reference_image"]
-        mockup_path = fs_ws.board_root(board_id) / ref_rel
-        if not mockup_path.exists():
-            raise HTTPException(404, f"Mockup not found at {mockup_path}")
-        bx1, by1, bx2, by2 = p["bbox"]
-        mockup = Image.open(mockup_path).convert("RGBA")
-        src_img = mockup.crop((bx1, by1, bx2, by2))
-        tw, th = p["target_size"]
-        src_img = src_img.resize((tw, th), Image.NEAREST)
-        src_size = (tw, th)
-    elif source_kind == "upload":
-        upload_path = (
-            fs_ws.board_root(board_id) / "workspace" / "frames" / "_uploads" / source_id
-        )
-        if not upload_path.exists():
-            raise HTTPException(404, f"Upload {source_id!r} not found")
-        src_img = Image.open(upload_path).convert("RGBA")
-        src_size = src_img.size
-    else:
+    source_kind = bf_frames.normalize_frame_source_kind(source_kind)
+    if source_kind not in bf_frames.VALID_FRAME_SOURCE_KINDS:
         raise HTTPException(400, f"Unknown source_kind {source_kind!r}")
+
+    catalog = deps.load_board_catalog(board_id)
+    src_img, src_size = _load_atelier_source(board_id, catalog, source_kind, source_id)
 
     if ring_px * 2 >= min(src_size):
         raise HTTPException(400, f"ring_px={ring_px} is too thick for source {src_size}")
 
-    from domains.cells import frames_repository as frames_repo
+    from domains.spaces import frames_repository as frames_repo
 
     with bf_config.scope_board(board_id):
         slice_ = bf_frames.extract_9slice(src_img, ring_px)
@@ -372,7 +568,7 @@ async def _api_frame_disable(request: Request, board_id: str) -> JSONResponse:
     data["frame"]["enabled"] = False
     svc_boards.save_catalog(board_id, data)
 
-    from domains.cells import frames_repository as frames_repo
+    from domains.spaces import frames_repository as frames_repo
 
     n = frames_repo.mark_all_inactive(board_id)
     return JSONResponse({"ok": True, "deactivated_rows": n})
@@ -396,6 +592,85 @@ def _proposals_static_url(board_id: str, job_id: str, filename: str) -> str:
     )
 
 
+def _load_atelier_source(
+    board_id: str,
+    catalog: dict,
+    source_kind: str,
+    source_id: str,
+) -> tuple[Image.Image, tuple[int, int]]:
+    """Load the RGBA image used by Frame Atelier propose/refine/commit."""
+    sk = bf_frames.normalize_frame_source_kind(source_kind)
+    if sk not in bf_frames.VALID_FRAME_SOURCE_KINDS:
+        raise HTTPException(400, f"Unknown source_kind {source_kind!r}")
+    if sk == "functional":
+        live = fs_ws.live_path(board_id, "panels", source_id)
+        if not live.exists():
+            raise HTTPException(404, f"No live panel asset for {source_id}")
+        src_img = Image.open(live).convert("RGBA")
+        return src_img, src_img.size
+    if sk == "mockup":
+        panels = catalog.get("feature_panels", {}).get("panels", [])
+        p = next((x for x in panels if x["id"] == source_id), None)
+        if p is None:
+            raise HTTPException(404, f"Unknown panel {source_id}")
+        mockup_path = fs_ws.board_root(board_id) / catalog["style"]["reference_image"]
+        if not mockup_path.exists():
+            raise HTTPException(404, f"Mockup not found at {mockup_path}")
+        x1, y1, x2, y2 = p["bbox"]
+        crop = Image.open(mockup_path).convert("RGBA").crop((x1, y1, x2, y2))
+        crop = crop.resize(tuple(p["target_size"]), Image.NEAREST)
+        return crop, (p["target_size"][0], p["target_size"][1])
+    if sk == "upload":
+        upload_path = (
+            fs_ws.board_root(board_id) / "workspace" / "frames" / "_uploads" / source_id
+        )
+        if not upload_path.exists():
+            raise HTTPException(404, f"Upload {source_id!r} not found")
+        src_img = Image.open(upload_path).convert("RGBA")
+        return src_img, src_img.size
+    raise HTTPException(400, f"Unknown source_kind {source_kind!r}")
+
+
+def _cover_resize_nearest(img: Image.Image, tw: int, th: int) -> Image.Image:
+    """Uniform scale then center-crop so result is exactly tw×th (pixel-art friendly)."""
+    iw, ih = img.size
+    if iw <= 0 or ih <= 0 or tw <= 0 or th <= 0:
+        return Image.new("RGBA", (max(tw, 1), max(th, 1)), (0, 0, 0, 0))
+    scale = max(tw / iw, th / ih)
+    nw = max(1, int(round(iw * scale)))
+    nh = max(1, int(round(ih * scale)))
+    up = img.resize((nw, nh), Image.NEAREST)
+    left = max(0, (nw - tw) // 2)
+    top = max(0, (nh - th) // 2)
+    return up.crop((left, top, left + tw, top + th))
+
+
+def _pick_alternate_live_space_id(
+    board_id: str,
+    catalog: dict,
+    source_id: str,
+) -> str | None:
+    """First catalog-order live space design whose id ≠ ``source_id``.
+
+    Panel/upload/mockup sources never equal a space id, so any live space qualifies.
+    If only one live space exists and its id equals ``source_id`` (e.g. future
+    space-as-frame-source), returns ``None`` so the caller falls back to the
+    rim-source interior.
+    """
+    try:
+        cat_model = Catalog.from_dict(catalog)
+    except Exception:
+        return None
+    store = bs.get_store()
+    for d in cat_model.all_space_designs():
+        rel = fs_ws.live_rel("spaces", d.id)
+        if not store.exists(board_id, rel):
+            continue
+        if d.id != source_id:
+            return d.id
+    return None
+
+
 @router.post("/users/{username}/board-games/{path_slug}/api/frame/propose")
 async def api_frame_propose(
     request: Request,
@@ -413,7 +688,8 @@ async def api_frame_propose(
     """
     if candidate_count < 1 or candidate_count > 5:
         raise HTTPException(400, "candidate_count must be in 1..5")
-    if source_kind not in ("panel", "mockup", "upload"):
+    source_kind = bf_frames.normalize_frame_source_kind(source_kind)
+    if source_kind not in bf_frames.VALID_FRAME_SOURCE_KINDS:
         raise HTTPException(400, f"Unknown source_kind {source_kind!r}")
 
     keys = deps.user_provider_api_keys(request)
@@ -482,6 +758,129 @@ async def api_frame_proposals(
     return JSONResponse(out)
 
 
+class FrameRefineBody(BaseModel):
+    """Body for ``POST /api/frame/refine`` — resize proposal bbox (handle drag)."""
+
+    job_id: str
+    candidate_index: int
+    bbox: tuple[int, int, int, int]
+    source_kind: Literal["functional", "mockup", "upload"]
+    source_id: str
+    ring_px: int | None = None
+
+    @field_validator("source_kind", mode="before")
+    @classmethod
+    def _normalize_refine_source_kind(cls, v: object) -> str:
+        return bf_frames.normalize_frame_source_kind(str(v))
+
+    @field_validator("bbox", mode="before")
+    @classmethod
+    def _bbox_tuple(cls, v):
+        if isinstance(v, (list, tuple)) and len(v) == 4:
+            return tuple(int(x) for x in v)
+        raise ValueError("bbox must be four integers")
+
+
+@router.post("/users/{username}/board-games/{path_slug}/api/frame/refine")
+async def api_frame_refine(
+    request: Request, board_id: NestedBoardId, body: FrameRefineBody,
+):
+    """Apply ``fit_to_window`` to a stored proposal and rewrite masks + preview."""
+    d = _proposals_dir(board_id, body.job_id)
+    manifest_p = d / "manifest.json"
+    if not manifest_p.exists():
+        raise HTTPException(404, f"No proposal manifest for job {body.job_id!r}")
+    try:
+        manifest = _json_std.loads(manifest_p.read_text())
+    except Exception as e:
+        raise HTTPException(500, f"Bad manifest: {e}") from None
+
+    if (
+        not bf_frames.frame_source_kinds_match(
+            manifest.get("source_kind"), body.source_kind,
+        )
+        or manifest.get("source_id") != body.source_id
+    ):
+        raise HTTPException(400, "source_kind / source_id do not match the proposal run")
+
+    cands = manifest.get("candidates") or []
+    if body.candidate_index < 0 or body.candidate_index >= len(cands):
+        raise HTTPException(404, f"Candidate index {body.candidate_index} out of range")
+    cand = cands[body.candidate_index]
+
+    sw, sh = int(manifest["source_size"][0]), int(manifest["source_size"][1])
+    catalog = deps.load_board_catalog(board_id)
+    src_img, src_size = _load_atelier_source(
+        board_id, catalog, body.source_kind, body.source_id,
+    )
+    if src_size != (sw, sh):
+        raise HTTPException(
+            400,
+            f"Source size {src_size} does not match proposal {sw}×{sh}",
+        )
+
+    hole_f = cand.get("hole_mask_filename")
+    rim_f = cand.get("rim_mask_filename")
+    prev_f = cand.get("preview_filename")
+    if not hole_f or not rim_f or not prev_f:
+        raise HTTPException(500, "Candidate manifest entry is incomplete")
+
+    geo = bf_frames_inference.CandidateGeometry(
+        bbox=tuple(int(x) for x in cand["bbox"]),
+        ring_px=int(cand["ring_px"]),
+        hole_mask=Image.open(d / hole_f).convert("L"),
+        rim_mask=Image.open(d / rim_f).convert("L"),
+        score=float(cand["score"]),
+        notes=str(cand.get("notes") or ""),
+    )
+    rp = body.ring_px if body.ring_px is not None else geo.ring_px
+    rp = max(2, min(rp, min(src_size) // 2 - 1))
+    geo = replace(geo, ring_px=rp)
+
+    x1, y1, x2, y2 = body.bbox
+    x1 = max(0, min(sw - 2, int(x1)))
+    y1 = max(0, min(sh - 2, int(y1)))
+    x2 = max(x1 + 2, min(sw, int(x2)))
+    y2 = max(y1 + 2, min(sh, int(y2)))
+    if x2 - x1 <= 2 * rp + 2 or y2 - y1 <= 2 * rp + 2:
+        raise HTTPException(
+            400,
+            "Bounding box too small for current ring thickness — "
+            "widen the frame or reduce ring thickness.",
+        )
+    bbox_adj = (x1, y1, x2, y2)
+
+    refined = bf_frames_inference.fit_to_window(
+        geo,
+        bbox=bbox_adj,
+        source_size=src_size,
+    )
+
+    refined.hole_mask.save(d / hole_f)
+    refined.rim_mask.save(d / rim_f)
+    overlay = bf_frames_inference.overlay_for_review(
+        src_img, refined.rim_mask, refined.hole_mask,
+    )
+    overlay.save(d / prev_f)
+
+    cand["bbox"] = list(refined.bbox)
+    cand["ring_px"] = refined.ring_px
+    cand["notes"] = refined.notes
+    cands[body.candidate_index] = cand
+    manifest["candidates"] = cands
+    manifest_p.write_text(_json_std.dumps(manifest, indent=2))
+
+    ts = asset_urls.wall_clock_ms()
+    preview_url = f"{_proposals_static_url(board_id, body.job_id, prev_f)}?t={ts}"
+    return JSONResponse({
+        "ok": True,
+        "bbox": list(refined.bbox),
+        "ring_px": refined.ring_px,
+        "notes": refined.notes,
+        "preview_url": preview_url,
+    })
+
+
 class FrameCommitBody(BaseModel):
     """Body for ``POST /api/frame/commit``.
 
@@ -499,9 +898,13 @@ class FrameCommitBody(BaseModel):
     so the rim shows immediately. ``regen_panels`` (default true) is
     Approach D — when true the server enqueues ``frame.reapply`` and
     returns the ``regen_job_id`` so the UI can attach progress to it.
+
+    ``regen_single_panel_id`` — when set (and typically ``regen_panels``
+    is false), enqueue ``frame.reapply_one`` for that panel id only so
+    the Atelier can regenerate one tile then redirect to the board.
     """
 
-    source_kind: Literal["panel", "mockup", "upload"]
+    source_kind: Literal["functional", "mockup", "upload"]
     source_id: str
     ring_px: int
 
@@ -510,6 +913,12 @@ class FrameCommitBody(BaseModel):
 
     enable_after: bool = True
     regen_panels: bool = True
+    regen_single_panel_id: str | None = None
+
+    @field_validator("source_kind", mode="before")
+    @classmethod
+    def _normalize_commit_source_kind(cls, v: object) -> str:
+        return bf_frames.normalize_frame_source_kind(str(v))
 
 
 @router.post("/users/{username}/board-games/{path_slug}/api/frame/commit")
@@ -528,51 +937,14 @@ async def api_frame_commit(
 
     catalog = deps.load_board_catalog(board_id)
 
-    # Resolve the source image. We always need it because the on-disk
-    # nine-slice pack stores actual rim pixels, even if vision provided
-    # the masks.
-    src_img: Image.Image
-    src_size: tuple[int, int]
-    if body.source_kind == "panel":
-        live = fs_ws.live_path(board_id, "panels", body.source_id)
-        if not live.exists():
-            raise HTTPException(404, f"No live panel asset for {body.source_id}")
-        src_img = Image.open(live).convert("RGBA")
-        src_size = src_img.size
-    elif body.source_kind == "mockup":
-        panels = catalog.get("feature_panels", {}).get("panels", [])
-        p = next((x for x in panels if x["id"] == body.source_id), None)
-        if p is None:
-            raise HTTPException(404, f"Unknown panel {body.source_id}")
-        mockup_path = fs_ws.board_root(board_id) / catalog["style"]["reference_image"]
-        if not mockup_path.exists():
-            raise HTTPException(404, f"Mockup not found at {mockup_path}")
-        x1, y1, x2, y2 = p["bbox"]
-        crop = Image.open(mockup_path).convert("RGBA").crop((x1, y1, x2, y2))
-        crop = crop.resize(tuple(p["target_size"]), Image.NEAREST)
-        src_img = crop
-        src_size = (p["target_size"][0], p["target_size"][1])
-    elif body.source_kind == "upload":
-        upload_path = (
-            fs_ws.board_root(board_id) / "workspace" / "frames" / "_uploads" / body.source_id
-        )
-        if not upload_path.exists():
-            raise HTTPException(404, f"Upload {body.source_id!r} not found")
-        src_img = Image.open(upload_path).convert("RGBA")
-        src_size = src_img.size
-    else:
-        raise HTTPException(400, f"Unknown source_kind {body.source_kind!r}")
+    src_img, src_size = _load_atelier_source(
+        board_id, catalog, body.source_kind, body.source_id,
+    )
 
-    if body.ring_px * 2 >= min(src_size):
-        raise HTTPException(
-            400, f"ring_px={body.ring_px} too thick for source {src_size}"
-        )
-
-    # If the commit refers to a vision proposal, load its manifest +
-    # masks; otherwise fall back to deterministic ring extraction.
     model_id = "deterministic"
     prompt_hash: str | None = None
     candidate_index: int | None = None
+    proposal_masks: tuple[Image.Image, Image.Image] | None = None
 
     if body.job_id and body.candidate_index is not None:
         d = _proposals_dir(board_id, body.job_id)
@@ -590,17 +962,42 @@ async def api_frame_commit(
         candidate_index = int(body.candidate_index)
         model_id = manifest.get("model_id") or model_id
         prompt_hash = manifest.get("prompt_hash")
-        # We could read the cand hole/rim masks back here and use them,
-        # but the rim is so visually subtle that the user-confirmed
-        # ring_px (slider value) is what matters most. We snapshot the
-        # ring_px from the body rather than the manifest to honor the
-        # user's slider edits during refine.
-        _ = cand  # placeholder for future Phase A wiring.
 
-    from domains.cells import frames_repository as frames_repo
+        bb = cand.get("bbox")
+        hole_f = cand.get("hole_mask_filename")
+        rim_f = cand.get("rim_mask_filename")
+        if isinstance(bb, (list, tuple)) and len(bb) == 4 and hole_f and rim_f:
+            x1, y1, x2, y2 = (int(bb[0]), int(bb[1]), int(bb[2]), int(bb[3]))
+            W, H = src_img.size
+            x1 = max(0, min(W, x1))
+            y1 = max(0, min(H, y1))
+            x2 = max(0, min(W, x2))
+            y2 = max(0, min(H, y2))
+            if x2 > x1 and y2 > y1:
+                hole_p = d / str(hole_f)
+                rim_p = d / str(rim_f)
+                if hole_p.exists() and rim_p.exists():
+                    proposal_masks = (
+                        Image.open(hole_p).convert("L").crop((x1, y1, x2, y2)),
+                        Image.open(rim_p).convert("L").crop((x1, y1, x2, y2)),
+                    )
+                src_img = src_img.crop((x1, y1, x2, y2))
+                src_size = src_img.size
+
+    if body.ring_px * 2 >= min(src_size):
+        raise HTTPException(
+            400, f"ring_px={body.ring_px} too thick for source {src_size}"
+        )
+
+    from domains.spaces import frames_repository as frames_repo
 
     with bf_config.scope_board(board_id):
         slice_ = bf_frames.extract_9slice(src_img, body.ring_px)
+        if proposal_masks is not None:
+            ho, ri = proposal_masks
+            if ho.size == src_size == ri.size:
+                slice_.hole_mask = ho
+                slice_.rim_mask = ri
         instance = bf_frames.FrameInstance(
             ring_px=int(body.ring_px),
             source_kind=body.source_kind,
@@ -622,8 +1019,32 @@ async def api_frame_commit(
         svc_boards.save_catalog(board_id, data)
 
     regen_job_id: str | None = None
-    if body.regen_panels:
-        keys = deps.user_provider_api_keys(request)
+    keys = deps.user_provider_api_keys(request)
+
+    if body.regen_single_panel_id:
+        pid = body.regen_single_panel_id.strip()
+        panel_rows = catalog.get("feature_panels", {}).get("panels", [])
+        panel_ids = [p["id"] for p in panel_rows]
+        if pid not in panel_ids:
+            raise HTTPException(400, f"Unknown panel {pid!r}")
+        live_rel = fs_ws.live_rel("panels", pid)
+        if not bs.get_store().exists(board_id, live_rel):
+            raise HTTPException(
+                400,
+                f"No live art for panel {pid!r} — generate it before reapply.",
+            )
+        regen_cost = pipeline_adapters.estimate_generate_one("panels", pid)
+        regen_job_id = deps.enqueue_pipeline_job(
+            label=f"Reapply frame to panel {pid}",
+            operation="frame.reapply_one",
+            target=pid,
+            cost_estimate=regen_cost,
+            fn=deps.scoped_pipeline_callable(
+                board_id,
+                partial(pipeline_adapters.frame_reapply_one, panel_id=pid, **keys),
+            ),
+        )
+    elif body.regen_panels:
         # Conservative panel-count-based estimate: actual cost is computed
         # inside the worker as it bills each provider call. Per-panel
         # estimate matches what generate_one shows in the side panel so
@@ -649,6 +1070,7 @@ async def api_frame_commit(
         "source_kind": body.source_kind,
         "source_id": body.source_id,
         "regen_job_id": regen_job_id,
+        "regen_single_panel": bool(body.regen_single_panel_id),
     })
 
 
@@ -740,8 +1162,8 @@ async def _action_generate_missing_all(
     request: Request, board_id: str,
 ) -> JSONResponse | RedirectResponse:
     catalog = deps.load_board_catalog(board_id)
-    missing_spaces = svc_cells.missing_space_ids(board_id, catalog)
-    missing_panels = svc_cells.missing_panel_ids(board_id, catalog)
+    missing_spaces = svc_spaces.missing_space_ids(board_id, catalog)
+    missing_panels = svc_spaces.missing_panel_ids(board_id, catalog)
     total = len(missing_spaces) + len(missing_panels)
     keys = deps.user_provider_api_keys(request)
     job_id = deps.enqueue_pipeline_job(
@@ -811,6 +1233,40 @@ async def _action_export(request: Request, board_id: str) -> JSONResponse | Redi
 @router.post("/users/{username}/board-games/{path_slug}/actions/export")
 async def action_export_nested(request: Request, board_id: NestedBoardId):
     return await _action_export(request, board_id)
+
+
+@router.get("/users/{username}/board-games/{path_slug}/export/project-bundle.zip")
+def download_project_bundle_zip(board_id: NestedBoardId):
+    """Portable ``project.json`` + ``assets/`` via ``app/exporter``.
+
+    The bundle tree and intermediate zip exist only inside a process-local
+    ``tempfile.TemporaryDirectory``; the handler returns bytes in memory after
+    the directory is destroyed (no accumulation under the board store).
+
+    This is **not** the pipeline ``POST …/actions/export`` (approved tiles to
+    ``export/``); that job stays separate.
+    """
+    cat = deps.load_board_catalog(board_id)
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        res = run_board_export(
+            board_id,
+            cat,
+            options=BoardExportOptions(store=bs.get_store(), bundle_root=root),
+        )
+        if not res.ok:
+            raise HTTPException(422, detail={"export_errors": list(res.errors)})
+        arc_path = shutil.make_archive(str(root / "bundle"), "zip", root_dir=str(root))
+        data = Path(arc_path).read_bytes()
+    safe = board_id.replace("-", "")[:12] or "board"
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="project-export-{safe}.zip"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 async def _action_regen_one(

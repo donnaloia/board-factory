@@ -4,7 +4,7 @@ Revision ID: 0002_frame_instances
 Revises: 0001_full_schema
 Create Date: 2026-05-06
 
-Backed by ``app/domains/cells/models.py``'s ``FrameInstanceRecord``. The
+Backed by ``app/domains/spaces/models.py``'s ``FrameInstanceRecord``. The
 on-disk pack at ``workspace/frames/house/`` remains the source of truth
 for the actual nine-slice + masks; this table stores provenance and the
 "one active frame per board" invariant for the Atelier UI.

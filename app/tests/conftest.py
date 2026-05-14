@@ -45,7 +45,10 @@ def _runtime_database_url() -> str:
     if not url:
         raise RuntimeError(
             "BOARDFACTORY_DATABASE_URL must be set when running the test suite. "
-            "Inside the docker container this is preset by docker-compose.yml."
+            "Run app tests inside Docker (not on the host): `make up` then `make test` "
+            "from the repo root, or `docker compose exec -T board-factory sh -c 'cd /app && "
+            "PYTHONPATH=/app:/repo/pipeline python -m pytest …'` — see Makefile `test` target. "
+            "Inside the board-factory container this URL is set by docker-compose.yml."
         )
     return url
 

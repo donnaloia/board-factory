@@ -16,7 +16,7 @@ from boardfactory import frames as bf_frames
 from domains.boards.routes_common import NestedBoardId, board_prefix
 from infrastructure import deps
 from domains.boards import services as svc_boards
-from domains.cells import services as svc_cells
+from domains.spaces import services as svc_spaces
 from assets import services as asset_urls
 from infrastructure import board_store as bs
 from infrastructure.files import workspace as fs_ws
@@ -30,7 +30,7 @@ def board_view(request: Request, board_id: NestedBoardId):
         return RedirectResponse(f"{board_prefix(board_id)}/setup", status_code=303)
 
     catalog = deps.load_board_catalog(board_id)
-    stats = svc_cells.collect_board_stats(board_id, catalog)
+    stats = svc_spaces.collect_board_stats(board_id, catalog)
     space_status = stats.space_status
     panel_status = stats.panel_status
     cp_status = stats.centerpiece_status
@@ -60,22 +60,10 @@ def board_view(request: Request, board_id: NestedBoardId):
 
     frame_overlay_url = None
     frame_block = catalog.get("frame", {}) or {}
-    frame_meta = None
-    frame_adopted = False
     with bf_config.set_active_board(board_id):
         if bf_frames.has_house_frame():
-            frame_adopted = True
-            frame_meta = bf_frames.read_house_meta()
             if frame_block.get("enabled") and frame_block.get("apply_to_panels", True):
                 frame_overlay_url = f"{board_prefix(board_id)}/frame.png"
-
-    frame_status = {
-        "adopted": frame_adopted,
-        "enabled": bool(frame_block.get("enabled")),
-        "source_kind": frame_meta.source_kind if frame_meta else None,
-        "source_id": frame_meta.source_id if frame_meta else None,
-        "ring_px": frame_meta.ring_px if frame_meta else None,
-    }
 
     svg_markup = render_board_svg(
         catalog, space_status, panel_status, cp_status,
@@ -114,7 +102,6 @@ def board_view(request: Request, board_id: NestedBoardId):
                 else "Generate missing spaces"
             ),
         },
-        "frame_status": frame_status,
         "generation": svc_boards.read_generation(catalog),
     })
     return request.app.state.templates.TemplateResponse(request, "board.html", ctx)
@@ -176,21 +163,18 @@ def frame_view(request: Request, board_id: NestedBoardId):
     # Lazy-backfill the relational row if the on-disk pack predates the
     # frame_instances table; the Atelier UI surfaces "imported from disk"
     # provenance based on the row that comes back here.
-    from domains.cells import frames_repository as frames_repo
+    from domains.spaces import frames_repository as frames_repo
 
     active_view = frames_repo.ensure_active_for_disk_pack(board_id)
 
-    # Source: live panels (ordered, with size + URL).
+    # Source: live panels only (Frame Atelier — same tiles as the functional UI;
+    # omit slots with no live asset so history-only states do not appear).
     panels = catalog.get("feature_panels", {}).get("panels", [])
     panel_sources: list[dict] = []
     for p in panels:
         live_rel = fs_ws.live_rel("panels", p["id"])
         size = [int(p["target_size"][0]), int(p["target_size"][1])]
         if not store.exists(board_id, live_rel):
-            panel_sources.append({
-                "id": p["id"], "label": p["id"].replace("_", " "),
-                "size": size, "url": None, "has_live": False,
-            })
             continue
         url_rel = live_rel.removeprefix("workspace/")
         panel_sources.append({
@@ -202,25 +186,7 @@ def frame_view(request: Request, board_id: NestedBoardId):
                 asset_relpath=url_rel,
                 mtime_ms=store.stat(board_id, live_rel).mtime_ms,
             ),
-            "has_live": True,
         })
-
-    # Source: mockup regions (one per panel bbox).
-    mockup_sources: list[dict] = []
-    ref_rel = (catalog.get("style") or {}).get("reference_image") or "mockup/board.png"
-    if store.exists(board_id, ref_rel):
-        for p in panels:
-            size = [int(p["target_size"][0]), int(p["target_size"][1])]
-            mockup_sources.append({
-                "id": p["id"],
-                "label": f"{p['id'].replace('_', ' ')} (from mockup)",
-                "size": size,
-                "url": (
-                    f"{bp}/api/frame/preview.png"
-                    f"?source_kind=mockup&source_id={p['id']}"
-                    f"&ring_px=8&w={size[0]}&h={size[1]}"
-                ),
-            })
 
     user = getattr(request.state, "user", None)
     has_openai_key = bool(
@@ -236,6 +202,12 @@ def frame_view(request: Request, board_id: NestedBoardId):
     default_ring = max(4, min(typical_size) // 16)
     max_ring = max(default_ring, min(typical_size) // 3)
 
+    per_panel_usd = pipeline_adapters.estimate_generate_one("panels")
+    reapply_batch_usd = per_panel_usd * n_panels
+    reapply_batch_sec = pipeline_adapters.estimate_frame_reapply_wall_seconds(n_panels)
+    reapply_single_usd = per_panel_usd
+    reapply_single_sec = pipeline_adapters.estimate_frame_reapply_wall_seconds(1)
+
     ctx = deps.editorial_template_context(board_id, request)
     ctx.update({
         "has_frame": has_frame,
@@ -246,13 +218,16 @@ def frame_view(request: Request, board_id: NestedBoardId):
             f"{bp}/frame.png?t={asset_urls.wall_clock_ms()}" if has_frame else None
         ),
         "panel_sources": panel_sources,
-        "mockup_sources": mockup_sources,
         "n_panels": n_panels,
         "typical_size": typical_size,
         "default_ring_px": default_ring,
         "min_ring_px": 2,
         "max_ring_px": max_ring,
         "has_openai_key": has_openai_key,
+        "reapply_batch_usd": reapply_batch_usd,
+        "reapply_batch_sec": reapply_batch_sec,
+        "reapply_single_usd": reapply_single_usd,
+        "reapply_single_sec": reapply_single_sec,
     })
     return request.app.state.templates.TemplateResponse(request, "frame.html", ctx)
 

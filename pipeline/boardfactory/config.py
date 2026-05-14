@@ -111,6 +111,38 @@ def regen_candidate_count(category: str) -> int:
         return centerpiece_candidates()
     return 0
 
+
+def frame_hole_expand_px() -> int:
+    """Grow the inpaint hole slightly into the rim band to drop mis-tagged legacy chrome.
+
+    Read at call time from ``BOARDFACTORY_FRAME_HOLE_EXPAND_PX`` (default ``2``).
+    """
+    try:
+        return max(0, int(os.environ.get("BOARDFACTORY_FRAME_HOLE_EXPAND_PX", "2")))
+    except ValueError:
+        return 2
+
+
+def frame_hole_expand_propose_px() -> int:
+    """Same idea as :func:`frame_hole_expand_px` but applied when cleaning vision proposals.
+
+    Env ``BOARDFACTORY_FRAME_HOLE_EXPAND_PROPOSE_PX`` (default ``1``).
+    """
+    try:
+        return max(0, int(os.environ.get("BOARDFACTORY_FRAME_HOLE_EXPAND_PROPOSE_PX", "1")))
+    except ValueError:
+        return 1
+
+
+def frame_inpaint_two_pass() -> bool:
+    """When true, panel inpaint runs a cheap wipe pass then the real prompt (2× API calls).
+
+    ``BOARDFACTORY_FRAME_INPAINT_TWO_PASS`` — ``1`` / ``true`` / ``yes`` enable.
+    """
+    v = os.environ.get("BOARDFACTORY_FRAME_INPAINT_TWO_PASS", "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
 PROJECT_NAME = os.environ.get("BOARDFACTORY_PROJECT_NAME", "my-board")
 PROVIDER_NAME = os.environ.get("BOARDFACTORY_PROVIDER", "pixellab").lower()
 

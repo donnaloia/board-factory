@@ -48,7 +48,7 @@ def _seed_house_frame(board_id: str, ring_px: int = 6) -> None:
     sl = bf_frames.extract_9slice(src, ring_px)
     instance = bf_frames.FrameInstance(
         ring_px=ring_px,
-        source_kind="panel",
+        source_kind="functional",
         source_id="seed",
         source_size=(64, 64),
         model_id="test",
@@ -62,14 +62,14 @@ def _seed_house_frame(board_id: str, ring_px: int = 6) -> None:
 
 def test_replace_active_enforces_one_active_per_board(seeded_board):
     from boardfactory import frames as bf_frames
-    from domains.cells import frames_repository as frames_repo
+    from domains.spaces import frames_repository as frames_repo
 
     a = bf_frames.FrameInstance(
-        ring_px=6, source_kind="panel", source_id="alpha",
+        ring_px=6, source_kind="functional", source_id="alpha",
         source_size=(64, 64), model_id="test",
     )
     b = bf_frames.FrameInstance(
-        ring_px=8, source_kind="panel", source_id="beta",
+        ring_px=8, source_kind="functional", source_id="beta",
         source_size=(64, 64), model_id="test",
     )
     va = frames_repo.replace_active(seeded_board.id, instance=a)
@@ -90,10 +90,10 @@ def test_replace_active_enforces_one_active_per_board(seeded_board):
 
 def test_mark_all_inactive_drops_active_flag(seeded_board):
     from boardfactory import frames as bf_frames
-    from domains.cells import frames_repository as frames_repo
+    from domains.spaces import frames_repository as frames_repo
 
     inst = bf_frames.FrameInstance(
-        ring_px=6, source_kind="panel", source_id="alpha",
+        ring_px=6, source_kind="functional", source_id="alpha",
         source_size=(64, 64),
     )
     frames_repo.replace_active(seeded_board.id, instance=inst)
@@ -103,7 +103,7 @@ def test_mark_all_inactive_drops_active_flag(seeded_board):
 
 
 def test_ensure_active_for_disk_pack_lazy_backfill(seeded_board):
-    from domains.cells import frames_repository as frames_repo
+    from domains.spaces import frames_repository as frames_repo
 
     _seed_house_frame(seeded_board.id, ring_px=6)
     # No DB row yet — backfill should create one tagged "legacy".

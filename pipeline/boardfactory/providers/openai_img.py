@@ -6,9 +6,12 @@ Uses the OpenAI Images API for all three draw modes:
   img2img   → POST /v1/images/edits       (with source image)
   inpaint   → POST /v1/images/edits       (with source + mask)
 
-OpenAI only supports fixed canvas sizes (smallest: 1024×1024), so every
-call generates at 1024×1024 and is then resized to the requested board-tile
-size with LANCZOS before being handed back to draw_cell for cleanup.
+OpenAI exposes a small set of fixed ``size`` strings (see API docs). **Text-to-image**
+(``generate``) picks the candidate whose **aspect ratio** is closest to the
+requested tile ``(width, height)`` — e.g. portrait tiles use ``1024x1536`` instead
+of always ``1024x1024`` — then ``_to_target_size`` scales to the exact pixel size.
+**Edits** (``img2img`` / ``inpaint``) still use the previous behaviour until a later
+pass aligns those endpoints the same way.
 
 See https://platform.openai.com/pricing for current per-image pricing;
 `_QUALITY` controls low / medium / high.
@@ -33,7 +36,34 @@ _RETRY_MAX_S  = 60.0  # cap each wait at 60 s
 
 
 _BASE_URL = "https://api.openai.com/v1"
-_GEN_SIZE = "1024x1024"       # smallest size supported by the image models we use
+_GEN_SIZE = "1024x1024"       # default / square; see ``_GENERATION_SIZE_CHOICES``
+
+# GPT Image models accept a fixed set of ``size`` values. We choose the candidate
+# whose width/height ratio best matches the board tile to avoid heavy anamorphic
+# stretch when mapping API output → ``spec.size`` (Phase 1: ``generate`` only).
+# Ref: https://platform.openai.com/docs/api-reference/images/create
+_GENERATION_SIZE_CHOICES: tuple[tuple[str, int, int], ...] = (
+    ("1024x1024", 1024, 1024),
+    ("1024x1536", 1024, 1536),
+    ("1536x1024", 1536, 1024),
+)
+
+
+def _generation_size_for_target(target: tuple[int, int]) -> str:
+    """Return OpenAI ``images/generations`` ``size`` closest to target aspect ratio."""
+    tw, th = target
+    if tw <= 0 or th <= 0:
+        return _GEN_SIZE
+    target_ar = tw / th
+    best_label = _GEN_SIZE
+    best_diff = float("inf")
+    for label, aw, ah in _GENERATION_SIZE_CHOICES:
+        api_ar = aw / ah
+        diff = abs(api_ar - target_ar)
+        if diff < best_diff:
+            best_diff = diff
+            best_label = label
+    return best_label
 _DEFAULT_QUALITY = "low"      # low | medium | high
 _DEFAULT_MODEL = "gpt-image-2"
 # Fallback estimates for ui cost hints — verify against OpenAI pricing.
@@ -96,6 +126,7 @@ class OpenAIImageProvider(PixelArtProvider):
     ) -> list[bytes]:
         full_prompt = _STYLE_PREFIX + prompt if prompt else _STYLE_PREFIX.rstrip(". ,")
         out: list[bytes] = []
+        api_size = _generation_size_for_target(size)
         while len(out) < n:
             batch = min(n - len(out), _MAX_IMAGES_PER_REQUEST)
             resp = self._json_post(
@@ -104,7 +135,7 @@ class OpenAIImageProvider(PixelArtProvider):
                     "model": self._model,
                     "prompt": full_prompt,
                     "n": batch,
-                    "size": _GEN_SIZE,
+                    "size": api_size,
                     "quality": self._quality,
                 },
             )
@@ -298,7 +329,7 @@ class OpenAIImageProvider(PixelArtProvider):
 
     @staticmethod
     def _to_target_size(png_bytes: bytes, size: tuple[int, int]) -> bytes:
-        """Downscale from 1024×1024 to the board tile's actual pixel size."""
+        """Resize API output (fixed catalog size, e.g. 1024×1536) to ``spec.size``."""
         img = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
         if img.size != size:
             img = img.resize(size, Image.LANCZOS)

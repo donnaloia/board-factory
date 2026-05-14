@@ -24,7 +24,11 @@
          data-max-ring="{{ max_ring_px }}"
          data-typical-w="{{ typical_size[0] }}"
          data-typical-h="{{ typical_size[1] }}"
-         data-n-panels="{{ n_panels }}">
+         data-n-panels="{{ n_panels }}"
+         data-reapply-batch-usd="{{ '%.6f'|format(reapply_batch_usd) }}"
+         data-reapply-batch-sec="{{ reapply_batch_sec }}"
+         data-reapply-single-usd="{{ '%.6f'|format(reapply_single_usd) }}"
+         data-reapply-single-sec="{{ reapply_single_sec }}">
 
   {# ─────────── status bar / hero ─────────── #}
   <header class="atelier-hero">
@@ -32,10 +36,9 @@
       <span class="eyebrow">Atelier · Frame</span>
       <h1 class="display">The frame</h1>
       <p class="body-lead">
-        One ornate ring, used by every functional panel on this board. Pick a
-        source, let the model propose where the ring sits, fine-tune the inset,
-        and commit &mdash; on commit the board re-paints every applicable panel
-        interior under the new rim so old chrome doesn't double up.
+        One shared frame rim for every functional panel on this board. Choose a
+        source tile, let vision suggest rim and hole, align the <strong>frame extraction region</strong>
+        and thickness, then commit &mdash; panels can be regenerated so interiors match the new rim.
       </p>
     </div>
 
@@ -80,7 +83,7 @@
       <li class="phase" data-phase="refine">
         <span class="phase-num">2</span>
         <span class="phase-label">Refine</span>
-        <span class="phase-sub">Tune rim and hole</span>
+        <span class="phase-sub">Extraction region &amp; rim thickness</span>
       </li>
       <li class="phase" data-phase="commit">
         <span class="phase-num">3</span>
@@ -89,6 +92,16 @@
       </li>
     </ol>
   </nav>
+
+  <aside class="atelier-guide" aria-label="How the frame atelier works">
+    <h2 class="micro-h">How to use this page</h2>
+    <ol class="atelier-guide-steps">
+      <li><strong>Propose</strong> — Pick which image defines the frame (a live panel tile or an upload) and run vision. Candidates appear on the left.</li>
+      <li><strong>Refine</strong> — The <strong>frame extraction region</strong> (dashed brass rectangle) is where we slice rim sprites from your source image &mdash; <em>not</em> a &ldquo;focus&rdquo; on gameplay art. Drag corners to resize it. <strong>Magenta</strong> tint = rim (kept); <strong>cyan</strong> tint = hole (repainted on panels). The <strong>ring thickness</strong> slider adjusts rim width.</li>
+      <li><strong>Typical-panel preview</strong> — The thumbnail is <strong>interior art and rim together</strong> (not art alone): content scaled under the hole plus the new chrome at catalog size; it tracks Refine.</li>
+      <li><strong>Commit</strong> — &ldquo;Adopt frame&rdquo; saves that rim for the board; optional reapply redraws panel interiors. Vision helps <em>find</em> the frame region; the built pipeline still builds a <strong>nine-slice</strong> rim (corners + edges that tile), which is why crop lines look straight &mdash; that keeps pixel art sharp at any panel size.</li>
+    </ol>
+  </aside>
 
   {# ─────────── propose: source picker ─────────── #}
   <section class="atelier-pane" data-pane="propose" aria-labelledby="propose-h">
@@ -106,9 +119,6 @@
       <button type="button" class="atelier-tab is-active" role="tab" data-source-tab="panel">
         From a generated panel
       </button>
-      <button type="button" class="atelier-tab" role="tab" data-source-tab="mockup">
-        From the mockup
-      </button>
       <button type="button" class="atelier-tab" role="tab" data-source-tab="upload">
         Upload an image
       </button>
@@ -117,39 +127,17 @@
     <div class="atelier-source-grid" data-source-grid="panel">
       {% if panel_sources %}
         {% for s in panel_sources %}
-          <button type="button" class="atelier-source-card{{ ' is-disabled' if not s.has_live else '' }}"
-                  {% if s.has_live %}data-source-kind="panel" data-source-id="{{ s.id }}" data-w="{{ s.size[0] }}" data-h="{{ s.size[1] }}"{% endif %}
-                  {% if not s.has_live %}aria-disabled="true" title="No live art yet — generate this panel first."{% endif %}>
+          <button type="button" class="atelier-source-card"
+                  data-source-kind="functional" data-source-id="{{ s.id }}" data-w="{{ s.size[0] }}" data-h="{{ s.size[1] }}">
             <div class="atelier-source-thumb">
-              {% if s.url %}
               <img src="{{ s.url }}" alt="">
-              {% else %}
-              <span class="atelier-source-empty">empty</span>
-              {% endif %}
             </div>
             <span class="atelier-source-label">{{ s.label }}</span>
             <span class="atelier-source-size">{{ s.size[0] }} × {{ s.size[1] }}</span>
           </button>
         {% endfor %}
       {% else %}
-        <p class="atelier-empty">No functional panels in this catalog yet.</p>
-      {% endif %}
-    </div>
-
-    <div class="atelier-source-grid" data-source-grid="mockup" hidden>
-      {% if mockup_sources %}
-        {% for s in mockup_sources %}
-          <button type="button" class="atelier-source-card"
-                  data-source-kind="mockup"
-                  data-source-id="{{ s.id }}"
-                  data-w="{{ s.size[0] }}" data-h="{{ s.size[1] }}">
-            <div class="atelier-source-thumb"><img src="{{ s.url }}" alt=""></div>
-            <span class="atelier-source-label">{{ s.label }}</span>
-            <span class="atelier-source-size">{{ s.size[0] }} × {{ s.size[1] }}</span>
-          </button>
-        {% endfor %}
-      {% else %}
-        <p class="atelier-empty">No mockup uploaded yet for this board.</p>
+        <p class="atelier-empty">No live panel art yet — generate panels on the board first.</p>
       {% endif %}
     </div>
 
@@ -190,12 +178,15 @@
   {# ─────────── refine: canvas + handles ─────────── #}
   <section class="atelier-pane is-empty" data-pane="refine" aria-labelledby="refine-h" hidden>
     <div class="atelier-pane-head">
-      <h2 id="refine-h" class="eyebrow">Refine &mdash; tune the rim</h2>
+      <h2 id="refine-h" class="eyebrow">Refine &mdash; extraction region &amp; rim</h2>
       <p class="atelier-help">
-        Drag the corners, or slide the ring thickness, until the
-        <span class="rim-swatch" aria-hidden="true"></span> rim and
-        <span class="hole-swatch" aria-hidden="true"></span> hole sit where you
-        want them. Switch candidates if the model offered alternatives.
+        Vision proposes where the <strong>rim</strong> and <strong>hole</strong> are (see legend below the stage).
+        The <strong>dashed brass rectangle</strong> is the <strong>frame extraction region</strong>: which part of the source bitmap we cut the nine-slice rim from.
+        It is <em>not</em> your gameplay focal point or subject crop &mdash; only the window for frame chrome.
+        Drag <strong>corner handles</strong> to resize or move that region; masks from vision are clipped inside it but keep curved contours.
+        <strong>Ring thickness</strong> adjusts how wide the rim strip reads.
+        Toggle <strong>Show rim/hole overlay</strong> if you want only the dashed outline.
+        Old painted frames may still appear until <strong>Reapply panels</strong> after commit.
       </p>
     </div>
 
@@ -207,18 +198,35 @@
       </aside>
 
       <div class="atelier-stage" data-stage>
+        <div class="atelier-extraction-heading">
+          <h3 class="micro-h">Frame extraction region</h3>
+          <p class="atelier-extraction-sub">
+            Not the gameplay focus &mdash; only where we slice the frame chrome from your source image.
+          </p>
+          <ul class="atelier-mask-legend" aria-label="Rim and hole overlay legend">
+            <li>
+              <span class="atelier-legend-swatch swatch-rim" aria-hidden="true"></span>
+              <span><strong>Rim</strong> (magenta tint) &mdash; decorative chrome taken from this source; preserved on the rim band.</span>
+            </li>
+            <li>
+              <span class="atelier-legend-swatch swatch-hole" aria-hidden="true"></span>
+              <span><strong>Hole</strong> (cyan tint) &mdash; interior area; repainted when panels are reapplied.</span>
+            </li>
+          </ul>
+        </div>
         <div class="atelier-stage-frame">
           <img class="atelier-stage-source" data-stage-source alt="frame source">
           <canvas class="atelier-stage-overlay" data-stage-overlay></canvas>
+          <div class="atelier-bbox-outline" data-bbox-outline aria-hidden="true"></div>
           <div class="atelier-stage-handles" data-stage-handles aria-hidden="true">
-            <span class="handle handle-tl" data-handle="tl"></span>
-            <span class="handle handle-tr" data-handle="tr"></span>
-            <span class="handle handle-bl" data-handle="bl"></span>
-            <span class="handle handle-br" data-handle="br"></span>
+            <span class="handle handle-tl" data-handle="tl" title="Resize frame extraction region"></span>
+            <span class="handle handle-tr" data-handle="tr" title="Resize frame extraction region"></span>
+            <span class="handle handle-bl" data-handle="bl" title="Resize frame extraction region"></span>
+            <span class="handle handle-br" data-handle="br" title="Resize frame extraction region"></span>
           </div>
         </div>
         <div class="atelier-stage-toolbar">
-          <button type="button" class="quiet-action is-active" data-toggle-overlay>Show overlay</button>
+          <button type="button" class="quiet-action is-active" data-toggle-overlay>Hide rim/hole overlay</button>
           <label class="atelier-checkbox tiny">
             <input type="checkbox" data-snap-to-grid checked>
             <span>Snap to grid</span>
@@ -245,9 +253,24 @@
         </dl>
 
         <h3 class="micro-h">Preview at typical panel ({{ typical_size[0] }}×{{ typical_size[1] }})</h3>
+        <label class="atelier-checkbox atelier-preview-diagnostic">
+          <input type="checkbox" data-mask-diagnostic>
+          <span>Show rim/hole diagnostic overlay on thumbnail (same tint as proposal cards)</span>
+        </label>
+        <p class="atelier-preview-caption">
+          <strong>Interior plus rim,</strong> not interior alone: the hole shows a <strong>different live UI space</strong>
+          (cover-cropped) under the rim when possible so you see chrome over board art, not only over the frame source tile.
+          If no other live space exists, the source tile&rsquo;s center fills the hole instead.
+          After vision, the thumbnail uses the <strong>AI rim and hole masks</strong> (not just a rectangular nine-slice)
+          when a proposal is loaded; otherwise it falls back to geometric slicing.
+          Crop and thickness follow your <strong>frame extraction region</strong> (dashed rectangle, handles) and <strong>ring thickness</strong> (slider).
+          The <strong>ring slider should update this thumbnail live</strong> (rim wider/narrower).
+          This is <strong>only on this page</strong> &mdash; tiles on the main board / side panel still show
+          each cell&rsquo;s saved image until you <strong>Commit</strong> here and run composite / reapply.
+        </p>
         <div class="atelier-preview-tile">
           <div class="atelier-preview-interior"></div>
-          <img data-preview-img alt="frame preview at typical size">
+          <img data-preview-img alt="Typical panel: interior under rim preview">
         </div>
       </aside>
     </div>
@@ -258,10 +281,10 @@
     <div class="atelier-pane-head">
       <h2 id="commit-h" class="eyebrow">Commit &mdash; adopt &amp; reapply</h2>
       <p class="atelier-help">
-        Adopting writes the new frame into <code>workspace/frames/house/</code>
-        and (when "reapply" is on) repaints every applicable panel interior so
-        old baked-in chrome is replaced cleanly. Each panel keeps a snapshot in
-        history tagged <code>frame_rework_pre</code>, so you can always go back.
+        Adopting writes the new frame into <code>workspace/frames/house/</code>.
+        With <strong>Reapply to all panels</strong>, every applicable panel interior is repainted under the new rim.
+        With <strong>Regenerate frame source panel only</strong> (panel sources only), just that tile is inpainted and you return to the board editor when it finishes.
+        Each panel keeps a snapshot in history tagged <code>frame_rework_pre</code> when reapply runs, so you can roll back.
       </p>
     </div>
 
@@ -272,7 +295,12 @@
       </label>
       <label class="atelier-checkbox">
         <input type="checkbox" data-regen-panels checked>
-        <span>Reapply to {{ n_panels }} panel{{ '' if n_panels == 1 else 's' }} (Approach D)</span>
+        <span>Reapply to {{ n_panels }} panel{{ '' if n_panels == 1 else 's' }}</span>
+      </label>
+
+      <label class="atelier-checkbox" data-regen-single-wrap hidden>
+        <input type="checkbox" data-regen-single-panel>
+        <span>Regenerate frame source panel only, then return to board</span>
       </label>
 
       <button type="button" class="editorial-action primary big" data-commit>
@@ -285,9 +313,9 @@
 
   {# ─────────── approach D progress overlay ─────────── #}
   <section class="atelier-progress-overlay" data-progress-overlay hidden aria-live="polite">
-    <div class="atelier-progress-card">
+    <div class="atelier-progress-card" data-progress-card>
       <header>
-        <span class="eyebrow">Approach D</span>
+        <span class="eyebrow" data-progress-eyebrow>Approach D</span>
         <h2 class="display" data-progress-title>Reapplying frame…</h2>
         <p class="body-lead" data-progress-summary>0 of {{ n_panels }} panels regenerated.</p>
       </header>
@@ -303,13 +331,14 @@
             {% if s.url %}<img src="{{ s.url }}" alt="">{% endif %}
           </div>
           <span class="atelier-progress-label">{{ s.label }}</span>
-          <span class="atelier-progress-state">queued</span>
+          <span class="atelier-progress-state">Waiting…</span>
         </li>
         {% endfor %}
       </ul>
 
       <footer class="atelier-progress-actions">
-        <button type="button" class="quiet-action" data-cancel-regen>Cancel</button>
+        <button type="button" class="quiet-action" data-cancel-regen
+          title="Stops the batch before the next panel. Panels already completed keep their new art; the rest stay unchanged.">Cancel</button>
         <button type="button" class="quiet-action" data-progress-done hidden>Done</button>
       </footer>
     </div>
