@@ -165,7 +165,7 @@
   function syncRegenSingleOption() {
     if (!dom.regenSingleWrap || !dom.regenSinglePanel) return;
     const isPanel = Boolean(
-      state.selectedSource && state.selectedSource.kind === "panel"
+      state.selectedSource && state.selectedSource.kind === "functional"
         && state.activeTab === "panel",
     );
     dom.regenSingleWrap.hidden = !isPanel;
@@ -913,7 +913,7 @@
     dom.commit.disabled = true;
     const singlePanel =
       Boolean(dom.regenSinglePanel && dom.regenSinglePanel.checked)
-      && state.selectedSource && state.selectedSource.kind === "panel";
+      && state.selectedSource && state.selectedSource.kind === "functional";
     const body = {
       source_kind: state.selectedSource.kind,
       source_id: state.selectedSource.id,

@@ -217,7 +217,7 @@ and HTTP stays thin:
 
 - **`app/domains/`** — persistence, routes, and orchestration that touches the DB
   and job runner. **Frames** are a good fit as a **sub-area of `cells`** (e.g.
-  extra modules alongside `domains.cells` routes/services/repository): frames
+  extra modules alongside `domains.spaces` routes/services/repository): frames
   apply to **cells** (panels/spaces) at composite time, even though
   `FrameInstance` is keyed by **board**. If the surface grows large, promoting
   to `domains.frames` is an optional later split — start aligned with **cells**

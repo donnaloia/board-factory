@@ -278,8 +278,8 @@
     const sizeStr = spec.size ? `${spec.size[0]} × ${spec.size[1]}` : "—";
     const usesStr = spec.uses === 1 ? "1 position" : `${spec.uses} positions`;
     const eyebrow = ({
-      space: "Perimeter",
-      panel: "Functional",
+      perimeter: "Perimeter",
+      functional: "Functional",
       centerpiece: "Marquee",
     })[spec.kind] || "Cell";
 
@@ -320,7 +320,7 @@
         <div>
           <span class="panel-eyebrow">${eyebrow}</span>
           <h3 class="panel-title">${escapeHtml(spec.title)}</h3>
-          ${spec.kind === "space"
+          ${spec.kind === "perimeter"
             ? renderSpaceDesignIdHead(spec, data)
             : `<span class="panel-id">${escapeHtml(spec.id)}</span>`}
         </div>
@@ -355,7 +355,7 @@
           <dt>Size</dt><dd>${sizeStr} px</dd>
           <dt>Uses</dt><dd>${usesStr}</dd>
           <dt>Category</dt><dd>${data.category}</dd>
-          ${spec.kind === "space"
+          ${spec.kind === "perimeter"
             ? (() => {
                 const sk = spec.space_kind || "standard";
                 const ft = Array.isArray(data.functional_targets) ? data.functional_targets : [];

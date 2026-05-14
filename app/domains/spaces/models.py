@@ -1,4 +1,4 @@
-"""Cells domain — ORM tables: ``cells``, ``frame_instances``."""
+"""Spaces domain — ORM tables: ``cells``, ``frame_instances``."""
 
 from __future__ import annotations
 
@@ -21,13 +21,13 @@ class CellRecord(Base):
     and ``asset_versions.cell_id`` can FK directly to the cell that produced
     each PNG.
 
-    Discriminator: ``kind ∈ {space, panel, centerpiece}``. The DB-level CHECK
-    constraint enforces that:
+    Discriminator: ``kind ∈ {perimeter, functional, centerpiece}``. The DB-level
+    CHECK constraint enforces that:
 
-      * spaces have ``space_kind`` + ``positions_json`` and no bbox/target_size
+      * perimeter rows have ``space_kind`` + ``positions_json`` and no bbox/target_size
         (their bbox is computed at runtime from
         ``board_games.body_json.board_spaces.layout`` + ``positions``);
-      * panels and centerpieces have full bbox + target_size and no
+      * functional (UI) cells and the centerpiece have full bbox + target_size and no
         ``space_kind`` / ``positions_json``;
       * exactly one centerpiece per board (UNIQUE on
         ``(board_uuid, kind, slug)``).
@@ -72,7 +72,7 @@ class CellRecord(Base):
         nullable=True,
     )
 
-    #: Space-design row only: optional ``cells.id`` of a ``kind=panel`` cell to
+    #: Perimeter-design row only: optional ``cells.id`` of a ``kind=functional`` cell to
     #: associate for land → UI / animation (see ``docs/project-export-spec.md`` §10).
     triggers_functional_cell_id: Mapped[str | None] = mapped_column(
         PG_UUID(as_uuid=False),
@@ -86,7 +86,7 @@ class CellRecord(Base):
         Index("ix_cells_live_asset_version_id", "live_asset_version_id"),
         Index("ix_cells_triggers_functional_cell_id", "triggers_functional_cell_id"),
         sa.CheckConstraint(
-            "kind IN ('space','panel','centerpiece')",
+            "kind IN ('perimeter','functional','centerpiece')",
             name="ck_cells_kind_enum",
         ),
         sa.CheckConstraint(
@@ -99,13 +99,13 @@ class CellRecord(Base):
         ),
         sa.CheckConstraint(
             """
-            (kind = 'space'
+            (kind = 'perimeter'
                 AND space_kind IS NOT NULL
                 AND positions_json IS NOT NULL
                 AND bbox_x1 IS NULL AND bbox_y1 IS NULL
                 AND bbox_x2 IS NULL AND bbox_y2 IS NULL
                 AND target_w IS NULL AND target_h IS NULL)
-         OR (kind IN ('panel','centerpiece')
+         OR (kind IN ('functional','centerpiece')
                 AND space_kind IS NULL
                 AND positions_json IS NULL
                 AND bbox_x1 IS NOT NULL AND bbox_y1 IS NOT NULL
@@ -123,7 +123,7 @@ class FrameInstanceRecord(Base):
     Mirrors the on-disk ``workspace/frames/house/frame.json`` so the
     Atelier can list frames across boards and so the Approach D batch
     regen job has a stable id to attach progress to. Persisted by
-    ``app/domains/cells/frames_repository.py``; the on-disk pack
+    ``app/domains/spaces/frames_repository.py``; the on-disk pack
     (eight slice PNGs + hole/rim masks) remains the source of truth for
     the actual rim pixels.
 
@@ -182,7 +182,7 @@ class FrameInstanceRecord(Base):
             postgresql_where=sa.text("active = true"),
         ),
         sa.CheckConstraint(
-            "source_kind IN ('panel','mockup','upload')",
+            "source_kind IN ('functional','mockup','upload')",
             name="ck_frame_instances_source_kind",
         ),
         sa.CheckConstraint(

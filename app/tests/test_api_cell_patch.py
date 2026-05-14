@@ -46,12 +46,12 @@ def test_patch_space_kind_rejects_panels(seeded_board, test_user):
 
 
 def test_get_space_cell_includes_functional_targets(seeded_board, test_user):
-    from domains.cells import repository as cells_repo
+    from domains.spaces import repository as spaces_repo
 
     sid = auth_services.create_session_cookie(test_user.id)
     client = TestClient(app)
     bid = seeded_board.id
-    panel_cell_id = cells_repo.find_id(bid, "panels", "panel_left_top")
+    panel_cell_id = spaces_repo.find_id(bid, "panels", "panel_left_top")
     assert panel_cell_id
     path = f"/users/{test_user.username}/board-games/{bid}/api/cell/spaces/corner_tl"
     r = client.get(path, cookies={auth_services.COOKIE_NAME: sid})
@@ -65,12 +65,12 @@ def test_get_space_cell_includes_functional_targets(seeded_board, test_user):
 
 
 def test_patch_land_trigger_then_clear(seeded_board, test_user):
-    from domains.cells import repository as cells_repo
+    from domains.spaces import repository as spaces_repo
 
     sid = auth_services.create_session_cookie(test_user.id)
     client = TestClient(app)
     bid = seeded_board.id
-    panel_cell_id = cells_repo.find_id(bid, "panels", "panel_left_top")
+    panel_cell_id = spaces_repo.find_id(bid, "panels", "panel_left_top")
     assert panel_cell_id
     base = f"/users/{test_user.username}/board-games/{bid}/api/cell/spaces/corner_tl"
 
@@ -94,12 +94,12 @@ def test_patch_land_trigger_then_clear(seeded_board, test_user):
 
 
 def test_patch_land_trigger_rejects_non_panel_target(seeded_board, test_user):
-    from domains.cells import repository as cells_repo
+    from domains.spaces import repository as spaces_repo
 
     sid = auth_services.create_session_cookie(test_user.id)
     client = TestClient(app)
     bid = seeded_board.id
-    other_space_id = cells_repo.find_id(bid, "spaces", "corner_tr")
+    other_space_id = spaces_repo.find_id(bid, "spaces", "corner_tr")
     assert other_space_id
     path = f"/users/{test_user.username}/board-games/{bid}/api/cell/spaces/corner_tl"
     r = client.patch(

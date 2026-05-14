@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 
 from boardfactory import config as bf_config
 
-from domains.cells import repository as cells_repo
+from domains.spaces import repository as spaces_repo
 from infrastructure import deps
 
 router = APIRouter()
@@ -64,7 +64,7 @@ async def _api_patch_cell(
                 '"triggers_functional_cell_id" must be a string UUID or null',
             )
     try:
-        ok = cells_repo.patch_space_cell_metadata(
+        ok = spaces_repo.patch_space_cell_metadata(
             board_id,
             asset_id,
             space_kind=body.get("space_kind") if has_space_kind else None,

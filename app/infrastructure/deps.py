@@ -29,8 +29,8 @@ from infrastructure.files import workspace as fs_ws
 from assets import repository as assets_repo
 from assets import services as asset_urls
 from domains.boards import services as bd
-from domains.cells import repository as cells_repo
-from domains.cells.models import CellRecord
+from domains.spaces import repository as spaces_repo
+from domains.spaces.models import CellRecord
 from assets.models import AssetVersionRecord
 
 from infrastructure import board_store as bs
@@ -261,7 +261,7 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
         d = next((x for x in designs if x["id"] == asset_id), None)
         if d is None:
             raise HTTPException(404, f"Unknown space design: {asset_id}")
-        from domains.cells.geometry import resolve_position
+        from domains.spaces.geometry import resolve_position
 
         layout = catalog["board_spaces"]["layout"]
         sample_pos = d["positions"][0] if d.get("positions") else None
@@ -275,7 +275,7 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
             "prompt": d.get("prompt", ""),
             "uses": len(d.get("positions", [])),
             "size": size,
-            "kind": "space",
+            "kind": "perimeter",
             "space_kind": d.get("space_kind") or "standard",
         }
     elif category == "panels":
@@ -289,7 +289,7 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
             "prompt": p.get("prompt", ""),
             "uses": 1,
             "size": list(p["target_size"]),
-            "kind": "panel",
+            "kind": "functional",
         }
     elif category == "centerpiece":
         cp = catalog["centerpiece"]
@@ -343,7 +343,7 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
     active_prompt: str | None = None
     cell_row: CellRecord | None = None
 
-    cell_kind = cells_repo.category_to_kind(category)
+    cell_kind = spaces_repo.category_to_kind(category)
     if cell_kind is not None:
         with session_scope() as session:
             cell_row = session.scalar(
@@ -377,7 +377,7 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
                 "id": c.slug,
                 "title": c.slug.replace("_", " "),
             }
-            for c in cells_repo.list_panel_cells_for_board(board_id)
+            for c in spaces_repo.list_panel_cells_for_board(board_id)
         ]
         if cell_row is not None:
             triggers_functional_cell_id = cell_row.triggers_functional_cell_id
@@ -389,7 +389,7 @@ def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -
                     if (
                         tgt is not None
                         and tgt.board_uuid == board_id
-                        and tgt.kind == "panel"
+                        and tgt.kind == "functional"
                     ):
                         triggers_functional = {
                             "cell_id": tgt.id,

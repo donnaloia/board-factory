@@ -14,7 +14,7 @@ _DEFAULT_GAME_ENGINE_INSTRUCTIONS = (
     "(or ResourceLoader.load after import). interaction_graph defines cross-space behavior; "
     "do not infer links only from space layout. spaces[].assets.animation may be null — "
     "skip AnimationPlayer setup when absent. Perimeter rects use the same math as "
-    "app/domains/cells/geometry.py:resolve_position and app/frontend/views/board_svg.py. "
+    "app/domains/spaces/geometry.py:resolve_position and app/frontend/views/board_svg.py. "
     "docs/spec_prose.md explains the grid; real boards may differ from the default skeleton."
 )
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from domains.cells import repository as cells_repo
+from domains.spaces import repository as spaces_repo
 
 from exporter.state import BoardExportState
 
@@ -62,7 +62,7 @@ def stage_interaction_graph(state: BoardExportState) -> None:
     """Fill ``project["interaction_graph"]`` from DB land triggers or an explicit map.
 
     Uses ``BoardExportOptions.land_triggers_design_to_panel``: when **``None``**
-    (default), loads via ``cells_repo.export_land_triggers_by_design_slug``.
+    (default), loads via ``spaces_repo.export_land_triggers_by_design_slug``.
     When set to a **dict** (possibly empty), uses that instead (tests / callers).
 
     ``from_space_id`` is the lexicographically smallest export ``spaces[].id`` for
@@ -76,7 +76,7 @@ def stage_interaction_graph(state: BoardExportState) -> None:
     triggers = (
         opts.land_triggers_design_to_panel
         if opts.land_triggers_design_to_panel is not None
-        else cells_repo.export_land_triggers_by_design_slug(state.board_id)
+        else spaces_repo.export_land_triggers_by_design_slug(state.board_id)
     )
 
     space_ids = {s["id"] for s in spaces if isinstance(s, dict) and isinstance(s.get("id"), str)}

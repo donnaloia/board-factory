@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from domains.cells.geometry import resolve_position
+from domains.spaces.geometry import resolve_position
 
 from exporter.state import BoardExportState
 
@@ -76,7 +76,7 @@ def stage_geometry(state: BoardExportState) -> None:
     layout_hint: dict[str, Any] = {
         "kind": "boardfactory_catalog_v1",
         "reference_implementation": "pipeline/boardfactory/boards.py:default_catalog_dict",
-        "layout_math": "app/domains/cells/geometry.py:resolve_position",
+        "layout_math": "app/domains/spaces/geometry.py:resolve_position",
         "prose_spec": "docs/spec_prose.md",
         "board_size": [cw, ch],
         "perimeter_layout_rows": layout,

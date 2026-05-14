@@ -1,0 +1,27 @@
+# Board Factory — AI / editor context
+
+## Architecture
+
+- Web app: **REST** for normal request/response; **Server-Sent Events (SSE)** for live updates to the client.
+- Heavy work lives in **agentic pipelines** (image analysis, image generation, and related automation). Treat the web layer as orchestration and UX; treat pipelines as the execution engine behind it.
+
+## Pipeline package (`pipeline/`)
+
+- **Sandboxed:** Do not edit anything under `pipeline/` (code, configs, provider wiring) **without explicit user approval** first. Treat it as a separate subsystem.
+- **Decoupling:** The backend should **invoke** pipelines through clear boundaries (adapters, CLI, jobs, stable interfaces)—not entangle HTTP handlers, templates, or domain logic with pipeline internals.
+- **Pipeline isolation (no cross-pipeline code):** Each pipeline tree (e.g. `pipeline/boardfactory/`, future siblings like `cardfactory/`) is **self-contained**. **Do not** share helpers, types, or modules **between** pipeline packages—no cross-imports, no “shared pipeline lib” under `pipeline/`. **Duplication across pipelines is acceptable** and preferred over coupling.
+
+## Design patterns (app code)
+
+- **Functions only:** Implement behavior as **plain callables** (module-level functions; closures only when they shrink noise). **No custom classes** for services, repositories, orchestration, or “managers”—no OOP-shaped app layers. **Exception:** types a library requires (e.g. Pydantic `BaseModel`, ORM declarative models); keep those thin and push logic into functions.
+- **Domains + vertical slices:** **Domain-first** layout (`domains/<name>/`), with **technical slices inside each domain**—for example `models`, `routes`, `repositories` (or a single `repository` module per domain), `services`, and when needed `validators`, `formatters`. Put genuinely shared code in neutral roots (`jobs/`, `infrastructure/`, …) only when it is not owned by one domain.
+- **Placement rule:** Before adding or moving code, answer **which domain owns it** and **which slice** it belongs in. If ownership is unclear, add or extend a domain folder rather than a catch-all dump.
+- **Service shape (app only—not `pipeline/`):** Write `services` as a **short, top-to-bottom chain of named function calls**—each call one clear step—so a quick read shows the high-level flow. Factor non-trivial work into well-named helpers; avoid a single opaque block. **This is a readability convention for webapp services**; do not confuse it with the sandboxed **agentic** packages under `pipeline/`.
+- **No silent fallbacks for required state:** If data or a resource **should** exist for the operation to be valid, **fail fast** with a clear error—do not “if missing, use this instead.” Branch only for **true domain optionality** (explicit optional fields, flags, alternate flows)—not to mask bad design or incomplete setup.
+
+## Default stance
+
+- **Run commands in Docker:** Run **alembic, Python modules, pip installs**, and similar app tooling via **`docker compose exec board-factory …`** or the repo **`make`** targets—not on the host. Use **`postgres`** only for DB-native steps when that’s what the Makefile or task requires.
+- **Tests — always in the container:** Run **`make test`** (after **`make up`**) or the equivalent `docker compose exec -T board-factory … pytest …` for **`app/tests/`**. Do **not** run `python -m pytest` on the host for the app suite — it needs **`BOARDFACTORY_DATABASE_URL`**, Postgres, and the same **`PYTHONPATH`** as the container, and will fail or give false results.
+- Prefer small, focused changes in the app shell (routes, services, frontend, jobs that *call* pipelines).
+- When pipeline changes seem necessary, **stop and ask the user** before modifying anything under `pipeline/`.

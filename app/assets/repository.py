@@ -28,7 +28,7 @@ from infrastructure import board_store as bs
 from infrastructure.db import session_scope
 from assets.models import AssetVersionRecord
 from domains.boards.models import BoardGameRecord
-from domains.cells.models import CellRecord
+from domains.spaces.models import CellRecord
 
 
 # ── pipeline event handler ────────────────────────────────────────────
@@ -137,7 +137,7 @@ def merged_prompt_for_live_asset_row(
 # ── inserts ───────────────────────────────────────────────────────────
 
 
-_CATEGORY_TO_KIND = {"spaces": "space", "panels": "panel", "centerpiece": "centerpiece"}
+_CATEGORY_TO_KIND = {"spaces": "perimeter", "panels": "functional", "centerpiece": "centerpiece"}
 
 
 def _resolve_cell_id(session, board_id: str, category: str, asset_id: str) -> str | None:

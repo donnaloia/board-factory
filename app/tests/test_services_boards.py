@@ -169,7 +169,7 @@ def test_clone_board_copies_disk_cells_and_asset_rows(seeded_board, test_user):
 
     from assets.models import AssetVersionRecord
     from domains.boards import services as svc_boards
-    from domains.cells.models import CellRecord
+    from domains.spaces.models import CellRecord
     from infrastructure.db import session_scope
 
     with session_scope() as session:

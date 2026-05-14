@@ -81,7 +81,7 @@ Export **`spaces[].rect_canvas`** must use the **same math** as the inline board
 
 | Catalog region | Source fields | Pixel rect `(x, y, width, height)` |
 | --- | --- | --- |
-| **Perimeter cell** | Each `board_spaces.designs[]` entry has `positions[]` strings like `top_row.3`. Layout row defs live in `board_spaces.layout`. | For each `(design, position_ref)`, call **`domains.cells.geometry.resolve_position`** (`layout` dict, `position_ref`). Same behavior as pipeline `BoardSpacesSpec.resolve_position`. |
+| **Perimeter cell** | Each `board_spaces.designs[]` entry has `positions[]` strings like `top_row.3`. Layout row defs live in `board_spaces.layout`. | For each `(design, position_ref)`, call **`domains.spaces.geometry.resolve_position`** (`layout` dict, `position_ref`). Same behavior as pipeline `BoardSpacesSpec.resolve_position`. |
 | **Feature panel** | `feature_panels.panels[].bbox` is **`[x1, y1, x2, y2]`** (canvas coords). | `x = x1`, `y = y1`, `width = x2 - x1`, `height = y2 - y1` (matches `board_svg` conversion). |
 | **Centerpiece** | `centerpiece.bbox` is **`[x1, y1, x2, y2]`**. | Same conversion as panels. |
 | **Canvas size** | `board_size` | `[width, height]` for the root view / `canvas_pixels`. |
@@ -89,7 +89,7 @@ Export **`spaces[].rect_canvas`** must use the **same math** as the inline board
 **Reference code (repo):**
 
 - Default catalog skeleton (new boards): **`pipeline/boardfactory/boards.py`** — `default_catalog_dict`.
-- Layout math (raw dict): **`app/domains/cells/geometry.py`** — `resolve_position`.
+- Layout math (raw dict): **`app/domains/spaces/geometry.py`** — `resolve_position`.
 - SVG placement (authoritative consumer): **`app/frontend/views/board_svg.py`** — `render_board_svg`.
 - Human-readable geometry prose: **`docs/spec_prose.md`**.
 
@@ -168,7 +168,7 @@ Each stage is a **plain function** (`stage_geometry(state) -> None` mutating `st
 
 ### 9.3 Layout / geometry — no duplicate service
 
-- Perimeter pixel rects: use existing **`domains.cells.geometry.resolve_position`** (same as SVG / §5.2).  
+- Perimeter pixel rects: use existing **`domains.spaces.geometry.resolve_position`** (same as SVG / §5.2).  
 - Do **not** introduce a parallel “geometry service” that re-implements row math; the catalog + `resolve_position` path is already shared with **`app/frontend/views/board_svg.py`**.  
 - Panel/centerpiece: apply **`bbox` `[x1,y1,x2,y2]` → `x,y,width,height`** in an export stage (same rule as §5.2). Boards may precompute rects and pass them into `exporter` if you want `exporter` to avoid importing `cells` — either wiring is acceptable as long as **one** implementation of the math exists.
 
@@ -203,8 +203,8 @@ This section documents the **shipped** model the exporter must read to fill **`i
 
 - **Model:** **nullable foreign key** on the **perimeter-side** row (the cell that can initiate the trigger), pointing at the **target functional** row. Both endpoints are rows in **`cells`** (`CellRecord`). **`NULL`** means “no land trigger / no linked functional.”  
 - **Discriminator:** use **`cells.kind`** (not `space_kind` — that field is only for **`standard` / `event`** flavor on space rows and does **not** distinguish perimeter vs functional UI).  
-  - **Source row** must be a **perimeter / board-space** cell: **`cells.kind = 'space'`** in the DB today; planned rename to **`'perimeter'`** (see **`docs/TODO-issues.md`** §13).  
-  - **Target row** must be a **functional UI** cell: **`cells.kind = 'panel'`** today; planned rename to **`'functional'`** (same TODO).  
+  - **Source row** must be a **perimeter / board-space** cell: **`cells.kind = 'perimeter'`**.  
+  - **Target row** must be a **functional UI** cell: **`cells.kind = 'functional'`**.  
   - Reject pairs where `kind` does not match those roles (and reject **`centerpiece`** as source or target unless product later allows it).  
 - **Not** a many-to-many link table for MVP: one optional target per perimeter cell matches the single dropdown. Revisit a **link table** later if product needs **multiple** actions per land or rich per-edge metadata.  
 - **Validation (server):** both rows share the same **`board_uuid`**; enforce **`cells.kind`** rules above; reject self-loops (`from_id == to_id`).  

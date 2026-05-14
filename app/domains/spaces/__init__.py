@@ -1,12 +1,12 @@
-"""Cells domain — spaces, feature panels, centerpiece.
+"""Spaces domain — perimeter spaces, feature panels, centerpiece.
 
-A *cell* is one painted region of a board. Three subtypes share the same
-``cells`` row shape (see ``domains.cells.models.CellRecord``):
+A *cell* is one painted region of a board (DB table ``cells``). Three subtypes share the same
+``cells`` row shape (see ``domains.spaces.models.CellRecord``):
 
-  * ``kind == 'space'``       — perimeter tile; geometry comes from
+  * ``kind == 'perimeter'``   — perimeter tile; geometry comes from
                                 ``board_games.body_json.board_spaces.layout``
                                 + ``cells.positions_json``.
-  * ``kind == 'panel'``       — interior panel; absolute bbox + target_size
+  * ``kind == 'functional'``  — interior functional UI cell; absolute bbox + target_size
                                 stored on the cell row.
   * ``kind == 'centerpiece'`` — exactly one per board; absolute bbox +
                                 target_size stored on the cell row.

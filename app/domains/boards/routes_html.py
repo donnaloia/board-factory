@@ -16,7 +16,7 @@ from boardfactory import frames as bf_frames
 from domains.boards.routes_common import NestedBoardId, board_prefix
 from infrastructure import deps
 from domains.boards import services as svc_boards
-from domains.cells import services as svc_cells
+from domains.spaces import services as svc_spaces
 from assets import services as asset_urls
 from infrastructure import board_store as bs
 from infrastructure.files import workspace as fs_ws
@@ -30,7 +30,7 @@ def board_view(request: Request, board_id: NestedBoardId):
         return RedirectResponse(f"{board_prefix(board_id)}/setup", status_code=303)
 
     catalog = deps.load_board_catalog(board_id)
-    stats = svc_cells.collect_board_stats(board_id, catalog)
+    stats = svc_spaces.collect_board_stats(board_id, catalog)
     space_status = stats.space_status
     panel_status = stats.panel_status
     cp_status = stats.centerpiece_status
@@ -163,7 +163,7 @@ def frame_view(request: Request, board_id: NestedBoardId):
     # Lazy-backfill the relational row if the on-disk pack predates the
     # frame_instances table; the Atelier UI surfaces "imported from disk"
     # provenance based on the row that comes back here.
-    from domains.cells import frames_repository as frames_repo
+    from domains.spaces import frames_repository as frames_repo
 
     active_view = frames_repo.ensure_active_for_disk_pack(board_id)
 

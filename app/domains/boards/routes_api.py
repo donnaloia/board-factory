@@ -30,7 +30,7 @@ from boardfactory.schemas import Catalog
 from domains.boards.routes_common import NestedBoardId, board_prefix
 from infrastructure import deps
 from domains.boards import services as svc_boards
-from domains.cells import services as svc_cells
+from domains.spaces import services as svc_spaces
 from assets import services as asset_urls
 from domains.boards import mockup_prompt as mockup_prompt_svc
 from exporter import run_board_export
@@ -88,7 +88,9 @@ def _try_load_proposal_masks(
         man = _json_std.loads(manifest_p.read_text())
     except (OSError, ValueError, TypeError):
         return None
-    if man.get("source_kind") != source_kind or man.get("source_id") != source_id:
+    if man.get("source_id") != source_id:
+        return None
+    if not bf_frames.frame_source_kinds_match(man.get("source_kind"), source_kind):
         return None
     cands = man.get("candidates") or []
     if not (0 <= candidate_index < len(cands)):
@@ -196,7 +198,7 @@ def api_frame_preview(
             try:
                 man = _json_std.loads(manifest_p.read_text())
                 if (
-                    man.get("source_kind") == source_kind
+                    bf_frames.frame_source_kinds_match(man.get("source_kind"), source_kind)
                     and man.get("source_id") == source_id
                 ):
                     cands = man.get("candidates") or []
@@ -500,13 +502,17 @@ async def _api_frame_adopt(
     if ring_px < 2:
         raise HTTPException(400, "ring_px must be at least 2")
 
+    source_kind = bf_frames.normalize_frame_source_kind(source_kind)
+    if source_kind not in bf_frames.VALID_FRAME_SOURCE_KINDS:
+        raise HTTPException(400, f"Unknown source_kind {source_kind!r}")
+
     catalog = deps.load_board_catalog(board_id)
     src_img, src_size = _load_atelier_source(board_id, catalog, source_kind, source_id)
 
     if ring_px * 2 >= min(src_size):
         raise HTTPException(400, f"ring_px={ring_px} is too thick for source {src_size}")
 
-    from domains.cells import frames_repository as frames_repo
+    from domains.spaces import frames_repository as frames_repo
 
     with bf_config.scope_board(board_id):
         slice_ = bf_frames.extract_9slice(src_img, ring_px)
@@ -562,7 +568,7 @@ async def _api_frame_disable(request: Request, board_id: str) -> JSONResponse:
     data["frame"]["enabled"] = False
     svc_boards.save_catalog(board_id, data)
 
-    from domains.cells import frames_repository as frames_repo
+    from domains.spaces import frames_repository as frames_repo
 
     n = frames_repo.mark_all_inactive(board_id)
     return JSONResponse({"ok": True, "deactivated_rows": n})
@@ -593,13 +599,16 @@ def _load_atelier_source(
     source_id: str,
 ) -> tuple[Image.Image, tuple[int, int]]:
     """Load the RGBA image used by Frame Atelier propose/refine/commit."""
-    if source_kind == "panel":
+    sk = bf_frames.normalize_frame_source_kind(source_kind)
+    if sk not in bf_frames.VALID_FRAME_SOURCE_KINDS:
+        raise HTTPException(400, f"Unknown source_kind {source_kind!r}")
+    if sk == "functional":
         live = fs_ws.live_path(board_id, "panels", source_id)
         if not live.exists():
             raise HTTPException(404, f"No live panel asset for {source_id}")
         src_img = Image.open(live).convert("RGBA")
         return src_img, src_img.size
-    if source_kind == "mockup":
+    if sk == "mockup":
         panels = catalog.get("feature_panels", {}).get("panels", [])
         p = next((x for x in panels if x["id"] == source_id), None)
         if p is None:
@@ -611,7 +620,7 @@ def _load_atelier_source(
         crop = Image.open(mockup_path).convert("RGBA").crop((x1, y1, x2, y2))
         crop = crop.resize(tuple(p["target_size"]), Image.NEAREST)
         return crop, (p["target_size"][0], p["target_size"][1])
-    if source_kind == "upload":
+    if sk == "upload":
         upload_path = (
             fs_ws.board_root(board_id) / "workspace" / "frames" / "_uploads" / source_id
         )
@@ -679,7 +688,8 @@ async def api_frame_propose(
     """
     if candidate_count < 1 or candidate_count > 5:
         raise HTTPException(400, "candidate_count must be in 1..5")
-    if source_kind not in ("panel", "mockup", "upload"):
+    source_kind = bf_frames.normalize_frame_source_kind(source_kind)
+    if source_kind not in bf_frames.VALID_FRAME_SOURCE_KINDS:
         raise HTTPException(400, f"Unknown source_kind {source_kind!r}")
 
     keys = deps.user_provider_api_keys(request)
@@ -754,9 +764,14 @@ class FrameRefineBody(BaseModel):
     job_id: str
     candidate_index: int
     bbox: tuple[int, int, int, int]
-    source_kind: Literal["panel", "mockup", "upload"]
+    source_kind: Literal["functional", "mockup", "upload"]
     source_id: str
     ring_px: int | None = None
+
+    @field_validator("source_kind", mode="before")
+    @classmethod
+    def _normalize_refine_source_kind(cls, v: object) -> str:
+        return bf_frames.normalize_frame_source_kind(str(v))
 
     @field_validator("bbox", mode="before")
     @classmethod
@@ -781,7 +796,9 @@ async def api_frame_refine(
         raise HTTPException(500, f"Bad manifest: {e}") from None
 
     if (
-        manifest.get("source_kind") != body.source_kind
+        not bf_frames.frame_source_kinds_match(
+            manifest.get("source_kind"), body.source_kind,
+        )
         or manifest.get("source_id") != body.source_id
     ):
         raise HTTPException(400, "source_kind / source_id do not match the proposal run")
@@ -887,7 +904,7 @@ class FrameCommitBody(BaseModel):
     the Atelier can regenerate one tile then redirect to the board.
     """
 
-    source_kind: Literal["panel", "mockup", "upload"]
+    source_kind: Literal["functional", "mockup", "upload"]
     source_id: str
     ring_px: int
 
@@ -897,6 +914,11 @@ class FrameCommitBody(BaseModel):
     enable_after: bool = True
     regen_panels: bool = True
     regen_single_panel_id: str | None = None
+
+    @field_validator("source_kind", mode="before")
+    @classmethod
+    def _normalize_commit_source_kind(cls, v: object) -> str:
+        return bf_frames.normalize_frame_source_kind(str(v))
 
 
 @router.post("/users/{username}/board-games/{path_slug}/api/frame/commit")
@@ -967,7 +989,7 @@ async def api_frame_commit(
             400, f"ring_px={body.ring_px} too thick for source {src_size}"
         )
 
-    from domains.cells import frames_repository as frames_repo
+    from domains.spaces import frames_repository as frames_repo
 
     with bf_config.scope_board(board_id):
         slice_ = bf_frames.extract_9slice(src_img, body.ring_px)
@@ -1140,8 +1162,8 @@ async def _action_generate_missing_all(
     request: Request, board_id: str,
 ) -> JSONResponse | RedirectResponse:
     catalog = deps.load_board_catalog(board_id)
-    missing_spaces = svc_cells.missing_space_ids(board_id, catalog)
-    missing_panels = svc_cells.missing_panel_ids(board_id, catalog)
+    missing_spaces = svc_spaces.missing_space_ids(board_id, catalog)
+    missing_panels = svc_spaces.missing_panel_ids(board_id, catalog)
     total = len(missing_spaces) + len(missing_panels)
     keys = deps.user_provider_api_keys(request)
     job_id = deps.enqueue_pipeline_job(

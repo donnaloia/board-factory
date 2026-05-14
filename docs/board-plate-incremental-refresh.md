@@ -34,7 +34,7 @@ Today the board refreshes by **replacing the entire `#board-plate`** HTML (full 
 
 Prefer:
 
-- **Stable domain events** already emitted today (e.g. asset promoted → URL known), surfaced through **app layer** (`domains/cells`, `jobs`, SSE) to the browser; or  
+- **Stable domain events** already emitted today (e.g. asset promoted → URL known), surfaced through **app layer** (`domains/spaces`, `jobs`, SSE) to the browser; or  
 - **Thin adapters** in **`app/`** that subscribe to existing outcomes and forward minimal facts (`asset_id`, `live_url`, `version`) to SSE.
 
 The pipeline stays **UI-agnostic**; the web tier translates outcomes into **incremental patch instructions** for the plate.

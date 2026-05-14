@@ -36,7 +36,7 @@ def upgrade() -> None:
     import jobs.models  # noqa: F401
     import assets.models  # noqa: F401
     import domains.boards.models  # noqa: F401
-    import domains.cells.models  # noqa: F401
+    import domains.spaces.models  # noqa: F401
 
     bind = op.get_bind()
     Base.metadata.create_all(bind)
@@ -49,7 +49,7 @@ def downgrade() -> None:
     import jobs.models  # noqa: F401
     import assets.models  # noqa: F401
     import domains.boards.models  # noqa: F401
-    import domains.cells.models  # noqa: F401
+    import domains.spaces.models  # noqa: F401
 
     bind = op.get_bind()
     Base.metadata.drop_all(bind)

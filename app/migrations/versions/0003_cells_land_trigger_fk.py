@@ -5,7 +5,7 @@ Revises: 0002_frame_instances
 Create Date: 2026-05-09
 
 See ``docs/project-export-spec.md`` §10 — ``triggers_functional_cell_id`` on
-``kind = 'space'`` rows points at a ``kind = 'panel'`` row on the same board.
+``kind = 'perimeter'`` rows points at a ``kind = 'functional'`` row on the same board.
 """
 
 from __future__ import annotations

@@ -17,13 +17,13 @@ from sqlalchemy import func, select
 
 from infrastructure.db import session_scope
 from assets.models import AssetVersionRecord
-from domains.cells.models import CellRecord
+from domains.spaces.models import CellRecord
 
 
 # ────────────────────────── id translation ──────────────────────────
 
 
-_CATEGORY_TO_KIND = {"spaces": "space", "panels": "panel", "centerpiece": "centerpiece"}
+_CATEGORY_TO_KIND = {"spaces": "perimeter", "panels": "functional", "centerpiece": "centerpiece"}
 _KIND_TO_CATEGORY = {v: k for k, v in _CATEGORY_TO_KIND.items()}
 
 
@@ -107,7 +107,7 @@ def update_space_kind(board_id: str, slug: str, space_kind: str) -> bool:
         row = session.scalar(
             select(CellRecord).where(
                 CellRecord.board_uuid == board_id,
-                CellRecord.kind == "space",
+                CellRecord.kind == "perimeter",
                 CellRecord.slug == slug,
             )
         )
@@ -130,7 +130,7 @@ def patch_space_cell_metadata(
 
     Only fields with ``update_*`` True are written. For triggers, pass
     ``triggers_functional_cell_id=None`` with ``update_triggers=True`` to clear.
-    Validates target row is ``kind='panel'`` on the same board when non-null.
+    Validates target row is ``kind='functional'`` on the same board when non-null.
     """
     if space_kind is not None and space_kind not in ("standard", "event"):
         raise ValueError(f"invalid space_kind: {space_kind!r}")
@@ -139,7 +139,7 @@ def patch_space_cell_metadata(
         row = session.scalar(
             select(CellRecord).where(
                 CellRecord.board_uuid == board_id,
-                CellRecord.kind == "space",
+                CellRecord.kind == "perimeter",
                 CellRecord.slug == slug,
             )
         )
@@ -157,7 +157,7 @@ def patch_space_cell_metadata(
                     select(CellRecord).where(
                         CellRecord.id == triggers_functional_cell_id,
                         CellRecord.board_uuid == board_id,
-                        CellRecord.kind == "panel",
+                        CellRecord.kind == "functional",
                     )
                 )
                 if tgt is None:
@@ -179,7 +179,7 @@ def list_panel_cells_for_board(board_id: str) -> list[CellRecord]:
                 select(CellRecord)
                 .where(
                     CellRecord.board_uuid == board_id,
-                    CellRecord.kind == "panel",
+                    CellRecord.kind == "functional",
                 )
                 .order_by(CellRecord.position_index, CellRecord.slug)
             )
@@ -201,10 +201,10 @@ def export_land_triggers_by_design_slug(board_id: str) -> dict[str, str]:
             .join(Panel, CellRecord.triggers_functional_cell_id == Panel.id)
             .where(
                 CellRecord.board_uuid == board_id,
-                CellRecord.kind == "space",
+                CellRecord.kind == "perimeter",
                 CellRecord.triggers_functional_cell_id.is_not(None),
                 Panel.board_uuid == board_id,
-                Panel.kind == "panel",
+                Panel.kind == "functional",
             )
         ).all()
         return {str(a): str(b) for a, b in rows}

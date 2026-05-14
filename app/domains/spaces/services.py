@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from domains.cells.status import CellStatus
+from domains.spaces.status import CellStatus
 
 from infrastructure import deps
 from assets import repository as asset_index

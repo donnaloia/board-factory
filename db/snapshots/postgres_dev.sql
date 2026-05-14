@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict g3L4qP4AJnzL6z3LcjdzdVW2EcMJb3G4JI9VA3DcNfTDIvJmMUwZSYwZ1DtYrUd
+\restrict 7FB91aSk3xClrihCAengO4q5pto2nG3bkI15KE5BNVShdI3Zqer0pLpSUgKOZVV
 
 -- Dumped from database version 16.13
 -- Dumped by pg_dump version 16.13
@@ -24,6 +24,7 @@ ALTER TABLE IF EXISTS ONLY public.owned_boards DROP CONSTRAINT IF EXISTS owned_b
 ALTER TABLE IF EXISTS ONLY public.frame_instances DROP CONSTRAINT IF EXISTS frame_instances_source_cell_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.frame_instances DROP CONSTRAINT IF EXISTS frame_instances_source_asset_version_id_fkey;
 ALTER TABLE IF EXISTS ONLY public.frame_instances DROP CONSTRAINT IF EXISTS frame_instances_board_uuid_fkey;
+ALTER TABLE IF EXISTS ONLY public.cells DROP CONSTRAINT IF EXISTS fk_cells_triggers_functional_cell_id;
 ALTER TABLE IF EXISTS ONLY public.cells DROP CONSTRAINT IF EXISTS fk_cells_live_asset_version_id_asset_versions;
 ALTER TABLE IF EXISTS ONLY public.cells DROP CONSTRAINT IF EXISTS cells_board_uuid_fkey;
 ALTER TABLE IF EXISTS ONLY public.browser_sessions DROP CONSTRAINT IF EXISTS browser_sessions_user_id_fkey;
@@ -37,6 +38,7 @@ DROP INDEX IF EXISTS public.ix_owned_boards_user_id;
 DROP INDEX IF EXISTS public.ix_job_runs_ended_at;
 DROP INDEX IF EXISTS public.ix_frame_instances_board;
 DROP INDEX IF EXISTS public.ix_cost_entries_ts;
+DROP INDEX IF EXISTS public.ix_cells_triggers_functional_cell_id;
 DROP INDEX IF EXISTS public.ix_cells_live_asset_version_id;
 DROP INDEX IF EXISTS public.ix_cells_board_kind;
 DROP INDEX IF EXISTS public.ix_browser_sessions_user_id;
@@ -202,9 +204,10 @@ CREATE TABLE public.cells (
     target_w integer,
     target_h integer,
     live_asset_version_id integer,
+    triggers_functional_cell_id uuid,
     CONSTRAINT ck_cells_active_kind_enum CHECK (((active_kind)::text = ANY (ARRAY[('glow'::character varying)::text, ('pulse'::character varying)::text, ('flicker'::character varying)::text, ('none'::character varying)::text]))),
-    CONSTRAINT ck_cells_kind_enum CHECK (((kind)::text = ANY (ARRAY[('space'::character varying)::text, ('panel'::character varying)::text, ('centerpiece'::character varying)::text]))),
-    CONSTRAINT ck_cells_shape_by_kind CHECK (((((kind)::text = 'space'::text) AND (space_kind IS NOT NULL) AND (positions_json IS NOT NULL) AND (bbox_x1 IS NULL) AND (bbox_y1 IS NULL) AND (bbox_x2 IS NULL) AND (bbox_y2 IS NULL) AND (target_w IS NULL) AND (target_h IS NULL)) OR (((kind)::text = ANY (ARRAY[('panel'::character varying)::text, ('centerpiece'::character varying)::text])) AND (space_kind IS NULL) AND (positions_json IS NULL) AND (bbox_x1 IS NOT NULL) AND (bbox_y1 IS NOT NULL) AND (bbox_x2 IS NOT NULL) AND (bbox_y2 IS NOT NULL) AND (target_w IS NOT NULL) AND (target_h IS NOT NULL)))),
+    CONSTRAINT ck_cells_kind_enum CHECK (((kind)::text = ANY ((ARRAY['perimeter'::character varying, 'functional'::character varying, 'centerpiece'::character varying])::text[]))),
+    CONSTRAINT ck_cells_shape_by_kind CHECK (((((kind)::text = 'perimeter'::text) AND (space_kind IS NOT NULL) AND (positions_json IS NOT NULL) AND (bbox_x1 IS NULL) AND (bbox_y1 IS NULL) AND (bbox_x2 IS NULL) AND (bbox_y2 IS NULL) AND (target_w IS NULL) AND (target_h IS NULL)) OR (((kind)::text = ANY ((ARRAY['functional'::character varying, 'centerpiece'::character varying])::text[])) AND (space_kind IS NULL) AND (positions_json IS NULL) AND (bbox_x1 IS NOT NULL) AND (bbox_y1 IS NOT NULL) AND (bbox_x2 IS NOT NULL) AND (bbox_y2 IS NOT NULL) AND (target_w IS NOT NULL) AND (target_h IS NOT NULL)))),
     CONSTRAINT ck_cells_space_kind_enum CHECK (((space_kind IS NULL) OR ((space_kind)::text = ANY (ARRAY[('standard'::character varying)::text, ('event'::character varying)::text]))))
 );
 
@@ -264,7 +267,7 @@ CREATE TABLE public.frame_instances (
     active boolean DEFAULT true NOT NULL,
     created_ms bigint NOT NULL,
     CONSTRAINT ck_frame_instances_geometry CHECK (((ring_px >= 1) AND (source_w > 0) AND (source_h > 0))),
-    CONSTRAINT ck_frame_instances_source_kind CHECK (((source_kind)::text = ANY ((ARRAY['panel'::character varying, 'mockup'::character varying, 'upload'::character varying])::text[])))
+    CONSTRAINT ck_frame_instances_source_kind CHECK (((source_kind)::text = ANY ((ARRAY['functional'::character varying, 'mockup'::character varying, 'upload'::character varying])::text[])))
 );
 
 
@@ -377,7 +380,7 @@ ALTER TABLE ONLY public.user_secrets ALTER COLUMN id SET DEFAULT nextval('public
 --
 
 COPY public.alembic_version (version_num) FROM stdin;
-0002_frame_instances
+0004_perimeter_functional
 \.
 
 
@@ -1284,11 +1287,11 @@ a996c8d0-ff42-434b-a425-b229c8815138	{"board_spaces": {"layout": {"top_row": {"a
 --
 
 COPY public.browser_sessions (sid, user_id, created_ms, last_seen_ms) FROM stdin;
-LnZ7ZvRf5dDxciMtYz038Hn8JDxZoPLo	46c004b7a2a9482398aa262d103cf96e	1777822775286	1777870488690
 a19fCUhrtBjPPSeWEU7nBmsGr4FriOWO	46c004b7a2a9482398aa262d103cf96e	1777932194496	1777939749114
 6hoelKe_HlB9V-7StoOlqgQwCzeAzaMZ	46c004b7a2a9482398aa262d103cf96e	1777937643777	1777939801976
+VemCs6A0iOqV91zdig-SCVDPfPaJQUV4	46c004b7a2a9482398aa262d103cf96e	1778213077726	1778721170404
 8m1fomRi_SbjicZlBHWL4r3kj-sNk3e_	46c004b7a2a9482398aa262d103cf96e	1777682466977	1778212906339
-VemCs6A0iOqV91zdig-SCVDPfPaJQUV4	46c004b7a2a9482398aa262d103cf96e	1778213077726	1778375312173
+LnZ7ZvRf5dDxciMtYz038Hn8JDxZoPLo	46c004b7a2a9482398aa262d103cf96e	1777822775286	1778638048768
 \.
 
 
@@ -1296,259 +1299,259 @@ VemCs6A0iOqV91zdig-SCVDPfPaJQUV4	46c004b7a2a9482398aa262d103cf96e	1778213077726	
 -- Data for Name: cells; Type: TABLE DATA; Schema: public; Owner: -
 --
 
-COPY public.cells (id, board_uuid, kind, slug, position_index, prompt, needs_active, active_kind, space_kind, positions_json, bbox_x1, bbox_y1, bbox_x2, bbox_y2, target_w, target_h, live_asset_version_id) FROM stdin;
-38476bb0-1676-4ed0-93e9-99912c933a07	748e880d-ceab-46e3-96f8-7684903a2727	space	corner_tl	0		f	none	standard	["top_row.0"]	\N	\N	\N	\N	\N	\N	24662
-44bad422-75ee-4101-8d89-756f7510458c	748e880d-ceab-46e3-96f8-7684903a2727	space	corner_tr	1		f	none	standard	["top_row.11"]	\N	\N	\N	\N	\N	\N	24663
-c551c198-1369-4b74-ab97-63ae500f4673	748e880d-ceab-46e3-96f8-7684903a2727	space	corner_bl	2		f	none	standard	["bottom_row.0"]	\N	\N	\N	\N	\N	\N	24664
-684b2398-5144-4992-883b-43535a9d30fd	748e880d-ceab-46e3-96f8-7684903a2727	space	corner_br	3		f	none	standard	["bottom_row.11"]	\N	\N	\N	\N	\N	\N	24665
-e7fa6140-0edd-4cbd-b77f-5a1e22c2e02e	748e880d-ceab-46e3-96f8-7684903a2727	space	top_banner_a	4		f	none	standard	["top_row.5"]	\N	\N	\N	\N	\N	\N	24666
-fb347f50-3a23-47ec-ad49-8dd8b360ea9c	748e880d-ceab-46e3-96f8-7684903a2727	space	top_banner_b	5		f	none	standard	["top_row.7"]	\N	\N	\N	\N	\N	\N	24667
-c7a2cd72-6372-431f-88f6-b25a2cac5d41	748e880d-ceab-46e3-96f8-7684903a2727	space	top_space_a	6		f	none	standard	["top_row.1", "top_row.4", "top_row.8"]	\N	\N	\N	\N	\N	\N	24668
-0dec3e10-126c-4c8a-a608-095627ab4a07	748e880d-ceab-46e3-96f8-7684903a2727	space	top_space_b	7		f	none	standard	["top_row.2", "top_row.6", "top_row.9"]	\N	\N	\N	\N	\N	\N	24669
-50d7495f-e559-41e2-b70d-c75573e64970	748e880d-ceab-46e3-96f8-7684903a2727	space	top_space_c	8		f	none	standard	["top_row.3", "top_row.10"]	\N	\N	\N	\N	\N	\N	24670
-ed6ccf75-1c5a-400f-b87a-7253ad4aebc1	748e880d-ceab-46e3-96f8-7684903a2727	space	bottom_banner_a	9		f	none	standard	["bottom_row.5"]	\N	\N	\N	\N	\N	\N	24671
-026a7bf7-0af1-4b7c-8d37-3843235616d9	748e880d-ceab-46e3-96f8-7684903a2727	space	bottom_banner_b	10		f	none	standard	["bottom_row.6"]	\N	\N	\N	\N	\N	\N	24672
-fe4c5b8b-b385-4438-9802-b3ea587c9948	748e880d-ceab-46e3-96f8-7684903a2727	space	bottom_space_a	11		f	none	standard	["bottom_row.1", "bottom_row.4"]	\N	\N	\N	\N	\N	\N	24673
-eb024126-db41-40e0-a81c-7c261a4b23b5	748e880d-ceab-46e3-96f8-7684903a2727	space	bottom_space_b	12		f	none	standard	["bottom_row.2", "bottom_row.10"]	\N	\N	\N	\N	\N	\N	24674
-c969f7f6-adf3-4dc3-8849-86ab154b96f8	748e880d-ceab-46e3-96f8-7684903a2727	space	bottom_space_c	13		f	none	standard	["bottom_row.3", "bottom_row.8"]	\N	\N	\N	\N	\N	\N	24675
-3b19b24c-100f-4ba4-b453-35a3dcee0425	748e880d-ceab-46e3-96f8-7684903a2727	space	bottom_space_d	14		f	none	standard	["bottom_row.9"]	\N	\N	\N	\N	\N	\N	24676
-52eb0298-5aa0-439b-8469-4c6ba4a7c81f	748e880d-ceab-46e3-96f8-7684903a2727	space	bottom_battle	15		f	none	standard	["bottom_row.7"]	\N	\N	\N	\N	\N	\N	24677
-1d9b4bd8-1b2b-4bb6-bc42-f2785553f40d	748e880d-ceab-46e3-96f8-7684903a2727	space	side_battle	17		f	none	standard	["left_col.2", "right_col.0", "right_col.4"]	\N	\N	\N	\N	\N	\N	24679
-69e7b559-b30d-4f23-938e-62ed503f477c	748e880d-ceab-46e3-96f8-7684903a2727	space	top_battle	18		f	none	standard	["top_row.3"]	\N	\N	\N	\N	\N	\N	24680
-b46f8f7d-4be4-4039-a74d-3d6c18f417fb	ed1456f7-12ef-48d3-ac59-4c93634c8a33	space	corner_tl	0		f	none	standard	["top_row.0"]	\N	\N	\N	\N	\N	\N	24681
-4b1b3c50-561a-4a83-bf2d-1f82ff63cf64	ed1456f7-12ef-48d3-ac59-4c93634c8a33	space	corner_tr	1		f	none	standard	["top_row.11"]	\N	\N	\N	\N	\N	\N	24682
-8c059f13-0c61-485e-a588-ec606a267937	ed1456f7-12ef-48d3-ac59-4c93634c8a33	space	corner_bl	2		f	none	standard	["bottom_row.0"]	\N	\N	\N	\N	\N	\N	24683
-68c5291f-eee0-4465-8e3a-41e636391c0f	ed1456f7-12ef-48d3-ac59-4c93634c8a33	space	corner_br	3		f	none	standard	["bottom_row.11"]	\N	\N	\N	\N	\N	\N	24684
-aea8956c-4548-4824-a55b-f37d0885e027	ed1456f7-12ef-48d3-ac59-4c93634c8a33	space	top_banner_a	4		f	none	standard	["top_row.5"]	\N	\N	\N	\N	\N	\N	24685
-2eb50420-6ef1-4114-8f77-2e20353f7949	ed1456f7-12ef-48d3-ac59-4c93634c8a33	space	top_banner_b	5		f	none	standard	["top_row.7"]	\N	\N	\N	\N	\N	\N	24686
-9fa68c42-09da-4f2c-b249-f0b5ffadaeb6	ed1456f7-12ef-48d3-ac59-4c93634c8a33	space	top_space_a	6		f	none	standard	["top_row.1", "top_row.4", "top_row.8"]	\N	\N	\N	\N	\N	\N	24687
-019cbae7-d4a1-447b-8a49-39ddeb92797b	748e880d-ceab-46e3-96f8-7684903a2727	space	side_property	16		f	none	standard	["left_col.0", "left_col.1", "left_col.3", "left_col.4", "right_col.1", "right_col.2", "right_col.3"]	\N	\N	\N	\N	\N	\N	24678
-f781123b-b8c3-4cb9-93e9-a220b4c7a79a	ed1456f7-12ef-48d3-ac59-4c93634c8a33	space	top_space_b	7		f	none	standard	["top_row.2", "top_row.6", "top_row.9"]	\N	\N	\N	\N	\N	\N	24688
-a23b8bc0-fd75-4664-8a7f-b8eda64d8d13	ed1456f7-12ef-48d3-ac59-4c93634c8a33	space	top_space_c	8		f	none	standard	["top_row.3", "top_row.10"]	\N	\N	\N	\N	\N	\N	24689
-fdf3cf7e-d33f-41aa-9695-b06216bf4cb6	ed1456f7-12ef-48d3-ac59-4c93634c8a33	space	bottom_banner_a	9		f	none	standard	["bottom_row.5"]	\N	\N	\N	\N	\N	\N	24690
-81741217-4816-444e-bd2e-2b1098297118	ed1456f7-12ef-48d3-ac59-4c93634c8a33	space	bottom_banner_b	10		f	none	standard	["bottom_row.6"]	\N	\N	\N	\N	\N	\N	24691
-a9ed473b-2d13-41a2-9910-4522f57e82e3	ed1456f7-12ef-48d3-ac59-4c93634c8a33	space	bottom_space_a	11		f	none	standard	["bottom_row.1", "bottom_row.4"]	\N	\N	\N	\N	\N	\N	24692
-18e98814-2c39-4430-a959-8c588f6598f0	ed1456f7-12ef-48d3-ac59-4c93634c8a33	space	bottom_space_b	12		f	none	standard	["bottom_row.2", "bottom_row.10"]	\N	\N	\N	\N	\N	\N	24693
-4dcf9c1d-c379-4857-9696-77b3c7674993	ed1456f7-12ef-48d3-ac59-4c93634c8a33	space	bottom_space_c	13		f	none	standard	["bottom_row.3", "bottom_row.8"]	\N	\N	\N	\N	\N	\N	24694
-c4cf47c4-1d00-4629-9594-e07424b94046	ed1456f7-12ef-48d3-ac59-4c93634c8a33	space	bottom_space_d	14		f	none	standard	["bottom_row.9"]	\N	\N	\N	\N	\N	\N	24695
-81acf998-ba36-4063-9d87-515a8af42428	ed1456f7-12ef-48d3-ac59-4c93634c8a33	space	bottom_battle	15		f	none	standard	["bottom_row.7"]	\N	\N	\N	\N	\N	\N	24696
-5decb330-6524-46b3-8fb0-8afcc3c76fbc	ed1456f7-12ef-48d3-ac59-4c93634c8a33	space	side_property	16		f	none	standard	["left_col.0", "left_col.1", "left_col.3", "left_col.4", "right_col.1", "right_col.2", "right_col.3"]	\N	\N	\N	\N	\N	\N	24697
-247db5b4-dd39-44bb-a67d-2c48b9b5f23f	ed1456f7-12ef-48d3-ac59-4c93634c8a33	space	side_battle	17		f	none	standard	["left_col.2", "right_col.0", "right_col.4"]	\N	\N	\N	\N	\N	\N	24698
-4bcac0b7-2088-4ec1-9509-03db74d329ec	ed1456f7-12ef-48d3-ac59-4c93634c8a33	space	top_battle	18		f	none	standard	["top_row.3"]	\N	\N	\N	\N	\N	\N	24699
-e27dc48f-7afd-4e66-bc76-5c1c22e7ccd6	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	space	corner_tl	0		f	none	standard	["top_row.0"]	\N	\N	\N	\N	\N	\N	24700
-5157cd6d-20ba-483d-a9d3-039b22a24fb5	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	space	corner_tr	1		f	none	standard	["top_row.11"]	\N	\N	\N	\N	\N	\N	24701
-fbd9f23e-a376-4538-b63b-6f9b55c31682	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	space	corner_bl	2		f	none	standard	["bottom_row.0"]	\N	\N	\N	\N	\N	\N	24702
-cb3bd3d4-313f-46ba-8e77-7fcadeab01ab	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	space	corner_br	3		f	none	standard	["bottom_row.11"]	\N	\N	\N	\N	\N	\N	24703
-d91f4653-8aba-40dc-937f-4e056c3a83aa	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	space	top_banner_a	4		f	none	standard	["top_row.5"]	\N	\N	\N	\N	\N	\N	24704
-9758708c-d525-4c80-b79d-b7a750868e9f	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	space	top_banner_b	5		f	none	standard	["top_row.7"]	\N	\N	\N	\N	\N	\N	24705
-3d615df3-b677-4dae-ab0c-417216922dbe	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	space	top_space_a	6		f	none	standard	["top_row.1", "top_row.4", "top_row.8"]	\N	\N	\N	\N	\N	\N	24706
-fa00a178-57d9-4212-8493-d7e758fe1974	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	space	top_space_b	7		f	none	standard	["top_row.2", "top_row.6", "top_row.9"]	\N	\N	\N	\N	\N	\N	24707
-fb01b404-3e5b-4553-9a8c-56d259264dd5	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	space	top_space_c	8		f	none	standard	["top_row.3", "top_row.10"]	\N	\N	\N	\N	\N	\N	24708
-fccc1e56-df0b-41f4-808a-37cb68107ed4	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	space	bottom_banner_a	9		f	none	standard	["bottom_row.5"]	\N	\N	\N	\N	\N	\N	24709
-fa0204f1-2560-4279-98f2-1cb7bc4446f1	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	space	bottom_banner_b	10		f	none	standard	["bottom_row.6"]	\N	\N	\N	\N	\N	\N	24710
-266e27ea-2057-4a93-a461-859cd2f5c9d3	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	space	bottom_space_a	11		f	none	standard	["bottom_row.1", "bottom_row.4"]	\N	\N	\N	\N	\N	\N	24711
-2047dfdf-f45e-4e46-9450-b7bb4d49d3e4	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	space	bottom_space_b	12		f	none	standard	["bottom_row.2", "bottom_row.10"]	\N	\N	\N	\N	\N	\N	24712
-066d36ef-cd5e-44c2-a05e-9b36de16850c	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	space	bottom_space_c	13		f	none	standard	["bottom_row.3", "bottom_row.8"]	\N	\N	\N	\N	\N	\N	24713
-c0b54677-1cbe-47b5-a831-aa6178b70e17	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	space	bottom_space_d	14		f	none	standard	["bottom_row.9"]	\N	\N	\N	\N	\N	\N	24714
-8d17cab5-340f-42e9-82a5-09e9c2f0b9cb	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	space	bottom_battle	15		f	none	standard	["bottom_row.7"]	\N	\N	\N	\N	\N	\N	24715
-3a043190-ff63-49cc-bacd-6d93af4e98ca	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	space	side_property	16		f	none	standard	["left_col.0", "left_col.1", "left_col.3", "left_col.4", "right_col.1", "right_col.2", "right_col.3"]	\N	\N	\N	\N	\N	\N	24716
-00dab7ae-4800-4a99-9e1b-e543519547cf	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	space	side_battle	17		f	none	standard	["left_col.2", "right_col.0", "right_col.4"]	\N	\N	\N	\N	\N	\N	24717
-c29fd3fc-4fe8-4a8d-81c2-4d8f7200f006	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	space	top_battle	18		f	none	standard	["top_row.3"]	\N	\N	\N	\N	\N	\N	24718
-2eaaf833-8981-4907-b485-ae449bc17302	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	space	corner_tl	0		f	none	standard	["top_row.0"]	\N	\N	\N	\N	\N	\N	24719
-2d0890b4-7dc8-423e-b2c5-ea7a9cd62c07	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	space	corner_tr	1		f	none	standard	["top_row.11"]	\N	\N	\N	\N	\N	\N	24720
-44e93a32-97ef-41b9-9136-cdfcf844e9b8	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	space	corner_bl	2		f	none	standard	["bottom_row.0"]	\N	\N	\N	\N	\N	\N	24721
-a90d2028-91b7-4be9-bb27-770963495934	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	space	corner_br	3		f	none	standard	["bottom_row.11"]	\N	\N	\N	\N	\N	\N	24722
-17c553a7-cae3-4299-a450-43143bee6120	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	space	top_banner_a	4		f	none	standard	["top_row.5"]	\N	\N	\N	\N	\N	\N	24723
-1c424f14-ee0d-4d21-8a0d-577690598a9e	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	space	top_banner_b	5		f	none	standard	["top_row.7"]	\N	\N	\N	\N	\N	\N	24724
-cd53736c-a867-46ce-a27d-43f77d0815c9	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	space	top_space_a	6		f	none	standard	["top_row.1", "top_row.4", "top_row.8"]	\N	\N	\N	\N	\N	\N	24725
-89cd5b76-0391-4944-976c-be55ef4d3b63	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	space	top_space_b	7		f	none	standard	["top_row.2", "top_row.6", "top_row.9"]	\N	\N	\N	\N	\N	\N	24726
-f36ffe13-29a8-4372-9c44-1cc36f37ee4e	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	space	top_space_c	8		f	none	standard	["top_row.3", "top_row.10"]	\N	\N	\N	\N	\N	\N	24727
-261d52cf-6be9-4304-9a83-74eb79c514ee	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	space	bottom_banner_a	9		f	none	standard	["bottom_row.5"]	\N	\N	\N	\N	\N	\N	24728
-1099e547-920a-4cee-99b6-38275c1b6bd9	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	space	bottom_banner_b	10		f	none	standard	["bottom_row.6"]	\N	\N	\N	\N	\N	\N	24729
-da2a02d0-0914-4d1d-8f60-10de47a2376b	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	space	bottom_space_a	11		f	none	standard	["bottom_row.1", "bottom_row.4"]	\N	\N	\N	\N	\N	\N	24730
-419331a8-b728-4de7-bffc-43820f8f297f	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	space	bottom_space_b	12		f	none	standard	["bottom_row.2", "bottom_row.10"]	\N	\N	\N	\N	\N	\N	24731
-3780c51d-a936-44da-8e10-9cea7ec29e4f	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	space	bottom_space_c	13		f	none	standard	["bottom_row.3", "bottom_row.8"]	\N	\N	\N	\N	\N	\N	24732
-e0164400-aaca-4211-9d0e-9ca8d5f63b14	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	space	bottom_space_d	14		f	none	standard	["bottom_row.9"]	\N	\N	\N	\N	\N	\N	24733
-41c6f8fe-34c6-4bb5-86b0-0928ccb6996e	33e6b243-c15d-41f4-b117-5fd33767bc3d	centerpiece	centerpiece	0	Pantheon of Greek gods in divine council	f	none	\N	\N	700	180	1220	900	520	720	25642
-a33ab8b6-8941-4fc9-880a-9590357df5f5	33e6b243-c15d-41f4-b117-5fd33767bc3d	panel	panel_right_mid	10	Elegant dove in flight	f	none	\N	\N	1480	420	1740	660	260	240	25651
-df554320-023d-4765-9307-197df05892f8	33e6b243-c15d-41f4-b117-5fd33767bc3d	panel	panel_right_top	9	Noble deer with crescent crown	f	none	\N	\N	1480	180	1740	420	260	240	25612
-76725502-2f93-47d3-8395-b4b5868c15d4	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	space	bottom_battle	15		f	none	standard	["bottom_row.7"]	\N	\N	\N	\N	\N	\N	24734
-28dab9bb-3bbf-49b0-87cc-09add631d8f3	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	space	side_battle	17		f	none	standard	["left_col.2", "right_col.0", "right_col.4"]	\N	\N	\N	\N	\N	\N	24736
-1a5b4a63-4090-4c0f-889a-79530dfd9dca	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	space	top_battle	18		f	none	standard	["top_row.3"]	\N	\N	\N	\N	\N	\N	24737
-b758f927-d251-4f7c-bdaf-fb6080466439	748e880d-ceab-46e3-96f8-7684903a2727	panel	panel_left_top	0		f	none	\N	\N	180	180	440	420	260	240	24738
-83b63641-ebf1-429c-ac2c-24ace723bc4a	748e880d-ceab-46e3-96f8-7684903a2727	panel	panel_left_mid	1		f	none	\N	\N	180	420	440	660	260	240	24739
-4ca2d6df-3011-4842-a71d-90a71bd65690	748e880d-ceab-46e3-96f8-7684903a2727	panel	panel_left_bot	2		f	none	\N	\N	180	660	440	900	260	240	24740
-49153b6e-0294-4965-8f89-14acf9c22e75	a0bcf454-21c2-4741-9ec5-50efdd237b34	panel	panel_right_top	9	Trio of decorated cupcakes	f	none	\N	\N	1480	180	1740	420	260	240	25188
-2dd4a689-ed8f-46ac-9243-90414b55c402	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	space	side_property	16		f	none	standard	["left_col.0", "left_col.1", "left_col.3", "left_col.4", "right_col.1", "right_col.2", "right_col.3"]	\N	\N	\N	\N	\N	\N	24735
-4ce101b9-6fc8-40cb-b2a7-2a94d8980818	748e880d-ceab-46e3-96f8-7684903a2727	panel	panel_cleft_top	3		f	none	\N	\N	440	180	700	420	260	240	24741
-2647431b-4f27-4a7f-96bc-01fe7ea41442	748e880d-ceab-46e3-96f8-7684903a2727	panel	panel_cleft_mid	4		f	none	\N	\N	440	420	700	660	260	240	24742
-4a7df3a7-b835-4a3a-8d42-79de82de0975	748e880d-ceab-46e3-96f8-7684903a2727	panel	panel_cleft_bot	5		f	none	\N	\N	440	660	700	900	260	240	24743
-b1404ae2-5a58-4988-987e-5677ee351817	748e880d-ceab-46e3-96f8-7684903a2727	panel	panel_cright_top	6		f	none	\N	\N	1220	180	1480	420	260	240	24744
-23b63856-2d47-41e8-9c85-e410b22d42d0	748e880d-ceab-46e3-96f8-7684903a2727	panel	panel_cright_mid	7		f	none	\N	\N	1220	420	1480	660	260	240	24745
-d5b90dae-33ca-49d1-a558-cd15e670f1b6	748e880d-ceab-46e3-96f8-7684903a2727	panel	panel_cright_bot	8		f	none	\N	\N	1220	660	1480	900	260	240	24746
-da32cea7-87ee-49bc-98f9-ab5b044934df	748e880d-ceab-46e3-96f8-7684903a2727	panel	panel_right_top	9		f	none	\N	\N	1480	180	1740	420	260	240	24747
-efdc4968-90f2-4018-a66a-f83c42c7da41	748e880d-ceab-46e3-96f8-7684903a2727	panel	panel_right_mid	10		f	none	\N	\N	1480	420	1740	660	260	240	24748
-db3b7b81-e6c8-4976-b928-8cd828f6c038	748e880d-ceab-46e3-96f8-7684903a2727	panel	panel_right_bot	11		f	none	\N	\N	1480	660	1740	900	260	240	24749
-9901bc72-d5db-45e2-9d9e-7fecc14b302a	ed1456f7-12ef-48d3-ac59-4c93634c8a33	panel	panel_left_top	0		f	none	\N	\N	180	180	440	420	260	240	24750
-8fbfc195-3048-4ed6-82f0-d4deabc928f1	ed1456f7-12ef-48d3-ac59-4c93634c8a33	panel	panel_left_mid	1		f	none	\N	\N	180	420	440	660	260	240	24751
-123ce6f7-4169-443a-8c7a-95ffc7af4ad1	ed1456f7-12ef-48d3-ac59-4c93634c8a33	panel	panel_left_bot	2		f	none	\N	\N	180	660	440	900	260	240	24752
-f4a2f481-1e81-4596-9e23-fec263b4c18a	ed1456f7-12ef-48d3-ac59-4c93634c8a33	panel	panel_cleft_top	3		f	none	\N	\N	440	180	700	420	260	240	24753
-e4dbdfa2-c3e8-4d7b-9431-08e65201ef6f	ed1456f7-12ef-48d3-ac59-4c93634c8a33	panel	panel_cleft_mid	4		f	none	\N	\N	440	420	700	660	260	240	24754
-30dd1fa0-58e8-4cf7-abdd-adf07fbb4ca6	ed1456f7-12ef-48d3-ac59-4c93634c8a33	panel	panel_cleft_bot	5		f	none	\N	\N	440	660	700	900	260	240	24755
-620cc25b-2030-402d-b098-39669a5632b8	ed1456f7-12ef-48d3-ac59-4c93634c8a33	panel	panel_cright_top	6		f	none	\N	\N	1220	180	1480	420	260	240	24756
-c1895bf3-4d24-411e-be7a-6ee621030fea	ed1456f7-12ef-48d3-ac59-4c93634c8a33	panel	panel_cright_mid	7		f	none	\N	\N	1220	420	1480	660	260	240	24757
-dc67f0ff-2afe-469c-a1ff-83b9f66090f5	ed1456f7-12ef-48d3-ac59-4c93634c8a33	panel	panel_cright_bot	8		f	none	\N	\N	1220	660	1480	900	260	240	24758
-f50dc4cf-19cb-49c3-9291-df51a38eebec	ed1456f7-12ef-48d3-ac59-4c93634c8a33	panel	panel_right_top	9		f	none	\N	\N	1480	180	1740	420	260	240	24759
-27947c0e-4a0b-4b05-8930-9b6b580e2422	ed1456f7-12ef-48d3-ac59-4c93634c8a33	panel	panel_right_mid	10		f	none	\N	\N	1480	420	1740	660	260	240	24760
-f195516e-d8fe-4498-ba46-4b9a602a40cf	ed1456f7-12ef-48d3-ac59-4c93634c8a33	panel	panel_right_bot	11		f	none	\N	\N	1480	660	1740	900	260	240	24761
-c22e04db-c3ac-43d0-8893-0ffaea743d52	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	panel	panel_left_top	0		f	none	\N	\N	180	180	440	420	260	240	24762
-7c89301b-4aac-4cee-87c8-7701363844fb	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	panel	panel_left_mid	1		f	none	\N	\N	180	420	440	660	260	240	24763
-3dfe03b8-e04b-4e13-862e-02a0b91435d6	33e6b243-c15d-41f4-b117-5fd33767bc3d	panel	panel_cright_bot	8	Artemis hunting under moonlight	f	none	\N	\N	1220	660	1480	900	260	240	25594
-17f93403-e903-4efa-b3d6-86722af9de4f	33e6b243-c15d-41f4-b117-5fd33767bc3d	panel	panel_right_bot	11	Golden chariot racing through night	f	none	\N	\N	1480	660	1740	900	260	240	25603
-2de45ed1-5a94-482d-bd15-a96cb11c8d79	33e6b243-c15d-41f4-b117-5fd33767bc3d	panel	panel_cright_top	6	Poseidon wielding trident	f	none	\N	\N	1220	180	1480	420	260	240	25626
-f3d2db5d-fbb3-4c7d-be02-b7bf5141bdb1	33e6b243-c15d-41f4-b117-5fd33767bc3d	panel	panel_cright_mid	7	Apollo with lyre and laurels	f	none	\N	\N	1220	420	1480	660	260	240	25635
-3fae9fbc-a85c-439e-832e-90c6017cccf7	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	panel	panel_left_bot	2		f	none	\N	\N	180	660	440	900	260	240	24764
-32420415-f7aa-4306-9bb9-ca2ed0d7e9a3	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	panel	panel_cleft_top	3		f	none	\N	\N	440	180	700	420	260	240	24765
-0109abf9-0636-41dd-baea-942f918cb8fc	a0bcf454-21c2-4741-9ec5-50efdd237b34	panel	panel_left_top	0	Set of pastel-colored cake icons	f	none	\N	\N	180	180	440	420	260	240	25152
-a4804550-638b-4b04-a7ed-1320093f6021	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	panel	panel_cleft_mid	4		f	none	\N	\N	440	420	700	660	260	240	24766
-3e33b7af-60ee-43bd-9086-cb3199859bf9	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	panel	panel_cleft_bot	5		f	none	\N	\N	440	660	700	900	260	240	24767
-1860af04-66da-43a1-8abb-ab6c2c102129	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	panel	panel_cright_top	6		f	none	\N	\N	1220	180	1480	420	260	240	24768
-54c664d1-3779-47ce-b315-b90d2ab28db1	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	panel	panel_cright_mid	7		f	none	\N	\N	1220	420	1480	660	260	240	24769
-6247784c-2350-4afc-be07-28cacf9256b8	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	panel	panel_cright_bot	8		f	none	\N	\N	1220	660	1480	900	260	240	24770
-802ce82f-0f89-4b05-8641-b4116ffe6387	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	panel	panel_right_top	9		f	none	\N	\N	1480	180	1740	420	260	240	24771
-82ad9a10-48f2-47db-88d1-eefc6ed32dbf	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	panel	panel_right_mid	10		f	none	\N	\N	1480	420	1740	660	260	240	24772
-e0f973a9-5a5e-4ded-896a-c0d0635c26df	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	panel	panel_right_bot	11		f	none	\N	\N	1480	660	1740	900	260	240	24773
-d1a6a710-3790-4e05-a73f-1133092cd4f0	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	panel	panel_left_top	0		f	none	\N	\N	180	180	440	420	260	240	24774
-323f382a-be8d-4647-b8e5-b6c215d33066	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	panel	panel_left_mid	1		f	none	\N	\N	180	420	440	660	260	240	24775
-f0d8a6da-37b1-4ad7-bfdc-f157aa560347	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	panel	panel_left_bot	2		f	none	\N	\N	180	660	440	900	260	240	24776
-206b99bf-12a5-40d4-bd06-29926392f199	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	panel	panel_cleft_top	3		f	none	\N	\N	440	180	700	420	260	240	24777
-0eaf7353-1122-4add-b79c-0a564145c7ed	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	panel	panel_cleft_mid	4		f	none	\N	\N	440	420	700	660	260	240	24778
-462e5776-0eea-46d5-be0b-93be9ef36b3e	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	panel	panel_cleft_bot	5		f	none	\N	\N	440	660	700	900	260	240	24779
-63c687ad-adfd-48db-a79f-05aa972bdd26	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	panel	panel_cright_top	6		f	none	\N	\N	1220	180	1480	420	260	240	24780
-0598d0b9-b2a9-4b75-9748-271f7e455eb7	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	space	bottom_battle	15	Tower of pancakes with syrup	f	none	standard	["bottom_row.7"]	\N	\N	\N	\N	\N	\N	127
-082877ca-ecfb-4a41-aa0d-cf563b0b5da3	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	space	corner_br	3	Caramel apple with candy sprinkles	f	none	standard	["bottom_row.11"]	\N	\N	\N	\N	\N	\N	150
-08e47ed0-a9ec-492b-af8b-7594e773b73f	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	space	bottom_space_a	11	Chocolate eclair with cream	f	none	standard	["bottom_row.1", "bottom_row.4"]	\N	\N	\N	\N	\N	\N	130
-0b9f3635-5d2b-42b7-ad39-e1c63f6525cc	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	space	side_property	16	Macaron tower with icing	f	none	standard	["left_col.0", "left_col.1", "left_col.3", "left_col.4", "right_col.1", "right_col.2", "right_col.3"]	\N	\N	\N	\N	\N	\N	162
-0f27144e-1bf7-4c17-a23e-dc53d2881d92	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	space	bottom_space_d	14	Tall glass of milkshake	f	none	event	["bottom_row.9"]	\N	\N	\N	\N	\N	\N	141
-0f4e58ce-6367-46db-a2a3-bff5fb9ed14c	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	space	top_banner_b	5	Stack of colorful donuts	f	none	standard	["top_row.7"]	\N	\N	\N	\N	\N	\N	168
-15908a34-82c3-4044-82f5-be891a18d2eb	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	space	top_space_b	7	Blueberry tart on a plate	f	none	standard	["top_row.2", "top_row.6", "top_row.9"]	\N	\N	\N	\N	\N	\N	176
-7679ba1d-0a67-4431-b936-36f2f0cff2aa	33e6b243-c15d-41f4-b117-5fd33767bc3d	space	corner_tr	1	Feathered helmet with shield	f	none	standard	["top_row.11"]	\N	\N	\N	\N	\N	\N	25516
-a3f6374a-62ec-4f1f-ae17-1fef3af4fbc5	33e6b243-c15d-41f4-b117-5fd33767bc3d	space	corner_bl	2	Hammer and anvil icons	f	none	standard	["bottom_row.0"]	\N	\N	\N	\N	\N	\N	25519
-529910af-3f18-4d0a-8a76-39ca6ff8f0b4	33e6b243-c15d-41f4-b117-5fd33767bc3d	space	corner_br	3	Flaming torch with olive branches	f	none	standard	["bottom_row.11"]	\N	\N	\N	\N	\N	\N	25522
-9b3d60e5-9c02-410e-b415-e3cff09ce90c	33e6b243-c15d-41f4-b117-5fd33767bc3d	space	top_banner_a	4	Greek temple silhouette on horizon	f	none	standard	["top_row.5"]	\N	\N	\N	\N	\N	\N	25525
-504e67a7-8adb-459d-b3c5-765a7e99c2cd	33e6b243-c15d-41f4-b117-5fd33767bc3d	space	top_space_a	6	Celestial solar eclipse scene	f	none	standard	["top_row.1", "top_row.4", "top_row.8"]	\N	\N	\N	\N	\N	\N	25531
-3dc7bf37-b420-4c65-937e-1a61c2e9f75f	33e6b243-c15d-41f4-b117-5fd33767bc3d	space	top_space_b	7	Majestic Greek columns under moonlight	f	none	standard	["top_row.2", "top_row.6", "top_row.9"]	\N	\N	\N	\N	\N	\N	25534
-83ae6f87-97f0-4934-ad04-efbf493cf571	33e6b243-c15d-41f4-b117-5fd33767bc3d	space	top_space_c	8	Starlit constellation over mountains	f	none	standard	["top_row.3", "top_row.10"]	\N	\N	\N	\N	\N	\N	25537
-0825f95b-7c3e-43bc-a001-737a10be64ff	33e6b243-c15d-41f4-b117-5fd33767bc3d	space	bottom_banner_a	9	Golden Greek helmet emblem	f	none	standard	["bottom_row.5"]	\N	\N	\N	\N	\N	\N	25540
-42fdcabd-849e-4fb1-9d59-58a13e41bbe1	33e6b243-c15d-41f4-b117-5fd33767bc3d	space	bottom_banner_b	10	Classic trident icon in waves	f	none	standard	["bottom_row.6"]	\N	\N	\N	\N	\N	\N	25543
-81bcd448-b0d6-44bc-9e91-db93f789557c	33e6b243-c15d-41f4-b117-5fd33767bc3d	space	bottom_space_c	13	Grecian urn pouring water	f	none	standard	["bottom_row.3", "bottom_row.8"]	\N	\N	\N	\N	\N	\N	25552
-1db4318b-0e7a-441b-acc4-815cf74eb683	33e6b243-c15d-41f4-b117-5fd33767bc3d	space	bottom_battle	15	Goddess of war in armor	f	none	standard	["bottom_row.7"]	\N	\N	\N	\N	\N	\N	25558
-06c03c30-00fb-4d0d-bc94-6e35696ee8fa	33e6b243-c15d-41f4-b117-5fd33767bc3d	space	side_property	16	Vibrant peacock on a branch	f	none	standard	["left_col.0", "left_col.1", "left_col.3", "left_col.4", "right_col.1", "right_col.2", "right_col.3"]	\N	\N	\N	\N	\N	\N	25561
-65e649d1-fe52-48dd-bb5c-9ad47c4b78a8	33e6b243-c15d-41f4-b117-5fd33767bc3d	space	side_battle	17	Volcano erupting with lava	f	none	standard	["left_col.2", "right_col.0", "right_col.4"]	\N	\N	\N	\N	\N	\N	25564
-78652703-edfb-48f5-b114-f49e1754938f	33e6b243-c15d-41f4-b117-5fd33767bc3d	space	top_battle	18	Warrior's shield and spear	f	none	standard	["top_row.3"]	\N	\N	\N	\N	\N	\N	25567
-bfba1356-cd74-4b91-96a4-37ccdded9dd0	33e6b243-c15d-41f4-b117-5fd33767bc3d	panel	panel_cleft_mid	4	Goddess dispensing justice scales	f	none	\N	\N	440	420	700	660	260	240	25582
-8152b4a4-c119-40d8-b81b-ea32b2091333	33e6b243-c15d-41f4-b117-5fd33767bc3d	panel	panel_left_top	0	Mighty eagle soaring in sky	f	none	\N	\N	180	180	440	420	260	240	25606
-27d50ff0-8cc6-4ef7-a39a-73e6223b17f0	33e6b243-c15d-41f4-b117-5fd33767bc3d	panel	panel_left_mid	1	Olympic mountain peak	f	none	\N	\N	180	420	440	660	260	240	25617
-0ebc953f-61cc-441b-bd56-da4ce1890a9a	33e6b243-c15d-41f4-b117-5fd33767bc3d	panel	panel_cleft_top	3	Athena with spear and shield	f	none	\N	\N	440	180	700	420	260	240	25632
-67a2a34e-190d-4f02-a222-20e1505d18c2	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	panel	panel_left_mid	1	Five lavender cupcake silhouettes	f	none	\N	\N	180	420	440	660	260	240	25510
-b62b3167-d379-48d6-aaf5-e0e6413ea939	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	panel	panel_cright_mid	7		f	none	\N	\N	1220	420	1480	660	260	240	24781
-761d2f36-3d20-4f12-bb4c-74bd1578f9de	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	panel	panel_cright_bot	8		f	none	\N	\N	1220	660	1480	900	260	240	24782
-fcba00b3-51b1-4516-88d3-5211ae4ca818	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	panel	panel_right_top	9		f	none	\N	\N	1480	180	1740	420	260	240	24783
-2c257e72-bb8d-4ad3-9f0c-d8ee801984d4	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	panel	panel_right_mid	10		f	none	\N	\N	1480	420	1740	660	260	240	24784
-1d455159-e3c9-466e-acf7-07d6f484b8db	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	panel	panel_right_bot	11		f	none	\N	\N	1480	660	1740	900	260	240	24785
-94d43b6f-1c87-4889-b9ef-6f2d49599f43	748e880d-ceab-46e3-96f8-7684903a2727	centerpiece	centerpiece	0		f	none	\N	\N	700	180	1220	900	520	720	24786
-42e02b75-fce2-49d0-b195-fca2769dfc61	ed1456f7-12ef-48d3-ac59-4c93634c8a33	centerpiece	centerpiece	0		f	none	\N	\N	700	180	1220	900	520	720	24787
-196ffcde-aab2-490a-a0d7-342650e454ab	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	centerpiece	centerpiece	0		f	none	\N	\N	700	180	1220	900	520	720	24788
-315ad093-e4c7-459d-b98c-18a5dc094538	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	centerpiece	centerpiece	0		f	none	\N	\N	700	180	1220	900	520	720	24789
-1e0dc30f-c899-4c89-bd69-e95c31ff85b9	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	panel	panel_right_mid	10	Four circular treat emblems	f	none	\N	\N	1480	420	1740	660	260	240	96
-28c15232-e56e-4e43-ad03-b0867b84f00c	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	space	side_battle	17	Chocolate lava cake with spoon	f	none	standard	["left_col.2", "right_col.0", "right_col.4"]	\N	\N	\N	\N	\N	\N	158
-3c8b63b3-f8a3-47a7-acea-be76a2c60b12	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	space	corner_tl	0	Cupcake with pink frosting and cherry	f	none	standard	["top_row.0"]	\N	\N	\N	\N	\N	\N	153
-3eb21e06-e33c-4a97-88b4-04c55309fbca	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	space	top_space_a	6	Slice of swiss roll cake	f	none	standard	["top_row.1", "top_row.4", "top_row.8"]	\N	\N	\N	\N	\N	\N	173
-eaf50fbb-e385-44ca-a1b7-136f9c58935f	33e6b243-c15d-41f4-b117-5fd33767bc3d	panel	panel_left_bot	2	Wise owl on olive branch	f	none	\N	\N	180	660	440	900	260	240	25637
-aeeb6749-2bcc-4c16-8c17-bdc103526eaa	33e6b243-c15d-41f4-b117-5fd33767bc3d	space	corner_tl	0	Golden laurel wreath on marble	f	none	standard	["top_row.0"]	\N	\N	\N	\N	\N	\N	25513
-6265da1c-009c-4cd4-b152-e1f66670471d	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	space	bottom_banner_b	10	Plate of assorted chocolates	f	none	standard	["bottom_row.6"]	\N	\N	\N	\N	\N	\N	125
-cc86adfc-dbb3-4bd2-b2a9-e2d69a9ce0ed	33e6b243-c15d-41f4-b117-5fd33767bc3d	space	top_banner_b	5	Thunderbolt in dark stormy sky	f	none	standard	["top_row.7"]	\N	\N	\N	\N	\N	\N	25528
-cfc12151-cbdb-48d6-b10e-6a60bb17bb63	33e6b243-c15d-41f4-b117-5fd33767bc3d	space	bottom_space_a	11	Lush olive grove at dawn	f	none	standard	["bottom_row.1", "bottom_row.4"]	\N	\N	\N	\N	\N	\N	25546
-7631057a-746e-4aea-ac4d-c2744399a38b	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	panel	panel_right_bot	11	Row of fruit-topped pastries	f	none	\N	\N	1480	660	1740	900	260	240	92
-ea049684-e236-4a48-92f2-93c2e31da241	33e6b243-c15d-41f4-b117-5fd33767bc3d	space	bottom_space_d	14	Ship sailing under crescent moon	f	none	standard	["bottom_row.9"]	\N	\N	\N	\N	\N	\N	25555
-7caa3c37-1794-49ca-9c65-cbe90c6d81df	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	space	top_battle	18	Plate of colorful cupcakes	f	none	standard	["top_row.3"]	\N	\N	\N	\N	\N	\N	170
-85aa67aa-e1a5-4791-b59b-b2acbbbc264e	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	space	corner_bl	2	Slice of fruit-topped cheesecake	f	none	event	["bottom_row.0"]	\N	\N	\N	\N	\N	\N	145
-872ef89e-b657-4aa3-a111-ecfd53a28ad6	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	space	corner_tr	1	Chocolate truffle with golden wrapper	f	none	standard	["top_row.11"]	\N	\N	\N	\N	\N	\N	155
-89bf51b5-9e65-4488-986f-6332e0e40f11	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	centerpiece	centerpiece	0	Giant tiered cake in candyland landscape	f	none	\N	\N	700	180	1220	900	520	720	4
-9f296306-f1f5-4cbb-a34b-7ab58fb695af	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	space	bottom_space_c	13	Slice of strawberry cake	f	none	standard	["bottom_row.3", "bottom_row.8"]	\N	\N	\N	\N	\N	\N	136
-c3441ced-29c2-4f73-9f31-627e6cf26525	33e6b243-c15d-41f4-b117-5fd33767bc3d	panel	panel_cleft_bot	5	Hermes with caduceus staff	f	none	\N	\N	440	660	700	900	260	240	25587
-d14b42cb-f4b1-4b0d-aeed-5c107ca6c915	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	space	top_space_c	8	Glazed donut with sprinkles	f	none	standard	["top_row.3", "top_row.10"]	\N	\N	\N	\N	\N	\N	180
-d313c7b5-9929-4cda-9c93-a89e50dbaf2f	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	space	bottom_banner_a	9	Assorted cookies in a basket	f	none	standard	["bottom_row.5"]	\N	\N	\N	\N	\N	\N	123
-d55dea7d-d53d-45c6-b6da-a692ae542065	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	space	top_banner_a	4	Mint green macaron illustration	f	none	standard	["top_row.5"]	\N	\N	\N	\N	\N	\N	165
-e334954a-a8fb-40cb-ae6d-5f61740b55ab	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	space	bottom_space_b	12	Vanilla cupcake with sprinkles	f	none	standard	["bottom_row.2", "bottom_row.10"]	\N	\N	\N	\N	\N	\N	133
-7aa5b745-48c6-440e-8b2a-c4c4f5d59443	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	panel	panel_cright_mid	7	Desserts with a berry topping	f	none	\N	\N	1220	420	1480	660	260	240	25284
-90e7b5fd-b225-4070-a5a7-6ab0b2c20704	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	panel	panel_right_top	9	Trio of decorated cupcakes	f	none	\N	\N	1480	180	1740	420	260	240	25292
-2888765c-8054-4a54-83c4-551eccb8a741	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	panel	panel_cright_top	6	Series of outlined cake shapes	f	none	\N	\N	1220	180	1480	420	260	240	25279
-2de6df2f-d711-4994-a76e-6b0de1241c10	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	panel	panel_left_bot	2	Pink heart shapes on a stripe	f	none	\N	\N	180	660	440	900	260	240	25321
-ce43169f-64c2-45d6-952c-6358b5cee856	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	panel	panel_cleft_top	3	Green star symbols in a row	f	none	\N	\N	440	180	700	420	260	240	25325
-dde185fd-bc66-45ca-83f0-6b846e12c8b3	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	panel	panel_cleft_mid	4	Three round pastry icons	f	none	\N	\N	440	420	700	660	260	240	25329
-7401a1e1-4a25-44e2-9f04-ed249ef0b08c	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	panel	panel_cleft_bot	5	Cakes on stands; purple background	f	none	\N	\N	440	660	700	900	260	240	25333
-141dc77b-85c7-45fa-93f1-b0a140d23da0	a0bcf454-21c2-4741-9ec5-50efdd237b34	space	top_space_c	8	Glazed donut with sprinkles	f	none	standard	["top_row.3", "top_row.10"]	\N	\N	\N	\N	\N	\N	25248
-20e718ff-a482-40b8-8acf-6cd830490f04	a0bcf454-21c2-4741-9ec5-50efdd237b34	panel	panel_cright_top	6	Series of outlined cake shapes	f	none	\N	\N	1220	180	1480	420	260	240	25128
-2420417f-d6d0-4662-aa13-c6a7f35bbec1	a0bcf454-21c2-4741-9ec5-50efdd237b34	space	corner_bl	2	Slice of fruit-topped cheesecake	f	none	event	["bottom_row.0"]	\N	\N	\N	\N	\N	\N	25213
-3c134109-2ad8-4670-b296-e80349374793	a0bcf454-21c2-4741-9ec5-50efdd237b34	space	bottom_banner_a	9	Assorted cookies in a basket	f	none	standard	["bottom_row.5"]	\N	\N	\N	\N	\N	\N	25191
-4321fda5-a1a9-4342-a5d8-3828b45fbaf5	a0bcf454-21c2-4741-9ec5-50efdd237b34	space	top_banner_b	5	Stack of colorful donuts	f	none	standard	["top_row.7"]	\N	\N	\N	\N	\N	\N	25236
-495cbfdf-c2a4-40a4-b3fd-c76d752a5c27	a0bcf454-21c2-4741-9ec5-50efdd237b34	space	top_space_a	6	Slice of swiss roll cake	f	none	standard	["top_row.1", "top_row.4", "top_row.8"]	\N	\N	\N	\N	\N	\N	25241
-4b4c2a61-c1dc-4655-b901-ca08690117a6	a0bcf454-21c2-4741-9ec5-50efdd237b34	panel	panel_right_bot	11	Row of fruit-topped pastries	f	none	\N	\N	1480	660	1740	900	260	240	25160
-6a46f51d-c0e7-43c6-87b5-a87f8e45d9e0	a0bcf454-21c2-4741-9ec5-50efdd237b34	panel	panel_cleft_top	3	Green star symbols in a row	f	none	\N	\N	440	180	700	420	260	240	25091
-6b01b48b-c8db-43b4-bb5b-1c293cd974b7	a0bcf454-21c2-4741-9ec5-50efdd237b34	space	corner_tl	0	Cupcake with pink frosting and cherry	f	none	standard	["top_row.0"]	\N	\N	\N	\N	\N	\N	25221
-79691b6f-8ea5-4e78-ac5b-195dba7b0262	a0bcf454-21c2-4741-9ec5-50efdd237b34	panel	panel_left_mid	1	Five lavender cupcake silhouettes	f	none	\N	\N	180	420	440	660	260	240	25142
-7997470a-e0cb-49ca-9560-c557164c1fb9	a0bcf454-21c2-4741-9ec5-50efdd237b34	panel	panel_left_bot	2	Pink heart shapes on a stripe	f	none	\N	\N	180	660	440	900	260	240	25139
-a4517eb8-ebb7-49a0-adcc-0c0d31346e7e	a0bcf454-21c2-4741-9ec5-50efdd237b34	space	bottom_space_a	11	Chocolate eclair with cream	f	none	standard	["bottom_row.1", "bottom_row.4"]	\N	\N	\N	\N	\N	\N	25198
-a9e1c77b-7553-4fe0-9b0f-9d4e83f673a9	a0bcf454-21c2-4741-9ec5-50efdd237b34	panel	panel_cleft_bot	5	Cakes on stands; purple background	f	none	\N	\N	440	660	700	900	260	240	25075
-ae63d033-c71a-40fa-93ab-461ebed995fe	a0bcf454-21c2-4741-9ec5-50efdd237b34	centerpiece	centerpiece	0	Giant tiered cake in candyland landscape	f	none	\N	\N	700	180	1220	900	520	720	25072
-b8106ca0-9247-445d-8da6-f6b1fcc2a84f	a0bcf454-21c2-4741-9ec5-50efdd237b34	space	top_space_b	7	Blueberry tart on a plate	f	none	standard	["top_row.2", "top_row.6", "top_row.9"]	\N	\N	\N	\N	\N	\N	25244
-bb6d5ae5-08ef-4e45-ad92-bad2b6ce493e	a0bcf454-21c2-4741-9ec5-50efdd237b34	panel	panel_cleft_mid	4	Three round pastry icons	f	none	\N	\N	440	420	700	660	260	240	25084
-c0b4f21c-dccc-4cb4-8535-f0a61f4a9d8d	a0bcf454-21c2-4741-9ec5-50efdd237b34	space	corner_tr	1	Chocolate truffle with golden wrapper	f	none	standard	["top_row.11"]	\N	\N	\N	\N	\N	\N	25223
-cacfcb92-1b8c-448e-9e1c-4d1e7925a332	a0bcf454-21c2-4741-9ec5-50efdd237b34	panel	panel_cright_bot	8	Transparent jar with candy swirls	f	none	\N	\N	1220	660	1480	900	260	240	25111
-ccec4752-2074-4f45-8839-1b3e81b6f9fc	a0bcf454-21c2-4741-9ec5-50efdd237b34	space	corner_br	3	Caramel apple with candy sprinkles	f	none	standard	["bottom_row.11"]	\N	\N	\N	\N	\N	\N	25218
-ed7b0d36-d341-4d3b-88a6-4834fabfa48b	a0bcf454-21c2-4741-9ec5-50efdd237b34	space	top_banner_a	4	Mint green macaron illustration	f	none	standard	["top_row.5"]	\N	\N	\N	\N	\N	\N	25233
-f938dd57-336a-4d73-9e66-891090d2c477	a0bcf454-21c2-4741-9ec5-50efdd237b34	panel	panel_right_mid	10	Four circular treat emblems	f	none	\N	\N	1480	420	1740	660	260	240	25164
-99cc3707-f9b8-4d5c-a311-6829498b7d76	a0bcf454-21c2-4741-9ec5-50efdd237b34	space	bottom_space_c	13	Slice of strawberry cake	f	none	standard	["bottom_row.8"]	\N	\N	\N	\N	\N	\N	25204
-83385824-8497-408a-9298-59795216dc47	a0bcf454-21c2-4741-9ec5-50efdd237b34	space	top_battle	17	Plate of colorful cupcakes	f	none	standard	["top_row.3"]	\N	\N	\N	\N	\N	\N	25238
-8f028b31-58e0-4e2e-b635-6b1255a8aca3	a0bcf454-21c2-4741-9ec5-50efdd237b34	space	side_property	15	Macaron tower with icing	f	none	standard	["left_col.0", "left_col.1", "left_col.3", "left_col.4", "right_col.1", "right_col.2", "right_col.3"]	\N	\N	\N	\N	\N	\N	25230
-c2ad2dd4-7ba1-49c3-bf1d-73ec3a63999a	a0bcf454-21c2-4741-9ec5-50efdd237b34	space	bottom_battle	14	Tower of pancakes with syrup	f	none	standard	["bottom_row.7", "bottom_row.3"]	\N	\N	\N	\N	\N	\N	25195
-f628b935-1f9d-4cb1-8e39-c3ca52dde643	a0bcf454-21c2-4741-9ec5-50efdd237b34	space	side_battle	16	Chocolate lava cake with spoon	f	none	standard	["left_col.2", "right_col.0", "right_col.4"]	\N	\N	\N	\N	\N	\N	25226
-944e5906-d037-4e6e-97c5-d08c876a0ff7	a0bcf454-21c2-4741-9ec5-50efdd237b34	space	bottom_space_b	12	Vanilla cupcake with sprinkles	f	none	standard	["bottom_row.2", "bottom_row.10"]	\N	\N	\N	\N	\N	\N	25201
-edca6f58-ec1e-4889-9466-d60a8d8ef947	a0bcf454-21c2-4741-9ec5-50efdd237b34	space	bottom_banner_b	10	Plate of assorted chocolates	f	none	standard	["bottom_row.6", "bottom_row.9"]	\N	\N	\N	\N	\N	\N	25193
-a8c0df18-9967-46d7-8ec7-e2137955f883	a0bcf454-21c2-4741-9ec5-50efdd237b34	panel	panel_cright_mid	7	Desserts with a berry topping	f	none	\N	\N	1220	420	1480	660	260	240	25252
-434356fd-d4c6-4119-b0e4-1afccbba0c5b	33e6b243-c15d-41f4-b117-5fd33767bc3d	space	bottom_space_b	12	Ancient amphitheater with stars	f	none	standard	["bottom_row.2", "bottom_row.10"]	\N	\N	\N	\N	\N	\N	25549
-5d747bcf-87a6-4d3c-9d2d-895c6df1c9bf	a996c8d0-ff42-434b-a425-b229c8815138	space	bottom_banner_a	7	Banner with gothic script and flames	f	none	standard	["bottom_row.5"]	\N	\N	\N	\N	\N	\N	25493
-5f17228e-6a0b-494e-b633-281f40e5e39c	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	panel	panel_cright_bot	8	Transparent jar with candy swirls	f	none	\N	\N	1220	660	1480	900	260	240	25289
-460f79ce-307f-49a5-a4a5-1209579ead34	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	panel	panel_left_top	0	Set of pastel-colored cake icons	f	none	\N	\N	180	180	440	420	260	240	25313
-2810afa2-644a-44e5-97a0-b05c6c2983be	a996c8d0-ff42-434b-a425-b229c8815138	space	side_prop_2	14	Haunted mansion silhouette with glowing windows	f	none	standard	["left_col.1"]	\N	\N	\N	\N	\N	\N	25491
-4297b116-2b04-442a-ac58-61ee334328ab	a996c8d0-ff42-434b-a425-b229c8815138	space	corner_bl	2	Dark, mysterious cave entrance	f	none	standard	["bottom_row.0"]	\N	\N	\N	\N	\N	\N	25357
-339ad492-d051-4e78-aabc-c69e0c4347c8	a996c8d0-ff42-434b-a425-b229c8815138	space	side_battle	12	Epic clash with mythical creatures	f	none	standard	["left_col.2", "right_col.0", "right_col.4", "left_col.0", "left_col.3", "right_col.2"]	\N	\N	\N	\N	\N	\N	25478
-9ba026b3-b7f2-4881-bb40-5cec2851314b	a996c8d0-ff42-434b-a425-b229c8815138	space	side_property	11	Haunted mansion silhouette with glowing windows	f	none	standard	["left_col.4", "right_col.3"]	\N	\N	\N	\N	\N	\N	25387
-a7e39302-efc8-4ace-b771-87fe8ff60ad9	a996c8d0-ff42-434b-a425-b229c8815138	space	portal	15	Haunted mansion silhouette with glowing windows	f	none	standard	["right_col.1"]	\N	\N	\N	\N	\N	\N	25499
-9c0b292f-7ce7-4122-abea-b19c89753945	a996c8d0-ff42-434b-a425-b229c8815138	space	top_space_b	5	Dark wooden gate with iron accents	f	none	standard	["top_row.2", "top_row.9"]	\N	\N	\N	\N	\N	\N	25366
-6c76b55f-c6cc-4bff-af81-e06005f2d8c6	a996c8d0-ff42-434b-a425-b229c8815138	space	top_space_c	6	Flickering lanterns on wrought-iron stands	f	none	standard	["top_row.3"]	\N	\N	\N	\N	\N	\N	25369
-8add5ea9-5479-471a-bd2b-3e508d492b00	a996c8d0-ff42-434b-a425-b229c8815138	panel	panel_cright_bot	8	Cursed lake with glowing water	f	none	\N	\N	1220	660	1480	900	260	240	25450
-505ddf75-e540-4be8-b7c4-a160c25207c0	a996c8d0-ff42-434b-a425-b229c8815138	space	bottom_battle	10	Battle scene with warriors and magical elements	f	none	event	["bottom_row.9"]	\N	\N	\N	\N	\N	\N	25348
-95fc57e7-4564-4995-aafd-49eea8ecbfb2	a996c8d0-ff42-434b-a425-b229c8815138	space	corner_tl	0	Ancient stone pillar with intricate carvings	f	none	standard	["top_row.0"]	\N	\N	\N	\N	\N	\N	25507
-50266525-dc15-463e-96b4-40e944e1cfac	a996c8d0-ff42-434b-a425-b229c8815138	space	top_battle	13	Battlefield with charging knights and dragons	f	none	standard	["top_row.3", "top_row.8", "top_row.10", "top_row.1", "bottom_row.1", "bottom_row.10", "top_row.4", "top_row.6", "bottom_row.2", "bottom_row.8", "bottom_row.4", "bottom_row.7"]	\N	\N	\N	\N	\N	\N	25472
-19e44c7d-3581-49e0-aa63-b52deca41797	a996c8d0-ff42-434b-a425-b229c8815138	panel	panel_left_bot	2	Ancient ruins with mysterious aura	f	none	\N	\N	180	660	440	900	260	240	25439
-064c02ef-e227-400c-8e17-46e072ed58e7	a996c8d0-ff42-434b-a425-b229c8815138	panel	panel_cright_top	6	Mystical portal with swirling vortex	f	none	\N	\N	1220	180	1480	420	260	240	25441
-84694368-cb70-4abc-b101-4c63a6634a9d	a996c8d0-ff42-434b-a425-b229c8815138	panel	panel_right_top	9	Windswept mountains with jagged peaks	f	none	\N	\N	1480	180	1740	420	260	240	25444
-5669b42a-a7b5-4070-9421-ed14f56cb89f	a996c8d0-ff42-434b-a425-b229c8815138	panel	panel_cleft_mid	4	Enchanted garden with glowing flora	f	none	\N	\N	440	420	700	660	260	240	25455
-a90e6b68-1a0c-4768-96f1-2754b8c77225	a996c8d0-ff42-434b-a425-b229c8815138	centerpiece	centerpiece	0	Ancient, ornate table with arcane symbols	f	none	\N	\N	700	180	1220	900	520	720	25345
-6d1a200e-324d-45fa-8818-7b52a39bd1be	a996c8d0-ff42-434b-a425-b229c8815138	panel	panel_cleft_top	3	Starlit night with swirling clouds	f	none	\N	\N	440	180	700	420	260	240	25433
-aaaa0765-5a7a-4ecd-a2fb-3d4b32a6258f	a996c8d0-ff42-434b-a425-b229c8815138	panel	panel_cleft_bot	5	Shadowy cavern with glittering gems	f	none	\N	\N	440	660	700	900	260	240	25436
-b7203767-fa99-4f70-ad09-910888ddd016	a996c8d0-ff42-434b-a425-b229c8815138	panel	panel_left_top	0	Dark forest with shadows and mist	f	none	\N	\N	180	180	440	420	260	240	25458
-581cf3da-8858-447f-9b18-f9a3ffda2c2b	a996c8d0-ff42-434b-a425-b229c8815138	panel	panel_right_mid	10	Moonlit path with twinkling stars	f	none	\N	\N	1480	420	1740	660	260	240	25464
-9cf4dc6f-e3d7-43c5-8e09-1ee9e43c851e	a996c8d0-ff42-434b-a425-b229c8815138	panel	panel_left_mid	1	Gothic castle in moonlight	f	none	\N	\N	180	420	440	660	260	240	25469
-55d20b13-e269-4806-92c7-15052a6a72a7	a996c8d0-ff42-434b-a425-b229c8815138	panel	panel_right_bot	11	Ghostly figures in a spectral dance	f	none	\N	\N	1480	660	1740	900	260	240	25483
-e2b38459-7fea-4c4c-83a2-85b2d6dcbb55	a996c8d0-ff42-434b-a425-b229c8815138	space	top_banner_a	4	Ornate banner with skull motifs	f	none	standard	["top_row.5"]	\N	\N	\N	\N	\N	\N	25488
-da1b4c9a-89e2-4278-9070-2da24f0700cd	a996c8d0-ff42-434b-a425-b229c8815138	space	corner_tr	1	Gothic archway with glowing symbols	f	none	standard	["top_row.11"]	\N	\N	\N	\N	\N	\N	25354
-e14b8ad3-dec0-447b-a7de-bd099aad86c3	a996c8d0-ff42-434b-a425-b229c8815138	space	corner_br	3	Weathered tombstone with runic inscriptions	f	none	standard	["bottom_row.11"]	\N	\N	\N	\N	\N	\N	25360
-f4f31c1d-14e0-4103-83db-019713deb925	a996c8d0-ff42-434b-a425-b229c8815138	space	bottom_space_c	9	Stone altar with glowing crystals	f	none	standard	["bottom_row.3"]	\N	\N	\N	\N	\N	\N	25381
-dc587ff2-6888-4c46-8c6c-542ea33a6306	a996c8d0-ff42-434b-a425-b229c8815138	panel	panel_cright_mid	7	Desolate wasteland with eerie fog	f	none	\N	\N	1220	420	1480	660	260	240	25502
-d08f7354-0005-4a04-99d9-16999207aa99	a996c8d0-ff42-434b-a425-b229c8815138	space	bottom_banner_b	8	Dark tapestry with arcane symbols	f	none	standard	["bottom_row.6", "top_row.7"]	\N	\N	\N	\N	\N	\N	25375
+COPY public.cells (id, board_uuid, kind, slug, position_index, prompt, needs_active, active_kind, space_kind, positions_json, bbox_x1, bbox_y1, bbox_x2, bbox_y2, target_w, target_h, live_asset_version_id, triggers_functional_cell_id) FROM stdin;
+dde185fd-bc66-45ca-83f0-6b846e12c8b3	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	functional	panel_cleft_mid	4	Three round pastry icons	f	none	\N	\N	440	420	700	660	260	240	25331	\N
+38476bb0-1676-4ed0-93e9-99912c933a07	748e880d-ceab-46e3-96f8-7684903a2727	perimeter	corner_tl	0		f	none	standard	["top_row.0"]	\N	\N	\N	\N	\N	\N	24662	\N
+44bad422-75ee-4101-8d89-756f7510458c	748e880d-ceab-46e3-96f8-7684903a2727	perimeter	corner_tr	1		f	none	standard	["top_row.11"]	\N	\N	\N	\N	\N	\N	24663	\N
+c551c198-1369-4b74-ab97-63ae500f4673	748e880d-ceab-46e3-96f8-7684903a2727	perimeter	corner_bl	2		f	none	standard	["bottom_row.0"]	\N	\N	\N	\N	\N	\N	24664	\N
+684b2398-5144-4992-883b-43535a9d30fd	748e880d-ceab-46e3-96f8-7684903a2727	perimeter	corner_br	3		f	none	standard	["bottom_row.11"]	\N	\N	\N	\N	\N	\N	24665	\N
+e7fa6140-0edd-4cbd-b77f-5a1e22c2e02e	748e880d-ceab-46e3-96f8-7684903a2727	perimeter	top_banner_a	4		f	none	standard	["top_row.5"]	\N	\N	\N	\N	\N	\N	24666	\N
+fb347f50-3a23-47ec-ad49-8dd8b360ea9c	748e880d-ceab-46e3-96f8-7684903a2727	perimeter	top_banner_b	5		f	none	standard	["top_row.7"]	\N	\N	\N	\N	\N	\N	24667	\N
+c7a2cd72-6372-431f-88f6-b25a2cac5d41	748e880d-ceab-46e3-96f8-7684903a2727	perimeter	top_space_a	6		f	none	standard	["top_row.1", "top_row.4", "top_row.8"]	\N	\N	\N	\N	\N	\N	24668	\N
+0dec3e10-126c-4c8a-a608-095627ab4a07	748e880d-ceab-46e3-96f8-7684903a2727	perimeter	top_space_b	7		f	none	standard	["top_row.2", "top_row.6", "top_row.9"]	\N	\N	\N	\N	\N	\N	24669	\N
+50d7495f-e559-41e2-b70d-c75573e64970	748e880d-ceab-46e3-96f8-7684903a2727	perimeter	top_space_c	8		f	none	standard	["top_row.3", "top_row.10"]	\N	\N	\N	\N	\N	\N	24670	\N
+ed6ccf75-1c5a-400f-b87a-7253ad4aebc1	748e880d-ceab-46e3-96f8-7684903a2727	perimeter	bottom_banner_a	9		f	none	standard	["bottom_row.5"]	\N	\N	\N	\N	\N	\N	24671	\N
+026a7bf7-0af1-4b7c-8d37-3843235616d9	748e880d-ceab-46e3-96f8-7684903a2727	perimeter	bottom_banner_b	10		f	none	standard	["bottom_row.6"]	\N	\N	\N	\N	\N	\N	24672	\N
+fe4c5b8b-b385-4438-9802-b3ea587c9948	748e880d-ceab-46e3-96f8-7684903a2727	perimeter	bottom_space_a	11		f	none	standard	["bottom_row.1", "bottom_row.4"]	\N	\N	\N	\N	\N	\N	24673	\N
+eb024126-db41-40e0-a81c-7c261a4b23b5	748e880d-ceab-46e3-96f8-7684903a2727	perimeter	bottom_space_b	12		f	none	standard	["bottom_row.2", "bottom_row.10"]	\N	\N	\N	\N	\N	\N	24674	\N
+c969f7f6-adf3-4dc3-8849-86ab154b96f8	748e880d-ceab-46e3-96f8-7684903a2727	perimeter	bottom_space_c	13		f	none	standard	["bottom_row.3", "bottom_row.8"]	\N	\N	\N	\N	\N	\N	24675	\N
+3b19b24c-100f-4ba4-b453-35a3dcee0425	748e880d-ceab-46e3-96f8-7684903a2727	perimeter	bottom_space_d	14		f	none	standard	["bottom_row.9"]	\N	\N	\N	\N	\N	\N	24676	\N
+52eb0298-5aa0-439b-8469-4c6ba4a7c81f	748e880d-ceab-46e3-96f8-7684903a2727	perimeter	bottom_battle	15		f	none	standard	["bottom_row.7"]	\N	\N	\N	\N	\N	\N	24677	\N
+1d9b4bd8-1b2b-4bb6-bc42-f2785553f40d	748e880d-ceab-46e3-96f8-7684903a2727	perimeter	side_battle	17		f	none	standard	["left_col.2", "right_col.0", "right_col.4"]	\N	\N	\N	\N	\N	\N	24679	\N
+a23b8bc0-fd75-4664-8a7f-b8eda64d8d13	ed1456f7-12ef-48d3-ac59-4c93634c8a33	perimeter	top_space_c	8		f	none	standard	["top_row.3", "top_row.10"]	\N	\N	\N	\N	\N	\N	24689	\N
+fdf3cf7e-d33f-41aa-9695-b06216bf4cb6	ed1456f7-12ef-48d3-ac59-4c93634c8a33	perimeter	bottom_banner_a	9		f	none	standard	["bottom_row.5"]	\N	\N	\N	\N	\N	\N	24690	\N
+41c6f8fe-34c6-4bb5-86b0-0928ccb6996e	33e6b243-c15d-41f4-b117-5fd33767bc3d	centerpiece	centerpiece	0	Pantheon of Greek gods in divine council	f	none	\N	\N	700	180	1220	900	520	720	25642	\N
+76725502-2f93-47d3-8395-b4b5868c15d4	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	perimeter	bottom_battle	15		f	none	standard	["bottom_row.7"]	\N	\N	\N	\N	\N	\N	24734	\N
+28dab9bb-3bbf-49b0-87cc-09add631d8f3	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	perimeter	side_battle	17		f	none	standard	["left_col.2", "right_col.0", "right_col.4"]	\N	\N	\N	\N	\N	\N	24736	\N
+1a5b4a63-4090-4c0f-889a-79530dfd9dca	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	perimeter	top_battle	18		f	none	standard	["top_row.3"]	\N	\N	\N	\N	\N	\N	24737	\N
+2dd4a689-ed8f-46ac-9243-90414b55c402	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	perimeter	side_property	16		f	none	standard	["left_col.0", "left_col.1", "left_col.3", "left_col.4", "right_col.1", "right_col.2", "right_col.3"]	\N	\N	\N	\N	\N	\N	24735	\N
+a33ab8b6-8941-4fc9-880a-9590357df5f5	33e6b243-c15d-41f4-b117-5fd33767bc3d	functional	panel_right_mid	10	Elegant dove in flight	f	none	\N	\N	1480	420	1740	660	260	240	25651	\N
+df554320-023d-4765-9307-197df05892f8	33e6b243-c15d-41f4-b117-5fd33767bc3d	functional	panel_right_top	9	Noble deer with crescent crown	f	none	\N	\N	1480	180	1740	420	260	240	25612	\N
+b758f927-d251-4f7c-bdaf-fb6080466439	748e880d-ceab-46e3-96f8-7684903a2727	functional	panel_left_top	0		f	none	\N	\N	180	180	440	420	260	240	24738	\N
+83b63641-ebf1-429c-ac2c-24ace723bc4a	748e880d-ceab-46e3-96f8-7684903a2727	functional	panel_left_mid	1		f	none	\N	\N	180	420	440	660	260	240	24739	\N
+0598d0b9-b2a9-4b75-9748-271f7e455eb7	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	perimeter	bottom_battle	15	Tower of pancakes with syrup	f	none	standard	["bottom_row.7"]	\N	\N	\N	\N	\N	\N	127	\N
+94d43b6f-1c87-4889-b9ef-6f2d49599f43	748e880d-ceab-46e3-96f8-7684903a2727	centerpiece	centerpiece	0		f	none	\N	\N	700	180	1220	900	520	720	24786	\N
+42e02b75-fce2-49d0-b195-fca2769dfc61	ed1456f7-12ef-48d3-ac59-4c93634c8a33	centerpiece	centerpiece	0		f	none	\N	\N	700	180	1220	900	520	720	24787	\N
+196ffcde-aab2-490a-a0d7-342650e454ab	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	centerpiece	centerpiece	0		f	none	\N	\N	700	180	1220	900	520	720	24788	\N
+315ad093-e4c7-459d-b98c-18a5dc094538	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	centerpiece	centerpiece	0		f	none	\N	\N	700	180	1220	900	520	720	24789	\N
+89bf51b5-9e65-4488-986f-6332e0e40f11	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	centerpiece	centerpiece	0	Giant tiered cake in candyland landscape	f	none	\N	\N	700	180	1220	900	520	720	4	\N
+28c15232-e56e-4e43-ad03-b0867b84f00c	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	perimeter	side_battle	17	Chocolate lava cake with spoon	f	none	standard	["left_col.2", "right_col.0", "right_col.4"]	\N	\N	\N	\N	\N	\N	158	\N
+3c8b63b3-f8a3-47a7-acea-be76a2c60b12	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	perimeter	corner_tl	0	Cupcake with pink frosting and cherry	f	none	standard	["top_row.0"]	\N	\N	\N	\N	\N	\N	153	\N
+3eb21e06-e33c-4a97-88b4-04c55309fbca	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	perimeter	top_space_a	6	Slice of swiss roll cake	f	none	standard	["top_row.1", "top_row.4", "top_row.8"]	\N	\N	\N	\N	\N	\N	173	\N
+aeeb6749-2bcc-4c16-8c17-bdc103526eaa	33e6b243-c15d-41f4-b117-5fd33767bc3d	perimeter	corner_tl	0	Golden laurel wreath on marble	f	none	standard	["top_row.0"]	\N	\N	\N	\N	\N	\N	25513	\N
+6265da1c-009c-4cd4-b152-e1f66670471d	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	perimeter	bottom_banner_b	10	Plate of assorted chocolates	f	none	standard	["bottom_row.6"]	\N	\N	\N	\N	\N	\N	125	\N
+ae63d033-c71a-40fa-93ab-461ebed995fe	a0bcf454-21c2-4741-9ec5-50efdd237b34	centerpiece	centerpiece	0	Giant tiered cake in candyland landscape	f	none	\N	\N	700	180	1220	900	520	720	25072	\N
+141dc77b-85c7-45fa-93f1-b0a140d23da0	a0bcf454-21c2-4741-9ec5-50efdd237b34	perimeter	top_space_c	8	Glazed donut with sprinkles	f	none	standard	["top_row.3", "top_row.10"]	\N	\N	\N	\N	\N	\N	25248	\N
+2420417f-d6d0-4662-aa13-c6a7f35bbec1	a0bcf454-21c2-4741-9ec5-50efdd237b34	perimeter	corner_bl	2	Slice of fruit-topped cheesecake	f	none	event	["bottom_row.0"]	\N	\N	\N	\N	\N	\N	25213	\N
+3c134109-2ad8-4670-b296-e80349374793	a0bcf454-21c2-4741-9ec5-50efdd237b34	perimeter	bottom_banner_a	9	Assorted cookies in a basket	f	none	standard	["bottom_row.5"]	\N	\N	\N	\N	\N	\N	25191	\N
+4321fda5-a1a9-4342-a5d8-3828b45fbaf5	a0bcf454-21c2-4741-9ec5-50efdd237b34	perimeter	top_banner_b	5	Stack of colorful donuts	f	none	standard	["top_row.7"]	\N	\N	\N	\N	\N	\N	25236	\N
+495cbfdf-c2a4-40a4-b3fd-c76d752a5c27	a0bcf454-21c2-4741-9ec5-50efdd237b34	perimeter	top_space_a	6	Slice of swiss roll cake	f	none	standard	["top_row.1", "top_row.4", "top_row.8"]	\N	\N	\N	\N	\N	\N	25241	\N
+ed7b0d36-d341-4d3b-88a6-4834fabfa48b	a0bcf454-21c2-4741-9ec5-50efdd237b34	perimeter	top_banner_a	4	Mint green macaron illustration	f	none	standard	["top_row.5"]	\N	\N	\N	\N	\N	\N	25233	\N
+a90e6b68-1a0c-4768-96f1-2754b8c77225	a996c8d0-ff42-434b-a425-b229c8815138	centerpiece	centerpiece	0	Ancient, ornate table with arcane symbols	f	none	\N	\N	700	180	1220	900	520	720	25345	\N
+339ad492-d051-4e78-aabc-c69e0c4347c8	a996c8d0-ff42-434b-a425-b229c8815138	perimeter	side_battle	12	Epic clash with mythical creatures	f	none	standard	["left_col.2", "right_col.0", "right_col.4", "left_col.0", "left_col.3", "right_col.2"]	\N	\N	\N	\N	\N	\N	25478	\N
+9ba026b3-b7f2-4881-bb40-5cec2851314b	a996c8d0-ff42-434b-a425-b229c8815138	perimeter	side_property	11	Haunted mansion silhouette with glowing windows	f	none	standard	["left_col.4", "right_col.3"]	\N	\N	\N	\N	\N	\N	25387	\N
+a7e39302-efc8-4ace-b771-87fe8ff60ad9	a996c8d0-ff42-434b-a425-b229c8815138	perimeter	portal	15	Haunted mansion silhouette with glowing windows	f	none	standard	["right_col.1"]	\N	\N	\N	\N	\N	\N	25499	\N
+9c0b292f-7ce7-4122-abea-b19c89753945	a996c8d0-ff42-434b-a425-b229c8815138	perimeter	top_space_b	5	Dark wooden gate with iron accents	f	none	standard	["top_row.2", "top_row.9"]	\N	\N	\N	\N	\N	\N	25366	\N
+6c76b55f-c6cc-4bff-af81-e06005f2d8c6	a996c8d0-ff42-434b-a425-b229c8815138	perimeter	top_space_c	6	Flickering lanterns on wrought-iron stands	f	none	standard	["top_row.3"]	\N	\N	\N	\N	\N	\N	25369	\N
+505ddf75-e540-4be8-b7c4-a160c25207c0	a996c8d0-ff42-434b-a425-b229c8815138	perimeter	bottom_battle	10	Battle scene with warriors and magical elements	f	none	event	["bottom_row.9"]	\N	\N	\N	\N	\N	\N	25348	\N
+95fc57e7-4564-4995-aafd-49eea8ecbfb2	a996c8d0-ff42-434b-a425-b229c8815138	perimeter	corner_tl	0	Ancient stone pillar with intricate carvings	f	none	standard	["top_row.0"]	\N	\N	\N	\N	\N	\N	25507	\N
+50266525-dc15-463e-96b4-40e944e1cfac	a996c8d0-ff42-434b-a425-b229c8815138	perimeter	top_battle	13	Battlefield with charging knights and dragons	f	none	standard	["top_row.3", "top_row.8", "top_row.10", "top_row.1", "bottom_row.1", "bottom_row.10", "top_row.4", "top_row.6", "bottom_row.2", "bottom_row.8", "bottom_row.4", "bottom_row.7"]	\N	\N	\N	\N	\N	\N	25472	\N
+8add5ea9-5479-471a-bd2b-3e508d492b00	a996c8d0-ff42-434b-a425-b229c8815138	functional	panel_cright_bot	8	Cursed lake with glowing water	f	none	\N	\N	1220	660	1480	900	260	240	25450	\N
+19e44c7d-3581-49e0-aa63-b52deca41797	a996c8d0-ff42-434b-a425-b229c8815138	functional	panel_left_bot	2	Ancient ruins with mysterious aura	f	none	\N	\N	180	660	440	900	260	240	25439	\N
+064c02ef-e227-400c-8e17-46e072ed58e7	a996c8d0-ff42-434b-a425-b229c8815138	functional	panel_cright_top	6	Mystical portal with swirling vortex	f	none	\N	\N	1220	180	1480	420	260	240	25441	\N
+84694368-cb70-4abc-b101-4c63a6634a9d	a996c8d0-ff42-434b-a425-b229c8815138	functional	panel_right_top	9	Windswept mountains with jagged peaks	f	none	\N	\N	1480	180	1740	420	260	240	25444	\N
+5669b42a-a7b5-4070-9421-ed14f56cb89f	a996c8d0-ff42-434b-a425-b229c8815138	functional	panel_cleft_mid	4	Enchanted garden with glowing flora	f	none	\N	\N	440	420	700	660	260	240	25455	\N
+6d1a200e-324d-45fa-8818-7b52a39bd1be	a996c8d0-ff42-434b-a425-b229c8815138	functional	panel_cleft_top	3	Starlit night with swirling clouds	f	none	\N	\N	440	180	700	420	260	240	25433	\N
+aaaa0765-5a7a-4ecd-a2fb-3d4b32a6258f	a996c8d0-ff42-434b-a425-b229c8815138	functional	panel_cleft_bot	5	Shadowy cavern with glittering gems	f	none	\N	\N	440	660	700	900	260	240	25436	\N
+e2b38459-7fea-4c4c-83a2-85b2d6dcbb55	a996c8d0-ff42-434b-a425-b229c8815138	perimeter	top_banner_a	4	Ornate banner with skull motifs	f	none	standard	["top_row.5"]	\N	\N	\N	\N	\N	\N	25488	\N
+da1b4c9a-89e2-4278-9070-2da24f0700cd	a996c8d0-ff42-434b-a425-b229c8815138	perimeter	corner_tr	1	Gothic archway with glowing symbols	f	none	standard	["top_row.11"]	\N	\N	\N	\N	\N	\N	25354	\N
+e14b8ad3-dec0-447b-a7de-bd099aad86c3	a996c8d0-ff42-434b-a425-b229c8815138	perimeter	corner_br	3	Weathered tombstone with runic inscriptions	f	none	standard	["bottom_row.11"]	\N	\N	\N	\N	\N	\N	25360	\N
+f4f31c1d-14e0-4103-83db-019713deb925	a996c8d0-ff42-434b-a425-b229c8815138	perimeter	bottom_space_c	9	Stone altar with glowing crystals	f	none	standard	["bottom_row.3"]	\N	\N	\N	\N	\N	\N	25381	\N
+d08f7354-0005-4a04-99d9-16999207aa99	a996c8d0-ff42-434b-a425-b229c8815138	perimeter	bottom_banner_b	8	Dark tapestry with arcane symbols	f	none	standard	["bottom_row.6", "top_row.7"]	\N	\N	\N	\N	\N	\N	25375	\N
+dc587ff2-6888-4c46-8c6c-542ea33a6306	a996c8d0-ff42-434b-a425-b229c8815138	functional	panel_cright_mid	7	Desolate wasteland with eerie fog	f	none	\N	\N	1220	420	1480	660	260	240	25502	\N
+69e7b559-b30d-4f23-938e-62ed503f477c	748e880d-ceab-46e3-96f8-7684903a2727	perimeter	top_battle	18		f	none	standard	["top_row.3"]	\N	\N	\N	\N	\N	\N	24680	\N
+b46f8f7d-4be4-4039-a74d-3d6c18f417fb	ed1456f7-12ef-48d3-ac59-4c93634c8a33	perimeter	corner_tl	0		f	none	standard	["top_row.0"]	\N	\N	\N	\N	\N	\N	24681	\N
+4b1b3c50-561a-4a83-bf2d-1f82ff63cf64	ed1456f7-12ef-48d3-ac59-4c93634c8a33	perimeter	corner_tr	1		f	none	standard	["top_row.11"]	\N	\N	\N	\N	\N	\N	24682	\N
+8c059f13-0c61-485e-a588-ec606a267937	ed1456f7-12ef-48d3-ac59-4c93634c8a33	perimeter	corner_bl	2		f	none	standard	["bottom_row.0"]	\N	\N	\N	\N	\N	\N	24683	\N
+68c5291f-eee0-4465-8e3a-41e636391c0f	ed1456f7-12ef-48d3-ac59-4c93634c8a33	perimeter	corner_br	3		f	none	standard	["bottom_row.11"]	\N	\N	\N	\N	\N	\N	24684	\N
+aea8956c-4548-4824-a55b-f37d0885e027	ed1456f7-12ef-48d3-ac59-4c93634c8a33	perimeter	top_banner_a	4		f	none	standard	["top_row.5"]	\N	\N	\N	\N	\N	\N	24685	\N
+2eb50420-6ef1-4114-8f77-2e20353f7949	ed1456f7-12ef-48d3-ac59-4c93634c8a33	perimeter	top_banner_b	5		f	none	standard	["top_row.7"]	\N	\N	\N	\N	\N	\N	24686	\N
+9fa68c42-09da-4f2c-b249-f0b5ffadaeb6	ed1456f7-12ef-48d3-ac59-4c93634c8a33	perimeter	top_space_a	6		f	none	standard	["top_row.1", "top_row.4", "top_row.8"]	\N	\N	\N	\N	\N	\N	24687	\N
+019cbae7-d4a1-447b-8a49-39ddeb92797b	748e880d-ceab-46e3-96f8-7684903a2727	perimeter	side_property	16		f	none	standard	["left_col.0", "left_col.1", "left_col.3", "left_col.4", "right_col.1", "right_col.2", "right_col.3"]	\N	\N	\N	\N	\N	\N	24678	\N
+f781123b-b8c3-4cb9-93e9-a220b4c7a79a	ed1456f7-12ef-48d3-ac59-4c93634c8a33	perimeter	top_space_b	7		f	none	standard	["top_row.2", "top_row.6", "top_row.9"]	\N	\N	\N	\N	\N	\N	24688	\N
+81741217-4816-444e-bd2e-2b1098297118	ed1456f7-12ef-48d3-ac59-4c93634c8a33	perimeter	bottom_banner_b	10		f	none	standard	["bottom_row.6"]	\N	\N	\N	\N	\N	\N	24691	\N
+a9ed473b-2d13-41a2-9910-4522f57e82e3	ed1456f7-12ef-48d3-ac59-4c93634c8a33	perimeter	bottom_space_a	11		f	none	standard	["bottom_row.1", "bottom_row.4"]	\N	\N	\N	\N	\N	\N	24692	\N
+18e98814-2c39-4430-a959-8c588f6598f0	ed1456f7-12ef-48d3-ac59-4c93634c8a33	perimeter	bottom_space_b	12		f	none	standard	["bottom_row.2", "bottom_row.10"]	\N	\N	\N	\N	\N	\N	24693	\N
+4dcf9c1d-c379-4857-9696-77b3c7674993	ed1456f7-12ef-48d3-ac59-4c93634c8a33	perimeter	bottom_space_c	13		f	none	standard	["bottom_row.3", "bottom_row.8"]	\N	\N	\N	\N	\N	\N	24694	\N
+c4cf47c4-1d00-4629-9594-e07424b94046	ed1456f7-12ef-48d3-ac59-4c93634c8a33	perimeter	bottom_space_d	14		f	none	standard	["bottom_row.9"]	\N	\N	\N	\N	\N	\N	24695	\N
+81acf998-ba36-4063-9d87-515a8af42428	ed1456f7-12ef-48d3-ac59-4c93634c8a33	perimeter	bottom_battle	15		f	none	standard	["bottom_row.7"]	\N	\N	\N	\N	\N	\N	24696	\N
+5decb330-6524-46b3-8fb0-8afcc3c76fbc	ed1456f7-12ef-48d3-ac59-4c93634c8a33	perimeter	side_property	16		f	none	standard	["left_col.0", "left_col.1", "left_col.3", "left_col.4", "right_col.1", "right_col.2", "right_col.3"]	\N	\N	\N	\N	\N	\N	24697	\N
+247db5b4-dd39-44bb-a67d-2c48b9b5f23f	ed1456f7-12ef-48d3-ac59-4c93634c8a33	perimeter	side_battle	17		f	none	standard	["left_col.2", "right_col.0", "right_col.4"]	\N	\N	\N	\N	\N	\N	24698	\N
+4bcac0b7-2088-4ec1-9509-03db74d329ec	ed1456f7-12ef-48d3-ac59-4c93634c8a33	perimeter	top_battle	18		f	none	standard	["top_row.3"]	\N	\N	\N	\N	\N	\N	24699	\N
+e27dc48f-7afd-4e66-bc76-5c1c22e7ccd6	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	perimeter	corner_tl	0		f	none	standard	["top_row.0"]	\N	\N	\N	\N	\N	\N	24700	\N
+5157cd6d-20ba-483d-a9d3-039b22a24fb5	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	perimeter	corner_tr	1		f	none	standard	["top_row.11"]	\N	\N	\N	\N	\N	\N	24701	\N
+fbd9f23e-a376-4538-b63b-6f9b55c31682	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	perimeter	corner_bl	2		f	none	standard	["bottom_row.0"]	\N	\N	\N	\N	\N	\N	24702	\N
+cb3bd3d4-313f-46ba-8e77-7fcadeab01ab	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	perimeter	corner_br	3		f	none	standard	["bottom_row.11"]	\N	\N	\N	\N	\N	\N	24703	\N
+d91f4653-8aba-40dc-937f-4e056c3a83aa	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	perimeter	top_banner_a	4		f	none	standard	["top_row.5"]	\N	\N	\N	\N	\N	\N	24704	\N
+9758708c-d525-4c80-b79d-b7a750868e9f	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	perimeter	top_banner_b	5		f	none	standard	["top_row.7"]	\N	\N	\N	\N	\N	\N	24705	\N
+3d615df3-b677-4dae-ab0c-417216922dbe	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	perimeter	top_space_a	6		f	none	standard	["top_row.1", "top_row.4", "top_row.8"]	\N	\N	\N	\N	\N	\N	24706	\N
+fa00a178-57d9-4212-8493-d7e758fe1974	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	perimeter	top_space_b	7		f	none	standard	["top_row.2", "top_row.6", "top_row.9"]	\N	\N	\N	\N	\N	\N	24707	\N
+fb01b404-3e5b-4553-9a8c-56d259264dd5	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	perimeter	top_space_c	8		f	none	standard	["top_row.3", "top_row.10"]	\N	\N	\N	\N	\N	\N	24708	\N
+fccc1e56-df0b-41f4-808a-37cb68107ed4	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	perimeter	bottom_banner_a	9		f	none	standard	["bottom_row.5"]	\N	\N	\N	\N	\N	\N	24709	\N
+fa0204f1-2560-4279-98f2-1cb7bc4446f1	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	perimeter	bottom_banner_b	10		f	none	standard	["bottom_row.6"]	\N	\N	\N	\N	\N	\N	24710	\N
+266e27ea-2057-4a93-a461-859cd2f5c9d3	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	perimeter	bottom_space_a	11		f	none	standard	["bottom_row.1", "bottom_row.4"]	\N	\N	\N	\N	\N	\N	24711	\N
+2047dfdf-f45e-4e46-9450-b7bb4d49d3e4	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	perimeter	bottom_space_b	12		f	none	standard	["bottom_row.2", "bottom_row.10"]	\N	\N	\N	\N	\N	\N	24712	\N
+066d36ef-cd5e-44c2-a05e-9b36de16850c	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	perimeter	bottom_space_c	13		f	none	standard	["bottom_row.3", "bottom_row.8"]	\N	\N	\N	\N	\N	\N	24713	\N
+c0b54677-1cbe-47b5-a831-aa6178b70e17	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	perimeter	bottom_space_d	14		f	none	standard	["bottom_row.9"]	\N	\N	\N	\N	\N	\N	24714	\N
+8d17cab5-340f-42e9-82a5-09e9c2f0b9cb	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	perimeter	bottom_battle	15		f	none	standard	["bottom_row.7"]	\N	\N	\N	\N	\N	\N	24715	\N
+3a043190-ff63-49cc-bacd-6d93af4e98ca	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	perimeter	side_property	16		f	none	standard	["left_col.0", "left_col.1", "left_col.3", "left_col.4", "right_col.1", "right_col.2", "right_col.3"]	\N	\N	\N	\N	\N	\N	24716	\N
+00dab7ae-4800-4a99-9e1b-e543519547cf	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	perimeter	side_battle	17		f	none	standard	["left_col.2", "right_col.0", "right_col.4"]	\N	\N	\N	\N	\N	\N	24717	\N
+c29fd3fc-4fe8-4a8d-81c2-4d8f7200f006	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	perimeter	top_battle	18		f	none	standard	["top_row.3"]	\N	\N	\N	\N	\N	\N	24718	\N
+2eaaf833-8981-4907-b485-ae449bc17302	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	perimeter	corner_tl	0		f	none	standard	["top_row.0"]	\N	\N	\N	\N	\N	\N	24719	\N
+2d0890b4-7dc8-423e-b2c5-ea7a9cd62c07	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	perimeter	corner_tr	1		f	none	standard	["top_row.11"]	\N	\N	\N	\N	\N	\N	24720	\N
+44e93a32-97ef-41b9-9136-cdfcf844e9b8	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	perimeter	corner_bl	2		f	none	standard	["bottom_row.0"]	\N	\N	\N	\N	\N	\N	24721	\N
+a90d2028-91b7-4be9-bb27-770963495934	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	perimeter	corner_br	3		f	none	standard	["bottom_row.11"]	\N	\N	\N	\N	\N	\N	24722	\N
+17c553a7-cae3-4299-a450-43143bee6120	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	perimeter	top_banner_a	4		f	none	standard	["top_row.5"]	\N	\N	\N	\N	\N	\N	24723	\N
+1c424f14-ee0d-4d21-8a0d-577690598a9e	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	perimeter	top_banner_b	5		f	none	standard	["top_row.7"]	\N	\N	\N	\N	\N	\N	24724	\N
+cd53736c-a867-46ce-a27d-43f77d0815c9	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	perimeter	top_space_a	6		f	none	standard	["top_row.1", "top_row.4", "top_row.8"]	\N	\N	\N	\N	\N	\N	24725	\N
+89cd5b76-0391-4944-976c-be55ef4d3b63	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	perimeter	top_space_b	7		f	none	standard	["top_row.2", "top_row.6", "top_row.9"]	\N	\N	\N	\N	\N	\N	24726	\N
+f36ffe13-29a8-4372-9c44-1cc36f37ee4e	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	perimeter	top_space_c	8		f	none	standard	["top_row.3", "top_row.10"]	\N	\N	\N	\N	\N	\N	24727	\N
+261d52cf-6be9-4304-9a83-74eb79c514ee	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	perimeter	bottom_banner_a	9		f	none	standard	["bottom_row.5"]	\N	\N	\N	\N	\N	\N	24728	\N
+1099e547-920a-4cee-99b6-38275c1b6bd9	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	perimeter	bottom_banner_b	10		f	none	standard	["bottom_row.6"]	\N	\N	\N	\N	\N	\N	24729	\N
+da2a02d0-0914-4d1d-8f60-10de47a2376b	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	perimeter	bottom_space_a	11		f	none	standard	["bottom_row.1", "bottom_row.4"]	\N	\N	\N	\N	\N	\N	24730	\N
+419331a8-b728-4de7-bffc-43820f8f297f	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	perimeter	bottom_space_b	12		f	none	standard	["bottom_row.2", "bottom_row.10"]	\N	\N	\N	\N	\N	\N	24731	\N
+3780c51d-a936-44da-8e10-9cea7ec29e4f	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	perimeter	bottom_space_c	13		f	none	standard	["bottom_row.3", "bottom_row.8"]	\N	\N	\N	\N	\N	\N	24732	\N
+e0164400-aaca-4211-9d0e-9ca8d5f63b14	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	perimeter	bottom_space_d	14		f	none	standard	["bottom_row.9"]	\N	\N	\N	\N	\N	\N	24733	\N
+082877ca-ecfb-4a41-aa0d-cf563b0b5da3	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	perimeter	corner_br	3	Caramel apple with candy sprinkles	f	none	standard	["bottom_row.11"]	\N	\N	\N	\N	\N	\N	150	\N
+08e47ed0-a9ec-492b-af8b-7594e773b73f	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	perimeter	bottom_space_a	11	Chocolate eclair with cream	f	none	standard	["bottom_row.1", "bottom_row.4"]	\N	\N	\N	\N	\N	\N	130	\N
+0b9f3635-5d2b-42b7-ad39-e1c63f6525cc	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	perimeter	side_property	16	Macaron tower with icing	f	none	standard	["left_col.0", "left_col.1", "left_col.3", "left_col.4", "right_col.1", "right_col.2", "right_col.3"]	\N	\N	\N	\N	\N	\N	162	\N
+0f27144e-1bf7-4c17-a23e-dc53d2881d92	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	perimeter	bottom_space_d	14	Tall glass of milkshake	f	none	event	["bottom_row.9"]	\N	\N	\N	\N	\N	\N	141	\N
+0f4e58ce-6367-46db-a2a3-bff5fb9ed14c	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	perimeter	top_banner_b	5	Stack of colorful donuts	f	none	standard	["top_row.7"]	\N	\N	\N	\N	\N	\N	168	\N
+15908a34-82c3-4044-82f5-be891a18d2eb	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	perimeter	top_space_b	7	Blueberry tart on a plate	f	none	standard	["top_row.2", "top_row.6", "top_row.9"]	\N	\N	\N	\N	\N	\N	176	\N
+7679ba1d-0a67-4431-b936-36f2f0cff2aa	33e6b243-c15d-41f4-b117-5fd33767bc3d	perimeter	corner_tr	1	Feathered helmet with shield	f	none	standard	["top_row.11"]	\N	\N	\N	\N	\N	\N	25516	\N
+a3f6374a-62ec-4f1f-ae17-1fef3af4fbc5	33e6b243-c15d-41f4-b117-5fd33767bc3d	perimeter	corner_bl	2	Hammer and anvil icons	f	none	standard	["bottom_row.0"]	\N	\N	\N	\N	\N	\N	25519	\N
+529910af-3f18-4d0a-8a76-39ca6ff8f0b4	33e6b243-c15d-41f4-b117-5fd33767bc3d	perimeter	corner_br	3	Flaming torch with olive branches	f	none	standard	["bottom_row.11"]	\N	\N	\N	\N	\N	\N	25522	\N
+9b3d60e5-9c02-410e-b415-e3cff09ce90c	33e6b243-c15d-41f4-b117-5fd33767bc3d	perimeter	top_banner_a	4	Greek temple silhouette on horizon	f	none	standard	["top_row.5"]	\N	\N	\N	\N	\N	\N	25525	\N
+504e67a7-8adb-459d-b3c5-765a7e99c2cd	33e6b243-c15d-41f4-b117-5fd33767bc3d	perimeter	top_space_a	6	Celestial solar eclipse scene	f	none	standard	["top_row.1", "top_row.4", "top_row.8"]	\N	\N	\N	\N	\N	\N	25531	\N
+3dc7bf37-b420-4c65-937e-1a61c2e9f75f	33e6b243-c15d-41f4-b117-5fd33767bc3d	perimeter	top_space_b	7	Majestic Greek columns under moonlight	f	none	standard	["top_row.2", "top_row.6", "top_row.9"]	\N	\N	\N	\N	\N	\N	25534	\N
+83ae6f87-97f0-4934-ad04-efbf493cf571	33e6b243-c15d-41f4-b117-5fd33767bc3d	perimeter	top_space_c	8	Starlit constellation over mountains	f	none	standard	["top_row.3", "top_row.10"]	\N	\N	\N	\N	\N	\N	25537	\N
+0825f95b-7c3e-43bc-a001-737a10be64ff	33e6b243-c15d-41f4-b117-5fd33767bc3d	perimeter	bottom_banner_a	9	Golden Greek helmet emblem	f	none	standard	["bottom_row.5"]	\N	\N	\N	\N	\N	\N	25540	\N
+42fdcabd-849e-4fb1-9d59-58a13e41bbe1	33e6b243-c15d-41f4-b117-5fd33767bc3d	perimeter	bottom_banner_b	10	Classic trident icon in waves	f	none	standard	["bottom_row.6"]	\N	\N	\N	\N	\N	\N	25543	\N
+81bcd448-b0d6-44bc-9e91-db93f789557c	33e6b243-c15d-41f4-b117-5fd33767bc3d	perimeter	bottom_space_c	13	Grecian urn pouring water	f	none	standard	["bottom_row.3", "bottom_row.8"]	\N	\N	\N	\N	\N	\N	25552	\N
+1db4318b-0e7a-441b-acc4-815cf74eb683	33e6b243-c15d-41f4-b117-5fd33767bc3d	perimeter	bottom_battle	15	Goddess of war in armor	f	none	standard	["bottom_row.7"]	\N	\N	\N	\N	\N	\N	25558	\N
+06c03c30-00fb-4d0d-bc94-6e35696ee8fa	33e6b243-c15d-41f4-b117-5fd33767bc3d	perimeter	side_property	16	Vibrant peacock on a branch	f	none	standard	["left_col.0", "left_col.1", "left_col.3", "left_col.4", "right_col.1", "right_col.2", "right_col.3"]	\N	\N	\N	\N	\N	\N	25561	\N
+65e649d1-fe52-48dd-bb5c-9ad47c4b78a8	33e6b243-c15d-41f4-b117-5fd33767bc3d	perimeter	side_battle	17	Volcano erupting with lava	f	none	standard	["left_col.2", "right_col.0", "right_col.4"]	\N	\N	\N	\N	\N	\N	25564	\N
+78652703-edfb-48f5-b114-f49e1754938f	33e6b243-c15d-41f4-b117-5fd33767bc3d	perimeter	top_battle	18	Warrior's shield and spear	f	none	standard	["top_row.3"]	\N	\N	\N	\N	\N	\N	25567	\N
+cc86adfc-dbb3-4bd2-b2a9-e2d69a9ce0ed	33e6b243-c15d-41f4-b117-5fd33767bc3d	perimeter	top_banner_b	5	Thunderbolt in dark stormy sky	f	none	standard	["top_row.7"]	\N	\N	\N	\N	\N	\N	25528	\N
+cfc12151-cbdb-48d6-b10e-6a60bb17bb63	33e6b243-c15d-41f4-b117-5fd33767bc3d	perimeter	bottom_space_a	11	Lush olive grove at dawn	f	none	standard	["bottom_row.1", "bottom_row.4"]	\N	\N	\N	\N	\N	\N	25546	\N
+ea049684-e236-4a48-92f2-93c2e31da241	33e6b243-c15d-41f4-b117-5fd33767bc3d	perimeter	bottom_space_d	14	Ship sailing under crescent moon	f	none	standard	["bottom_row.9"]	\N	\N	\N	\N	\N	\N	25555	\N
+7caa3c37-1794-49ca-9c65-cbe90c6d81df	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	perimeter	top_battle	18	Plate of colorful cupcakes	f	none	standard	["top_row.3"]	\N	\N	\N	\N	\N	\N	170	\N
+85aa67aa-e1a5-4791-b59b-b2acbbbc264e	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	perimeter	corner_bl	2	Slice of fruit-topped cheesecake	f	none	event	["bottom_row.0"]	\N	\N	\N	\N	\N	\N	145	\N
+872ef89e-b657-4aa3-a111-ecfd53a28ad6	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	perimeter	corner_tr	1	Chocolate truffle with golden wrapper	f	none	standard	["top_row.11"]	\N	\N	\N	\N	\N	\N	155	\N
+9f296306-f1f5-4cbb-a34b-7ab58fb695af	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	perimeter	bottom_space_c	13	Slice of strawberry cake	f	none	standard	["bottom_row.3", "bottom_row.8"]	\N	\N	\N	\N	\N	\N	136	\N
+d14b42cb-f4b1-4b0d-aeed-5c107ca6c915	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	perimeter	top_space_c	8	Glazed donut with sprinkles	f	none	standard	["top_row.3", "top_row.10"]	\N	\N	\N	\N	\N	\N	180	\N
+d313c7b5-9929-4cda-9c93-a89e50dbaf2f	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	perimeter	bottom_banner_a	9	Assorted cookies in a basket	f	none	standard	["bottom_row.5"]	\N	\N	\N	\N	\N	\N	123	\N
+d55dea7d-d53d-45c6-b6da-a692ae542065	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	perimeter	top_banner_a	4	Mint green macaron illustration	f	none	standard	["top_row.5"]	\N	\N	\N	\N	\N	\N	165	\N
+e334954a-a8fb-40cb-ae6d-5f61740b55ab	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	perimeter	bottom_space_b	12	Vanilla cupcake with sprinkles	f	none	standard	["bottom_row.2", "bottom_row.10"]	\N	\N	\N	\N	\N	\N	133	\N
+6b01b48b-c8db-43b4-bb5b-1c293cd974b7	a0bcf454-21c2-4741-9ec5-50efdd237b34	perimeter	corner_tl	0	Cupcake with pink frosting and cherry	f	none	standard	["top_row.0"]	\N	\N	\N	\N	\N	\N	25221	\N
+a4517eb8-ebb7-49a0-adcc-0c0d31346e7e	a0bcf454-21c2-4741-9ec5-50efdd237b34	perimeter	bottom_space_a	11	Chocolate eclair with cream	f	none	standard	["bottom_row.1", "bottom_row.4"]	\N	\N	\N	\N	\N	\N	25198	\N
+b8106ca0-9247-445d-8da6-f6b1fcc2a84f	a0bcf454-21c2-4741-9ec5-50efdd237b34	perimeter	top_space_b	7	Blueberry tart on a plate	f	none	standard	["top_row.2", "top_row.6", "top_row.9"]	\N	\N	\N	\N	\N	\N	25244	\N
+c0b4f21c-dccc-4cb4-8535-f0a61f4a9d8d	a0bcf454-21c2-4741-9ec5-50efdd237b34	perimeter	corner_tr	1	Chocolate truffle with golden wrapper	f	none	standard	["top_row.11"]	\N	\N	\N	\N	\N	\N	25223	\N
+ccec4752-2074-4f45-8839-1b3e81b6f9fc	a0bcf454-21c2-4741-9ec5-50efdd237b34	perimeter	corner_br	3	Caramel apple with candy sprinkles	f	none	standard	["bottom_row.11"]	\N	\N	\N	\N	\N	\N	25218	\N
+99cc3707-f9b8-4d5c-a311-6829498b7d76	a0bcf454-21c2-4741-9ec5-50efdd237b34	perimeter	bottom_space_c	13	Slice of strawberry cake	f	none	standard	["bottom_row.8"]	\N	\N	\N	\N	\N	\N	25204	\N
+83385824-8497-408a-9298-59795216dc47	a0bcf454-21c2-4741-9ec5-50efdd237b34	perimeter	top_battle	17	Plate of colorful cupcakes	f	none	standard	["top_row.3"]	\N	\N	\N	\N	\N	\N	25238	\N
+8f028b31-58e0-4e2e-b635-6b1255a8aca3	a0bcf454-21c2-4741-9ec5-50efdd237b34	perimeter	side_property	15	Macaron tower with icing	f	none	standard	["left_col.0", "left_col.1", "left_col.3", "left_col.4", "right_col.1", "right_col.2", "right_col.3"]	\N	\N	\N	\N	\N	\N	25230	\N
+c2ad2dd4-7ba1-49c3-bf1d-73ec3a63999a	a0bcf454-21c2-4741-9ec5-50efdd237b34	perimeter	bottom_battle	14	Tower of pancakes with syrup	f	none	standard	["bottom_row.7", "bottom_row.3"]	\N	\N	\N	\N	\N	\N	25195	\N
+f628b935-1f9d-4cb1-8e39-c3ca52dde643	a0bcf454-21c2-4741-9ec5-50efdd237b34	perimeter	side_battle	16	Chocolate lava cake with spoon	f	none	standard	["left_col.2", "right_col.0", "right_col.4"]	\N	\N	\N	\N	\N	\N	25226	\N
+944e5906-d037-4e6e-97c5-d08c876a0ff7	a0bcf454-21c2-4741-9ec5-50efdd237b34	perimeter	bottom_space_b	12	Vanilla cupcake with sprinkles	f	none	standard	["bottom_row.2", "bottom_row.10"]	\N	\N	\N	\N	\N	\N	25201	\N
+edca6f58-ec1e-4889-9466-d60a8d8ef947	a0bcf454-21c2-4741-9ec5-50efdd237b34	perimeter	bottom_banner_b	10	Plate of assorted chocolates	f	none	standard	["bottom_row.6", "bottom_row.9"]	\N	\N	\N	\N	\N	\N	25193	\N
+434356fd-d4c6-4119-b0e4-1afccbba0c5b	33e6b243-c15d-41f4-b117-5fd33767bc3d	perimeter	bottom_space_b	12	Ancient amphitheater with stars	f	none	standard	["bottom_row.2", "bottom_row.10"]	\N	\N	\N	\N	\N	\N	25549	\N
+5d747bcf-87a6-4d3c-9d2d-895c6df1c9bf	a996c8d0-ff42-434b-a425-b229c8815138	perimeter	bottom_banner_a	7	Banner with gothic script and flames	f	none	standard	["bottom_row.5"]	\N	\N	\N	\N	\N	\N	25493	\N
+2810afa2-644a-44e5-97a0-b05c6c2983be	a996c8d0-ff42-434b-a425-b229c8815138	perimeter	side_prop_2	14	Haunted mansion silhouette with glowing windows	f	none	standard	["left_col.1"]	\N	\N	\N	\N	\N	\N	25491	\N
+4297b116-2b04-442a-ac58-61ee334328ab	a996c8d0-ff42-434b-a425-b229c8815138	perimeter	corner_bl	2	Dark, mysterious cave entrance	f	none	standard	["bottom_row.0"]	\N	\N	\N	\N	\N	\N	25357	\N
+4ca2d6df-3011-4842-a71d-90a71bd65690	748e880d-ceab-46e3-96f8-7684903a2727	functional	panel_left_bot	2		f	none	\N	\N	180	660	440	900	260	240	24740	\N
+49153b6e-0294-4965-8f89-14acf9c22e75	a0bcf454-21c2-4741-9ec5-50efdd237b34	functional	panel_right_top	9	Trio of decorated cupcakes	f	none	\N	\N	1480	180	1740	420	260	240	25188	\N
+4ce101b9-6fc8-40cb-b2a7-2a94d8980818	748e880d-ceab-46e3-96f8-7684903a2727	functional	panel_cleft_top	3		f	none	\N	\N	440	180	700	420	260	240	24741	\N
+2647431b-4f27-4a7f-96bc-01fe7ea41442	748e880d-ceab-46e3-96f8-7684903a2727	functional	panel_cleft_mid	4		f	none	\N	\N	440	420	700	660	260	240	24742	\N
+4a7df3a7-b835-4a3a-8d42-79de82de0975	748e880d-ceab-46e3-96f8-7684903a2727	functional	panel_cleft_bot	5		f	none	\N	\N	440	660	700	900	260	240	24743	\N
+b1404ae2-5a58-4988-987e-5677ee351817	748e880d-ceab-46e3-96f8-7684903a2727	functional	panel_cright_top	6		f	none	\N	\N	1220	180	1480	420	260	240	24744	\N
+23b63856-2d47-41e8-9c85-e410b22d42d0	748e880d-ceab-46e3-96f8-7684903a2727	functional	panel_cright_mid	7		f	none	\N	\N	1220	420	1480	660	260	240	24745	\N
+d5b90dae-33ca-49d1-a558-cd15e670f1b6	748e880d-ceab-46e3-96f8-7684903a2727	functional	panel_cright_bot	8		f	none	\N	\N	1220	660	1480	900	260	240	24746	\N
+da32cea7-87ee-49bc-98f9-ab5b044934df	748e880d-ceab-46e3-96f8-7684903a2727	functional	panel_right_top	9		f	none	\N	\N	1480	180	1740	420	260	240	24747	\N
+efdc4968-90f2-4018-a66a-f83c42c7da41	748e880d-ceab-46e3-96f8-7684903a2727	functional	panel_right_mid	10		f	none	\N	\N	1480	420	1740	660	260	240	24748	\N
+db3b7b81-e6c8-4976-b928-8cd828f6c038	748e880d-ceab-46e3-96f8-7684903a2727	functional	panel_right_bot	11		f	none	\N	\N	1480	660	1740	900	260	240	24749	\N
+9901bc72-d5db-45e2-9d9e-7fecc14b302a	ed1456f7-12ef-48d3-ac59-4c93634c8a33	functional	panel_left_top	0		f	none	\N	\N	180	180	440	420	260	240	24750	\N
+8fbfc195-3048-4ed6-82f0-d4deabc928f1	ed1456f7-12ef-48d3-ac59-4c93634c8a33	functional	panel_left_mid	1		f	none	\N	\N	180	420	440	660	260	240	24751	\N
+123ce6f7-4169-443a-8c7a-95ffc7af4ad1	ed1456f7-12ef-48d3-ac59-4c93634c8a33	functional	panel_left_bot	2		f	none	\N	\N	180	660	440	900	260	240	24752	\N
+f4a2f481-1e81-4596-9e23-fec263b4c18a	ed1456f7-12ef-48d3-ac59-4c93634c8a33	functional	panel_cleft_top	3		f	none	\N	\N	440	180	700	420	260	240	24753	\N
+e4dbdfa2-c3e8-4d7b-9431-08e65201ef6f	ed1456f7-12ef-48d3-ac59-4c93634c8a33	functional	panel_cleft_mid	4		f	none	\N	\N	440	420	700	660	260	240	24754	\N
+30dd1fa0-58e8-4cf7-abdd-adf07fbb4ca6	ed1456f7-12ef-48d3-ac59-4c93634c8a33	functional	panel_cleft_bot	5		f	none	\N	\N	440	660	700	900	260	240	24755	\N
+620cc25b-2030-402d-b098-39669a5632b8	ed1456f7-12ef-48d3-ac59-4c93634c8a33	functional	panel_cright_top	6		f	none	\N	\N	1220	180	1480	420	260	240	24756	\N
+c1895bf3-4d24-411e-be7a-6ee621030fea	ed1456f7-12ef-48d3-ac59-4c93634c8a33	functional	panel_cright_mid	7		f	none	\N	\N	1220	420	1480	660	260	240	24757	\N
+dc67f0ff-2afe-469c-a1ff-83b9f66090f5	ed1456f7-12ef-48d3-ac59-4c93634c8a33	functional	panel_cright_bot	8		f	none	\N	\N	1220	660	1480	900	260	240	24758	\N
+f50dc4cf-19cb-49c3-9291-df51a38eebec	ed1456f7-12ef-48d3-ac59-4c93634c8a33	functional	panel_right_top	9		f	none	\N	\N	1480	180	1740	420	260	240	24759	\N
+27947c0e-4a0b-4b05-8930-9b6b580e2422	ed1456f7-12ef-48d3-ac59-4c93634c8a33	functional	panel_right_mid	10		f	none	\N	\N	1480	420	1740	660	260	240	24760	\N
+f195516e-d8fe-4498-ba46-4b9a602a40cf	ed1456f7-12ef-48d3-ac59-4c93634c8a33	functional	panel_right_bot	11		f	none	\N	\N	1480	660	1740	900	260	240	24761	\N
+c22e04db-c3ac-43d0-8893-0ffaea743d52	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	functional	panel_left_top	0		f	none	\N	\N	180	180	440	420	260	240	24762	\N
+7c89301b-4aac-4cee-87c8-7701363844fb	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	functional	panel_left_mid	1		f	none	\N	\N	180	420	440	660	260	240	24763	\N
+3dfe03b8-e04b-4e13-862e-02a0b91435d6	33e6b243-c15d-41f4-b117-5fd33767bc3d	functional	panel_cright_bot	8	Artemis hunting under moonlight	f	none	\N	\N	1220	660	1480	900	260	240	25594	\N
+17f93403-e903-4efa-b3d6-86722af9de4f	33e6b243-c15d-41f4-b117-5fd33767bc3d	functional	panel_right_bot	11	Golden chariot racing through night	f	none	\N	\N	1480	660	1740	900	260	240	25603	\N
+2de45ed1-5a94-482d-bd15-a96cb11c8d79	33e6b243-c15d-41f4-b117-5fd33767bc3d	functional	panel_cright_top	6	Poseidon wielding trident	f	none	\N	\N	1220	180	1480	420	260	240	25626	\N
+f3d2db5d-fbb3-4c7d-be02-b7bf5141bdb1	33e6b243-c15d-41f4-b117-5fd33767bc3d	functional	panel_cright_mid	7	Apollo with lyre and laurels	f	none	\N	\N	1220	420	1480	660	260	240	25635	\N
+3fae9fbc-a85c-439e-832e-90c6017cccf7	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	functional	panel_left_bot	2		f	none	\N	\N	180	660	440	900	260	240	24764	\N
+32420415-f7aa-4306-9bb9-ca2ed0d7e9a3	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	functional	panel_cleft_top	3		f	none	\N	\N	440	180	700	420	260	240	24765	\N
+0109abf9-0636-41dd-baea-942f918cb8fc	a0bcf454-21c2-4741-9ec5-50efdd237b34	functional	panel_left_top	0	Set of pastel-colored cake icons	f	none	\N	\N	180	180	440	420	260	240	25152	\N
+a4804550-638b-4b04-a7ed-1320093f6021	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	functional	panel_cleft_mid	4		f	none	\N	\N	440	420	700	660	260	240	24766	\N
+3e33b7af-60ee-43bd-9086-cb3199859bf9	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	functional	panel_cleft_bot	5		f	none	\N	\N	440	660	700	900	260	240	24767	\N
+1860af04-66da-43a1-8abb-ab6c2c102129	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	functional	panel_cright_top	6		f	none	\N	\N	1220	180	1480	420	260	240	24768	\N
+54c664d1-3779-47ce-b315-b90d2ab28db1	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	functional	panel_cright_mid	7		f	none	\N	\N	1220	420	1480	660	260	240	24769	\N
+6247784c-2350-4afc-be07-28cacf9256b8	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	functional	panel_cright_bot	8		f	none	\N	\N	1220	660	1480	900	260	240	24770	\N
+802ce82f-0f89-4b05-8641-b4116ffe6387	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	functional	panel_right_top	9		f	none	\N	\N	1480	180	1740	420	260	240	24771	\N
+82ad9a10-48f2-47db-88d1-eefc6ed32dbf	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	functional	panel_right_mid	10		f	none	\N	\N	1480	420	1740	660	260	240	24772	\N
+e0f973a9-5a5e-4ded-896a-c0d0635c26df	e92c3dc7-ec23-4f36-9f78-ee04abf6106b	functional	panel_right_bot	11		f	none	\N	\N	1480	660	1740	900	260	240	24773	\N
+d1a6a710-3790-4e05-a73f-1133092cd4f0	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	functional	panel_left_top	0		f	none	\N	\N	180	180	440	420	260	240	24774	\N
+323f382a-be8d-4647-b8e5-b6c215d33066	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	functional	panel_left_mid	1		f	none	\N	\N	180	420	440	660	260	240	24775	\N
+f0d8a6da-37b1-4ad7-bfdc-f157aa560347	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	functional	panel_left_bot	2		f	none	\N	\N	180	660	440	900	260	240	24776	\N
+206b99bf-12a5-40d4-bd06-29926392f199	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	functional	panel_cleft_top	3		f	none	\N	\N	440	180	700	420	260	240	24777	\N
+0eaf7353-1122-4add-b79c-0a564145c7ed	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	functional	panel_cleft_mid	4		f	none	\N	\N	440	420	700	660	260	240	24778	\N
+462e5776-0eea-46d5-be0b-93be9ef36b3e	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	functional	panel_cleft_bot	5		f	none	\N	\N	440	660	700	900	260	240	24779	\N
+63c687ad-adfd-48db-a79f-05aa972bdd26	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	functional	panel_cright_top	6		f	none	\N	\N	1220	180	1480	420	260	240	24780	\N
+bfba1356-cd74-4b91-96a4-37ccdded9dd0	33e6b243-c15d-41f4-b117-5fd33767bc3d	functional	panel_cleft_mid	4	Goddess dispensing justice scales	f	none	\N	\N	440	420	700	660	260	240	25582	\N
+8152b4a4-c119-40d8-b81b-ea32b2091333	33e6b243-c15d-41f4-b117-5fd33767bc3d	functional	panel_left_top	0	Mighty eagle soaring in sky	f	none	\N	\N	180	180	440	420	260	240	25606	\N
+27d50ff0-8cc6-4ef7-a39a-73e6223b17f0	33e6b243-c15d-41f4-b117-5fd33767bc3d	functional	panel_left_mid	1	Olympic mountain peak	f	none	\N	\N	180	420	440	660	260	240	25617	\N
+0ebc953f-61cc-441b-bd56-da4ce1890a9a	33e6b243-c15d-41f4-b117-5fd33767bc3d	functional	panel_cleft_top	3	Athena with spear and shield	f	none	\N	\N	440	180	700	420	260	240	25632	\N
+67a2a34e-190d-4f02-a222-20e1505d18c2	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	functional	panel_left_mid	1	Five lavender cupcake silhouettes	f	none	\N	\N	180	420	440	660	260	240	25510	\N
+b62b3167-d379-48d6-aaf5-e0e6413ea939	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	functional	panel_cright_mid	7		f	none	\N	\N	1220	420	1480	660	260	240	24781	\N
+761d2f36-3d20-4f12-bb4c-74bd1578f9de	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	functional	panel_cright_bot	8		f	none	\N	\N	1220	660	1480	900	260	240	24782	\N
+fcba00b3-51b1-4516-88d3-5211ae4ca818	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	functional	panel_right_top	9		f	none	\N	\N	1480	180	1740	420	260	240	24783	\N
+2c257e72-bb8d-4ad3-9f0c-d8ee801984d4	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	functional	panel_right_mid	10		f	none	\N	\N	1480	420	1740	660	260	240	24784	\N
+1d455159-e3c9-466e-acf7-07d6f484b8db	3de2757b-bbe2-4f74-9e36-d2e7d3285b48	functional	panel_right_bot	11		f	none	\N	\N	1480	660	1740	900	260	240	24785	\N
+1e0dc30f-c899-4c89-bd69-e95c31ff85b9	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	functional	panel_right_mid	10	Four circular treat emblems	f	none	\N	\N	1480	420	1740	660	260	240	96	\N
+eaf50fbb-e385-44ca-a1b7-136f9c58935f	33e6b243-c15d-41f4-b117-5fd33767bc3d	functional	panel_left_bot	2	Wise owl on olive branch	f	none	\N	\N	180	660	440	900	260	240	25637	\N
+7631057a-746e-4aea-ac4d-c2744399a38b	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	functional	panel_right_bot	11	Row of fruit-topped pastries	f	none	\N	\N	1480	660	1740	900	260	240	92	\N
+c3441ced-29c2-4f73-9f31-627e6cf26525	33e6b243-c15d-41f4-b117-5fd33767bc3d	functional	panel_cleft_bot	5	Hermes with caduceus staff	f	none	\N	\N	440	660	700	900	260	240	25587	\N
+7aa5b745-48c6-440e-8b2a-c4c4f5d59443	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	functional	panel_cright_mid	7	Desserts with a berry topping	f	none	\N	\N	1220	420	1480	660	260	240	25284	\N
+90e7b5fd-b225-4070-a5a7-6ab0b2c20704	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	functional	panel_right_top	9	Trio of decorated cupcakes	f	none	\N	\N	1480	180	1740	420	260	240	25292	\N
+2888765c-8054-4a54-83c4-551eccb8a741	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	functional	panel_cright_top	6	Series of outlined cake shapes	f	none	\N	\N	1220	180	1480	420	260	240	25279	\N
+2de6df2f-d711-4994-a76e-6b0de1241c10	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	functional	panel_left_bot	2	Pink heart shapes on a stripe	f	none	\N	\N	180	660	440	900	260	240	25321	\N
+ce43169f-64c2-45d6-952c-6358b5cee856	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	functional	panel_cleft_top	3	Green star symbols in a row	f	none	\N	\N	440	180	700	420	260	240	25325	\N
+7401a1e1-4a25-44e2-9f04-ed249ef0b08c	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	functional	panel_cleft_bot	5	Cakes on stands; purple background	f	none	\N	\N	440	660	700	900	260	240	25333	\N
+20e718ff-a482-40b8-8acf-6cd830490f04	a0bcf454-21c2-4741-9ec5-50efdd237b34	functional	panel_cright_top	6	Series of outlined cake shapes	f	none	\N	\N	1220	180	1480	420	260	240	25128	\N
+4b4c2a61-c1dc-4655-b901-ca08690117a6	a0bcf454-21c2-4741-9ec5-50efdd237b34	functional	panel_right_bot	11	Row of fruit-topped pastries	f	none	\N	\N	1480	660	1740	900	260	240	25160	\N
+6a46f51d-c0e7-43c6-87b5-a87f8e45d9e0	a0bcf454-21c2-4741-9ec5-50efdd237b34	functional	panel_cleft_top	3	Green star symbols in a row	f	none	\N	\N	440	180	700	420	260	240	25091	\N
+79691b6f-8ea5-4e78-ac5b-195dba7b0262	a0bcf454-21c2-4741-9ec5-50efdd237b34	functional	panel_left_mid	1	Five lavender cupcake silhouettes	f	none	\N	\N	180	420	440	660	260	240	25142	\N
+7997470a-e0cb-49ca-9560-c557164c1fb9	a0bcf454-21c2-4741-9ec5-50efdd237b34	functional	panel_left_bot	2	Pink heart shapes on a stripe	f	none	\N	\N	180	660	440	900	260	240	25139	\N
+a9e1c77b-7553-4fe0-9b0f-9d4e83f673a9	a0bcf454-21c2-4741-9ec5-50efdd237b34	functional	panel_cleft_bot	5	Cakes on stands; purple background	f	none	\N	\N	440	660	700	900	260	240	25075	\N
+bb6d5ae5-08ef-4e45-ad92-bad2b6ce493e	a0bcf454-21c2-4741-9ec5-50efdd237b34	functional	panel_cleft_mid	4	Three round pastry icons	f	none	\N	\N	440	420	700	660	260	240	25084	\N
+cacfcb92-1b8c-448e-9e1c-4d1e7925a332	a0bcf454-21c2-4741-9ec5-50efdd237b34	functional	panel_cright_bot	8	Transparent jar with candy swirls	f	none	\N	\N	1220	660	1480	900	260	240	25111	\N
+f938dd57-336a-4d73-9e66-891090d2c477	a0bcf454-21c2-4741-9ec5-50efdd237b34	functional	panel_right_mid	10	Four circular treat emblems	f	none	\N	\N	1480	420	1740	660	260	240	25164	\N
+a8c0df18-9967-46d7-8ec7-e2137955f883	a0bcf454-21c2-4741-9ec5-50efdd237b34	functional	panel_cright_mid	7	Desserts with a berry topping	f	none	\N	\N	1220	420	1480	660	260	240	25252	\N
+5f17228e-6a0b-494e-b633-281f40e5e39c	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	functional	panel_cright_bot	8	Transparent jar with candy swirls	f	none	\N	\N	1220	660	1480	900	260	240	25289	\N
+460f79ce-307f-49a5-a4a5-1209579ead34	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	functional	panel_left_top	0	Set of pastel-colored cake icons	f	none	\N	\N	180	180	440	420	260	240	25313	\N
+b7203767-fa99-4f70-ad09-910888ddd016	a996c8d0-ff42-434b-a425-b229c8815138	functional	panel_left_top	0	Dark forest with shadows and mist	f	none	\N	\N	180	180	440	420	260	240	25458	\N
+581cf3da-8858-447f-9b18-f9a3ffda2c2b	a996c8d0-ff42-434b-a425-b229c8815138	functional	panel_right_mid	10	Moonlit path with twinkling stars	f	none	\N	\N	1480	420	1740	660	260	240	25464	\N
+9cf4dc6f-e3d7-43c5-8e09-1ee9e43c851e	a996c8d0-ff42-434b-a425-b229c8815138	functional	panel_left_mid	1	Gothic castle in moonlight	f	none	\N	\N	180	420	440	660	260	240	25469	\N
+55d20b13-e269-4806-92c7-15052a6a72a7	a996c8d0-ff42-434b-a425-b229c8815138	functional	panel_right_bot	11	Ghostly figures in a spectral dance	f	none	\N	\N	1480	660	1740	900	260	240	25483	\N
 \.
 
 
@@ -1731,12 +1734,12 @@ COPY public.cost_entries (id, ts, op, target, units, usd) FROM stdin;
 --
 
 COPY public.frame_instances (id, board_uuid, ring_px, source_w, source_h, source_kind, source_id, source_cell_id, source_asset_version_id, model_id, prompt_hash, candidate_index, notes, active, created_ms) FROM stdin;
-d55996bc-8166-49e1-9874-8980818af258	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	15	260	240	panel	panel_cright_bot	\N	\N	deterministic	\N	\N	committed via Atelier	f	1778115481282
-8e8a68a4-e07c-4985-9fce-2ec7e4fc4b11	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	12	217	211	panel	panel_cright_bot	\N	\N	gpt-4o	\N	0	committed via Atelier	f	1778130706470
-3479d771-e2fc-4c6d-820b-8d0ab84ae4e0	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	15	251	231	panel	panel_cright_bot	\N	\N	gpt-4o	\N	0	committed via Atelier	f	1778133269084
-59fda201-ba9a-49de-b34f-f45de813994e	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	12	245	217	panel	panel_left_bot	\N	\N	gpt-4o	\N	0	committed via Atelier	f	1778133618180
-daa9d01a-193b-4f91-8795-ed8a3b1bed4c	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	12	245	217	panel	panel_left_bot	\N	\N	gpt-4o	\N	0	committed via Atelier	f	1778133618180
-f0d74d6f-e9b5-4df1-9b04-38f2460de51e	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	25	260	240	panel	panel_cright_bot	\N	\N	gpt-4o	d2ee32bae66ed23f	0	committed via Atelier	t	1778194879441
+d55996bc-8166-49e1-9874-8980818af258	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	15	260	240	functional	panel_cright_bot	\N	\N	deterministic	\N	\N	committed via Atelier	f	1778115481282
+8e8a68a4-e07c-4985-9fce-2ec7e4fc4b11	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	12	217	211	functional	panel_cright_bot	\N	\N	gpt-4o	\N	0	committed via Atelier	f	1778130706470
+3479d771-e2fc-4c6d-820b-8d0ab84ae4e0	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	15	251	231	functional	panel_cright_bot	\N	\N	gpt-4o	\N	0	committed via Atelier	f	1778133269084
+59fda201-ba9a-49de-b34f-f45de813994e	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	12	245	217	functional	panel_left_bot	\N	\N	gpt-4o	\N	0	committed via Atelier	f	1778133618180
+daa9d01a-193b-4f91-8795-ed8a3b1bed4c	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	12	245	217	functional	panel_left_bot	\N	\N	gpt-4o	\N	0	committed via Atelier	f	1778133618180
+f0d74d6f-e9b5-4df1-9b04-38f2460de51e	2d5a1a6b-1a07-4b55-8ba3-373b15453bd3	25	260	240	functional	panel_cright_bot	\N	\N	gpt-4o	d2ee32bae66ed23f	0	committed via Atelier	t	1778194879441
 \.
 
 
@@ -2138,6 +2141,13 @@ CREATE INDEX ix_cells_live_asset_version_id ON public.cells USING btree (live_as
 
 
 --
+-- Name: ix_cells_triggers_functional_cell_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_cells_triggers_functional_cell_id ON public.cells USING btree (triggers_functional_cell_id);
+
+
+--
 -- Name: ix_cost_entries_ts; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2234,6 +2244,14 @@ ALTER TABLE ONLY public.cells
 
 
 --
+-- Name: cells fk_cells_triggers_functional_cell_id; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cells
+    ADD CONSTRAINT fk_cells_triggers_functional_cell_id FOREIGN KEY (triggers_functional_cell_id) REFERENCES public.cells(id) ON DELETE SET NULL;
+
+
+--
 -- Name: frame_instances frame_instances_board_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2285,5 +2303,5 @@ ALTER TABLE ONLY public.user_secrets
 -- PostgreSQL database dump complete
 --
 
-\unrestrict g3L4qP4AJnzL6z3LcjdzdVW2EcMJb3G4JI9VA3DcNfTDIvJmMUwZSYwZ1DtYrUd
+\unrestrict 7FB91aSk3xClrihCAengO4q5pto2nG3bkI15KE5BNVShdI3Zqer0pLpSUgKOZVV
 

@@ -1,7 +1,7 @@
 {
   "export_schema_version": "0.1.0-draft",
   "bundle_assets_root": "assets",
-  "game_engine_instructions": "Paths are relative to the bundle root unless prefixed by bundle_assets_root. When generating Godot 4 code, import textures under res:// and map paths accordingly (or ResourceLoader.load after import). interaction_graph defines cross-space behavior; do not infer links only from space layout. spaces[].assets.animation may be null — skip AnimationPlayer setup when absent. Perimeter rects below match the default new-board catalog (1920×1080 damnation-style skeleton): pipeline/boardfactory/boards.py:default_catalog_dict, same math as app/domains/cells/geometry.py:resolve_position and app/frontend/views/board_svg.py. docs/spec_prose.md explains the grid; edited boards may differ — real export must read that board's catalog from DB.",
+  "game_engine_instructions": "Paths are relative to the bundle root unless prefixed by bundle_assets_root. When generating Godot 4 code, import textures under res:// and map paths accordingly (or ResourceLoader.load after import). interaction_graph defines cross-space behavior; do not infer links only from space layout. spaces[].assets.animation may be null — skip AnimationPlayer setup when absent. Perimeter rects below match the default new-board catalog (1920×1080 damnation-style skeleton): pipeline/boardfactory/boards.py:default_catalog_dict, same math as app/domains/spaces/geometry.py:resolve_position and app/frontend/views/board_svg.py. docs/spec_prose.md explains the grid; edited boards may differ — real export must read that board's catalog from DB.",
   "game": {
     "id": "example-board-001",
     "title": "Example board (default catalog geometry)",
@@ -16,7 +16,7 @@
     "layout_hint": {
       "kind": "boardfactory_catalog_v1",
       "reference_implementation": "pipeline/boardfactory/boards.py:default_catalog_dict",
-      "layout_math": "app/domains/cells/geometry.py:resolve_position",
+      "layout_math": "app/domains/spaces/geometry.py:resolve_position",
       "prose_spec": "docs/spec_prose.md",
       "board_size": [1920, 1080],
       "perimeter_layout_rows": {

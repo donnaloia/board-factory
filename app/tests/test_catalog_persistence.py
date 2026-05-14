@@ -11,7 +11,7 @@ from domains.boards.models import BoardGameRecord
 
 def test_catalog_persists_to_board_games(isolated_repo, seeded_board, board_id):
     from domains.boards import services as svc_catalog
-    from domains.cells.models import CellRecord
+    from domains.spaces.models import CellRecord
 
     data = svc_catalog.load_catalog(board_id)
     assert data.get("project") == "Test Board"
@@ -26,7 +26,7 @@ def test_catalog_persists_to_board_games(isolated_repo, seeded_board, board_id):
         # Cells (designs / panels / centerpiece) live in ``cells``.
         kinds = {c.kind for c in session.query(CellRecord)
                                           .filter(CellRecord.board_uuid == board_id).all()}
-        assert kinds == {"space", "panel", "centerpiece"}
+        assert kinds == {"perimeter", "functional", "centerpiece"}
 
 
 def test_save_catalog_updates_db(isolated_repo, seeded_board, board_id):

@@ -29,7 +29,7 @@ from sqlalchemy import select, update
 
 from boardfactory import config as bf_config
 from boardfactory import frames as bf_frames
-from domains.cells.models import FrameInstanceRecord
+from domains.spaces.models import FrameInstanceRecord
 from infrastructure.db import session_scope
 
 

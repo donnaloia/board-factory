@@ -23,7 +23,7 @@ from fastapi.templating import Jinja2Templates
 
 from auth.middleware import AuthMiddleware
 from assets.routes_api import router as routes_assets
-from domains.cells.routes_api import router as routes_cells
+from domains.spaces.routes_api import router as routes_spaces
 from auth.routes_html import router as auth_html_router
 from auth.routes_api import router as auth_api_router
 from domains.boards.routes_html import router as boards_html_router
@@ -113,5 +113,5 @@ app.include_router(home_api_router)
 app.include_router(routes_assets)
 app.include_router(boards_html_router)
 app.include_router(boards_api_router)
-app.include_router(routes_cells)
+app.include_router(routes_spaces)
 app.include_router(jobs_api_router)

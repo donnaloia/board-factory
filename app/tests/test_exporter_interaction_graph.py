@@ -4,22 +4,22 @@ from __future__ import annotations
 
 from boardfactory.boards import default_catalog_dict
 
-from domains.cells import repository as cells_repo
+from domains.spaces import repository as spaces_repo
 
 from exporter.orchestrate import run_board_export
 from exporter.state import BoardExportOptions
 
 
 def test_export_land_triggers_by_design_slug_db(isolated_repo, seeded_board, board_id):
-    pid = cells_repo.find_id(board_id, "panels", "panel_left_top")
+    pid = spaces_repo.find_id(board_id, "panels", "panel_left_top")
     assert pid
-    cells_repo.patch_space_cell_metadata(
+    spaces_repo.patch_space_cell_metadata(
         board_id,
         "top_battle",
         update_triggers=True,
         triggers_functional_cell_id=pid,
     )
-    m = cells_repo.export_land_triggers_by_design_slug(board_id)
+    m = spaces_repo.export_land_triggers_by_design_slug(board_id)
     assert m == {"top_battle": "panel_left_top"}
 
 
@@ -87,9 +87,9 @@ def test_interaction_graph_errors_on_unknown_design():
 def test_interaction_graph_from_db_after_patch(isolated_repo, seeded_board, board_id):
     from boardfactory import boards as bf_boards
 
-    pid = cells_repo.find_id(board_id, "panels", "panel_left_top")
+    pid = spaces_repo.find_id(board_id, "panels", "panel_left_top")
     assert pid
-    cells_repo.patch_space_cell_metadata(
+    spaces_repo.patch_space_cell_metadata(
         board_id,
         "corner_tl",
         update_triggers=True,

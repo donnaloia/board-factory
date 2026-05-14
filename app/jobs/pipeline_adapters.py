@@ -775,13 +775,16 @@ def _load_frame_source(
     from PIL import Image
 
     from boardfactory import config as bf_config
+    from boardfactory import frames as bf_frames
+
+    source_kind = bf_frames.normalize_frame_source_kind(source_kind)
 
     panel_size: tuple[int, int] = (260, 240)
     panels = list(catalog.all_panels())
     if panels:
         panel_size = panels[0].target_size
 
-    if source_kind == "panel":
+    if source_kind == "functional":
         from boardfactory import assets as bf_assets
 
         live = bf_assets.live_path("panels", source_id)

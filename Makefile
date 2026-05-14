@@ -76,7 +76,7 @@ db-upgrade:
 backfill-live-fk:
 	docker compose exec -T board-factory sh -c 'cd /app && PYTHONPATH=/app:/repo/pipeline python -c "\
 from assets.repository import backfill_all_boards_with_catalog; \
-from domains.cells.repository import backfill_live_asset_version_ids; \
+from domains.spaces.repository import backfill_live_asset_version_ids; \
 backfill_all_boards_with_catalog(); \
 print(backfill_live_asset_version_ids())"'
 

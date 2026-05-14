@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from typing import Iterable
 
-from domains.cells.geometry import resolve_position
+from domains.spaces.geometry import resolve_position
 
 
 # ────────────────────────── helpers ──────────────────────────

@@ -70,6 +70,23 @@ _SLICE_NAMES = (
 )
 
 
+VALID_FRAME_SOURCE_KINDS: frozenset[str] = frozenset({"functional", "mockup", "upload"})
+
+
+def normalize_frame_source_kind(kind: str) -> str:
+    """Normalize provenance label; legacy disk/DB used ``panel`` for functional cells."""
+    k = str(kind or "").strip()
+    if k == "panel":
+        return "functional"
+    return k
+
+
+def frame_source_kinds_match(a: str | None, b: str | None) -> bool:
+    if a is None or b is None:
+        return False
+    return normalize_frame_source_kind(a) == normalize_frame_source_kind(b)
+
+
 # ────────────────────────── metadata ──────────────────────────
 
 
@@ -81,11 +98,11 @@ class FrameInstance:
     vision model produced it) plus the geometry parameters that drive
     9-slice composition. Persisted as ``frame.json`` next to the eight
     slice PNGs and the two masks; mirrored into the relational store for
-    cross-board queries (see ``app/domains/cells/frames_repository.py``).
+    cross-board queries (see ``app/domains/spaces/frames_repository.py``).
     """
 
     ring_px: int                              # outer ring thickness, source-asset pixels
-    source_kind: str                          # "panel" | "mockup" | "upload"
+    source_kind: str                          # "functional" | "mockup" | "upload"
     source_id: str | None                     # panel id, mockup region key, or upload filename
     source_size: tuple[int, int]              # WxH of the source asset frame was cut from
     created_ms: int = field(default_factory=lambda: int(time.time() * 1000))
@@ -121,11 +138,13 @@ class FrameInstance:
 
     @classmethod
     def from_dict(cls, d: dict) -> "FrameInstance":
-        kind = str(d.get("source_kind", "panel"))
+        kind = str(d.get("source_kind", "functional"))
         if kind == "mockup_region":
             kind = "mockup"
         if kind == "generated":
             kind = "upload"
+        if kind == "panel":
+            kind = "functional"
         size_raw = d.get("source_size", [0, 0])
         size = (int(size_raw[0]), int(size_raw[1])) if size_raw else (0, 0)
         return cls(

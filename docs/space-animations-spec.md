@@ -7,12 +7,12 @@
 ### Naming
 
 - **Product:** space animations (short loops for functional board spaces).  
-- **Codebase:** the **cells** domain is planned to be renamed **spaces**; this spec uses **space** in prose and keeps **cell** only where it matches current IDs (`cell_id`, paths, DB).  
+- **Codebase:** the Python package is **`domains.spaces`** (DB table remains **`cells`**); this spec uses **space** in prose and keeps **cell** only where it matches current IDs (`cell_id`, paths, DB).  
 - **Pipeline sandbox:** isolated package under **`pipeline/`**, parallel to `pipeline/boardfactory/` and `pipeline/cardfactory/` — see **§9**. Stakeholders may say **`pipeline/space-animations`**; the importable Python package directory **SHOULD use underscores** (e.g. **`pipeline/space_animations/`**) so job adapters can `import space_animations` the same way they `import boardfactory`. If a hyphenated folder is required for non-Python assets only, document an explicit import path strategy.
 
 ### Domain ownership (application layer)
 
-All **backend** work (FastAPI routes, services, repositories, DB rows linking animations to board spaces and `asset_versions`) should live with the **spaces/cells** domain — today **`app/domains/cells/`**, later **`app/domains/spaces/`** after rename. The **`pipeline/space_animations/`** (or agreed directory name) package stays **image/video pipeline only** and must not grow HTTP handlers — same boundary as Card Factory’s pipeline.
+All **backend** work (FastAPI routes, services, repositories, DB rows linking animations to board spaces and `asset_versions`) should live in **`app/domains/spaces/`**. The **`pipeline/space_animations/`** (or agreed directory name) package stays **image/video pipeline only** and must not grow HTTP handlers — same boundary as Card Factory’s pipeline.
 
 ---
 
@@ -120,7 +120,7 @@ The following are **explicitly not decided** in this draft; implementation ticke
 ## 9. Repository layout and isolation
 
 - **`pipeline/space_animations/`** — **sandbox** animation pipeline only (`ops/`, `steps/`, `providers/` as needed). **No** `from boardfactory import …` or `from cardfactory import …` inside this tree.  
-- **`app/domains/cells/`** (future **`spaces/`**) — routes, services, repository, models for “which spaces may animate,” job enqueue, linking **live animation** to `asset_versions` / space rows.  
+- **`app/domains/spaces/`** — routes, services, repository, models for “which spaces may animate,” job enqueue, linking **live animation** to `asset_versions` / space rows.  
 - **`app/jobs/`** — new adapter functions that invoke the sandbox pipeline with the same progress/cost patterns as existing adapters.
 
 **Rationale:** Pipelines sit **in parallel** as explicit sandboxes rather than nesting under a shared `pipeline/boardfactory/...` subtree — matches stakeholder direction for this feature.
