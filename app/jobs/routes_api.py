@@ -37,6 +37,18 @@ def job_kill(job_id: str):
     return JSONResponse({"ok": True})
 
 
+@router.post("/jobs/{job_id}/dismiss")
+def job_dismiss(job_id: str):
+    """Remove a finished job from the tray (failed/done/killed)."""
+    runner = get_runner()
+    if not runner.dismiss(job_id):
+        raise HTTPException(
+            404,
+            f"No such finished job {job_id}, or it is still running",
+        )
+    return JSONResponse({"ok": True})
+
+
 @router.get("/events/jobs")
 async def events_jobs(request: Request):
     runner = get_runner()

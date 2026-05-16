@@ -18,6 +18,13 @@
     <h1 class="auth-title">Sign in</h1>
     <p class="auth-sub">Welcome back.</p>
 
+    {% if setup_required %}
+    <div class="auth-banner">
+      There are no accounts on this server yet. Create the first one, then you can sign in here.
+      <a href="/register" class="auth-link" style="display:inline;margin-left:0.35em">Register</a>
+    </div>
+    {% endif %}
+
     {% if error %}<div class="auth-banner is-error">{{ error }}</div>{% endif %}
     {% if info %}<div class="auth-banner">{{ info }}</div>{% endif %}
 

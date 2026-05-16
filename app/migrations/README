@@ -6,8 +6,8 @@ There is no linear history of incremental revisions anymore — evolve the ORM,
 edit ``versions/0001_full_schema.py`` if you need explicit DDL beyond what the
 models express, or add a new revision on top of ``0001_full_schema``.
 
-Optional dev data lives outside migrations: restore ``db/snapshots/postgres_dev.sql``
-if you keep one (see ``db/snapshots/README.md``).
+Optional dev data lives outside migrations: restore ``postgres-snapshots/postgres_dev.sql``
+if you keep one (see ``postgres-snapshots/README.md``).
 
 Operational commands (inside the **board-factory** container, ``cd`` to
 ``/repo/app`` so ``alembic.ini`` resolves):

@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from boardfactory import config as bf_config
 
 from domains.spaces import repository as spaces_repo
+from domains.spaces import services as spaces_services
 from infrastructure import deps
 
 router = APIRouter()
@@ -27,7 +28,11 @@ NestedBoardId = Annotated[str, Depends(deps.require_nested_board)]
 
 @router.get("/users/{username}/board-games/{path_slug}/api/cell/{category}/{asset_id}")
 def api_cell(request: Request, board_id: NestedBoardId, category: str, asset_id: str):
-    return JSONResponse(deps.build_cell_side_panel_payload(board_id, category, asset_id))
+    return JSONResponse(
+        spaces_services.build_cell_side_panel_payload(
+            board_id, category, asset_id, request=request,
+        )
+    )
 
 
 # ── PATCH ─────────────────────────────────────────────────────────────
@@ -78,7 +83,11 @@ async def _api_patch_cell(
         raise HTTPException(400, str(e)) from e
     if not ok:
         raise HTTPException(404, f"Unknown space design: {asset_id}")
-    return JSONResponse(deps.build_cell_side_panel_payload(board_id, category, asset_id))
+    return JSONResponse(
+        spaces_services.build_cell_side_panel_payload(
+            board_id, category, asset_id, request=request,
+        )
+    )
 
 
 @router.patch("/users/{username}/board-games/{path_slug}/api/cell/{category}/{asset_id}")
@@ -100,7 +109,11 @@ def _api_cell_promote(
             bf_assets.promote(category, asset_id, filename)
         except FileNotFoundError as e:
             raise HTTPException(404, str(e)) from None
-    return JSONResponse(deps.build_cell_side_panel_payload(board_id, category, asset_id))
+    return JSONResponse(
+        spaces_services.build_cell_side_panel_payload(
+            board_id, category, asset_id, request=request,
+        )
+    )
 
 
 @router.post("/users/{username}/board-games/{path_slug}/api/cell/{category}/{asset_id}/promote")

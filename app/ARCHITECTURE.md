@@ -16,7 +16,7 @@ A domain is a noun the product reasons about. Today:
 
 | Domain | Owns |
 | --- | --- |
-| `domains/boards/`    | Board entity, ownership, paths, catalog config (style, generation, frame, layout), style-lock palette. |
+| `domains/boards/`    | Board entity, ownership, paths, catalog config (style, generation, frame, layout), style-lock palette; ``exporter/`` builds ``project.json`` bundles. |
 | `home/`      | Root ``/`` board picker HTML + ``/api/boards`` create/delete JSON. |
 | `domains/cards/` | Card Factory — decks/sets, layout templates, routes & services linking to `board_games` for palette/style; jobs delegate to `pipeline/cardfactory/`. |
 | `domains/spaces/`     | Spaces, feature panels, centerpiece; ``live_asset_version_id`` references ``asset_versions`` for sidebar metadata. |
@@ -59,12 +59,15 @@ Two pragmatic exceptions to "one services.py per domain":
 * **`domains/boards/`** splits HTTP into ``routes_html.py`` (Jinja pages under
   ``/users/.../board-games/...``) and ``routes_api.py`` (JSON, form actions, image streams)
   so HTML concerns stay separate from pipeline/API endpoints. Shared
-  ``Depends`` wiring lives in ``routes_common.py``.
-* **`jobs/`** keeps `runner.py`, `pipeline_adapters.py`, `cost_ledger.py`,
-  and ``routes_api.py`` (job tray JSON + SSE + cost summary). The runtime,
-  the pipeline-glue, and the cost ledger are different enough that
-  jamming them into one `services.py` makes greppability worse, not
-  better.
+  ``Depends`` wiring lives in ``routes_common.py``. **Project export** is
+  ``exporter/`` (staged ``project.json`` + asset copy); **GET**
+  ``…/export/project-bundle.zip`` is implemented in ``routes_api.py``.
+* **`jobs/`** keeps `runner.py`, `cost_ledger.py`, and ``routes_api.py`` (job
+  tray JSON + SSE + cost summary). Pipeline workers live in
+  ``domains/<feature>/pipeline_jobs.py`` (e.g. ``domains.boards.pipeline_jobs``).
+* Each feature domain that enqueues pipeline work should own a
+  ``pipeline_jobs.py`` beside its routes/services — import ``jobs.runner``
+  there, not the other way around.
 * **Mockup** image prompt composition lives in ``domains/boards/mockup_prompt.py``.
   **Side-panel active prompt** is assembled in ``infrastructure.deps`` from
   ``asset_versions`` + ``cells`` (and ``boardfactory.assets.read_meta`` for legacy
@@ -82,9 +85,8 @@ The dependency graph is acyclic:
 ```
 auth   <─── (depended on by everything; depends on nothing)
 
-domains.boards <─── domains.spaces, assets, jobs
-domains.spaces  <─── assets, jobs
-assets <── jobs
+domains.boards <─── domains.spaces, jobs
+domains.spaces  <─── jobs
 jobs   ──> orchestrator; depends on everything
 ```
 
@@ -109,8 +111,6 @@ cross-cutting code that doesn't belong to any one domain:
 * `infrastructure/deps` — Auth guards, board URL resolution, template context
                       dicts, job enqueue, side-panel JSON builders, etc. Used by
                       every domain router; not a route table.
-* `exporter/` — **Geometry**, **`interaction_graph`**, **asset wiring**, **polish**, **``project.json``**;
-                      **GET** ``…/export/project-bundle.zip`` lives on **boards** routes (temp zip, no exporter routes). See ``docs/project-export-spec.md`` §9.
 
 ## Composition root
 

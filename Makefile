@@ -1,4 +1,4 @@
-.PHONY: up down down-force down-nuclear logs shell rebuild clean protect-keys unprotect-keys test test-pipeline db-upgrade db-current db-stamp db-snapshot db-restore backfill-live-fk
+.PHONY: up down down-force down-nuclear logs shell rebuild clean protect-keys unprotect-keys test test-pipeline test-space-animations db-upgrade db-current db-stamp db-snapshot db-restore db-restore-clean backfill-live-fk migrate-tokens audit-storage
 
 # Compose labels use this project id (defaults to this repo directory name). Override if you use COMPOSE_PROJECT_NAME.
 COMPOSE_LABEL_PROJECT ?= board-factory
@@ -66,16 +66,36 @@ test-pipeline:
 	docker compose exec -T board-factory pip install --no-cache-dir -q -r /repo/app/requirements.txt
 	docker compose exec -T board-factory sh -c 'PYTHONPATH=/app:/repo/pipeline python -m pytest -q /repo/pipeline/boardfactory/tests/ --confcutdir=/repo/pipeline'
 
+# Space animations sandbox pipeline tests (separate package; no DB needed).
+test-space-animations:
+	docker compose exec -T board-factory pip install --no-cache-dir -q -r /repo/app/requirements.txt
+	docker compose exec -T board-factory sh -c 'PYTHONPATH=/app:/repo/pipeline python -m pytest -q /repo/pipeline/space_animations/tests/ --confcutdir=/repo/pipeline'
+
 # Apply Alembic migrations against the configured Postgres database.
 # Safe to run repeatedly.
 db-upgrade:
 	docker compose exec -T board-factory sh -c 'cd /repo/app && alembic upgrade head'
 
+# One-shot filesystem migration: move per-token workspaces from the old
+# board-nested layout (data/boards/<board_id>/workspace/tokens/<slug>/) to the
+# new top-level layout (data/tokens/<token_id>/). Idempotent — safe to re-run.
+# Pass --dry-run via DRY_RUN=1 to preview without moving anything.
+migrate-tokens:
+	docker compose exec -T board-factory sh -c 'cd /app && PYTHONPATH=/app:/repo/pipeline python -m scripts.migrate_tokens_top_level $${DRY_RUN:+--dry-run}'
+
+# Storage audit across data/{boards,decks,tokens}/: orphan files (no DB row)
+# and dangling pointers (DB row, missing file). Default is report-only.
+# ``ARGS=--apply`` — delete tracked orphans. ``ARGS='--prune-stale'`` — delete
+# transient leftovers (proposals, previews, legacy workspace/tokens/, masks).
+# ``ARGS='--apply --prune-stale'`` for both. ``ARGS=--json`` for JSON output.
+audit-storage:
+	docker compose exec -T board-factory sh -c 'cd /app && PYTHONPATH=/app:/repo/pipeline python -m scripts.audit_storage $(ARGS)'
+
 # Reconcile ``workspace/history`` → ``asset_versions``, then attach NULL
 # ``cells.live_asset_version_id`` to the newest version per cell. Idempotent.
 backfill-live-fk:
 	docker compose exec -T board-factory sh -c 'cd /app && PYTHONPATH=/app:/repo/pipeline python -c "\
-from assets.repository import backfill_all_boards_with_catalog; \
+from domains.spaces.assets.repository import backfill_all_boards_with_catalog; \
 from domains.spaces.repository import backfill_live_asset_version_ids; \
 backfill_all_boards_with_catalog(); \
 print(backfill_live_asset_version_ids())"'
@@ -94,14 +114,14 @@ db-stamp:
 	  -v ON_ERROR_STOP=1 \
 	  -c "UPDATE alembic_version SET version_num = '0001_full_schema';"
 
-# ── Postgres snapshot (optional; see db/snapshots/README.md) ───────────────
+# ── Postgres snapshot (optional; see postgres-snapshots/README.md) ─────────
 # Plain-SQL dump for small dev DBs. Uses compose service `postgres`; override
 # POSTGRES_USER / POSTGRES_DB if needed. --no-owner --no-acl improves portability.
 
-SNAPSHOT_SQL ?= db/snapshots/postgres_dev.sql
+SNAPSHOT_SQL ?= postgres-snapshots/postgres_dev.sql
 
 db-snapshot:
-	@mkdir -p db/snapshots
+	@mkdir -p postgres-snapshots
 	docker compose exec -T postgres pg_dump \
 	  -U "$${POSTGRES_USER:-boardfactory}" \
 	  -d "$${POSTGRES_DB:-boardfactory}" \
@@ -110,9 +130,28 @@ db-snapshot:
 	@echo "Wrote $(SNAPSHOT_SQL) — review size and secrets before git add"
 
 # Destructive: replays a committed snapshot into the running Postgres (dev only).
+# Stops on first SQL error (avoids half-applied dumps that then hit “multiple primary keys”).
 db-restore:
 	@test -f $(SNAPSHOT_SQL) || (echo "Missing $(SNAPSHOT_SQL). Run make db-snapshot first." && exit 1)
 	cat $(SNAPSHOT_SQL) | docker compose exec -T postgres psql \
 	  -U "$${POSTGRES_USER:-boardfactory}" \
-	  -d "$${POSTGRES_DB:-boardfactory}"
+	  -d "$${POSTGRES_DB:-boardfactory}" \
+	  -v ON_ERROR_STOP=1
 	@echo "Restore finished — consider: docker compose restart board-factory"
+
+# Like db-restore, but clears public schema first. Use when Postgres already has
+# objects from a newer Alembic head than this snapshot (e.g. space_animations):
+# the dump’s DROP list won’t remove them, plain db-restore can fail part-way and
+# leave duplicate PK / FK errors without ON_ERROR_STOP (older make targets).
+db-restore-clean:
+	@test -f $(SNAPSHOT_SQL) || (echo "Missing $(SNAPSHOT_SQL). Run make db-snapshot first." && exit 1)
+	docker compose exec -T postgres psql \
+	  -U "$${POSTGRES_USER:-boardfactory}" \
+	  -d "$${POSTGRES_DB:-boardfactory}" \
+	  -v ON_ERROR_STOP=1 \
+	  -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO \"$${POSTGRES_USER:-boardfactory}\"; GRANT ALL ON SCHEMA public TO public;"
+	cat $(SNAPSHOT_SQL) | docker compose exec -T postgres psql \
+	  -U "$${POSTGRES_USER:-boardfactory}" \
+	  -d "$${POSTGRES_DB:-boardfactory}" \
+	  -v ON_ERROR_STOP=1
+	@echo "Restore finished — run: docker compose restart board-factory && make db-upgrade"

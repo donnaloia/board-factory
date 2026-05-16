@@ -52,9 +52,12 @@ services:
       # without rebuilding the image. The Dockerfile still COPYs ``app/`` for
       # standalone runs; this overlay shadows it during development.
       - ./app:/app
-      # Pipeline library — live-mounted so edits to boardfactory/ are picked
-      # up by uvicorn --reload without rebuilding the image.
+      # Pipeline libraries — live-mounted so edits to either sandbox are
+      # picked up by uvicorn --reload without rebuilding the image. Each
+      # tree is import-isolated per .cursorrules; both install through the
+      # shared /repo/pipeline/pyproject.toml.
       - ./pipeline/boardfactory:/repo/pipeline/boardfactory
+      - ./pipeline/space_animations:/repo/pipeline/space_animations
     environment:
       # OpenAI Images API (`gpt-image-2`). Prefer a shell export or `.env` in this
       # directory (Compose interpolates vars; keep `.env` out of git). Per-user keys

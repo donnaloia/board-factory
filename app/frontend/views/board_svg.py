@@ -1,8 +1,8 @@
 """Board SVG renderer — generates an interactive inline SVG from a catalog dict.
 
-This module produces the SVG used by the live `/board` view. It mirrors the
-visual language of the static tech spec (`docs/layout-mockup.html`) but adds
-two things the spec doesn't have:
+This module produces the SVG used by the live `/board` view. It shares layout
+geometry with ``render_spec_svg`` (the board Tech spec page) but adds two things
+the spec diagram does not:
 
 1. Per-cell status color (pending / has-candidates / approved)
 2. Click handlers wrapping each cell — perimeter cells link to /spaces, inner

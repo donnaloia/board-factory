@@ -33,12 +33,12 @@ The backend has four layers; the [pipeline diagram](diagrams/pipeline.md) shows 
 | Layer                 | What it does                                                                                                                                                                                                                                                               | Files                                     |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
 | **Routes**            | HTTP handlers live in domain packages (`domains.boards.routes_*`, …). Shared Depends/helpers in `infrastructure.deps`.                                                                                                                                                           | `app/domains/boards/`, `app/auth/`, …             |
-| **Job runner**        | One per process. Holds the in-memory job registry, executes worker callables on a thread pool, supports cancel via `threading.Event`, publishes status changes to SSE subscribers, and persists terminal snapshots to `job_runs`.                                          | `app/jobs.py`, `app/services/job_runs.py` |
-| **Pipeline adapters** | Plain functions matching the runner's `(job, cancel_event) → cost_usd` shape. They load the catalog, validate the mockup, build the provider, and call the pipeline. Routes bind their parameters via `functools.partial`.                                                 | `app/pipeline_adapters.py`                |
+| **Job runner**        | One per process. Holds the in-memory job registry, executes worker callables on a thread pool, supports cancel via `threading.Event`, publishes status changes to SSE subscribers, and persists terminal snapshots to `job_runs`.                                          | `app/jobs/runner.py`, `app/jobs/repository.py` |
+| **Pipeline jobs**     | Plain functions matching the runner's `(job, cancel_event) → cost_usd` shape. Each feature domain owns `pipeline_jobs.py` (e.g. `domains.boards.pipeline_jobs` for boardfactory + frame workers). Routes bind parameters via `functools.partial` and call `deps.enqueue_pipeline_job`. | `app/domains/*/pipeline_jobs.py`          |
 | **Pipeline package**  | The actual image work. `ops.draw_cell` is the atomic generate operation (provider call → cleanup → history push → promote); `ops.orchestrate` loops it for "generate everything missing". `steps/` holds non-per-cell operations (style lock, states, compositor, export). | `pipeline/boardfactory/`                  |
 
 
-`assets.py` writes PNGs into `history/` and `live/` and **emits a `history_push` event** on every write. The web app registers `services.asset_index.on_asset_event` at startup so each push also lands as an `asset_versions` row in SQL — but the pipeline package itself has no database knowledge.
+`assets.py` writes PNGs into `history/` and `live/` and **emits a `history_push` event** on every write. The web app registers `domains.spaces.assets.repository.on_asset_event` at startup so each push also lands as an `asset_versions` row in SQL — but the pipeline package itself has no database knowledge.
 
 ## Provider abstraction
 
@@ -53,7 +53,7 @@ Per-board provider settings live in the catalog's `generation` block (provider, 
 
 ## Pipeline steps
 
-The user-facing pipeline is **eight steps**. Steps 1, 2, and 4–8 each map to a single function in `app/pipeline_adapters.py`; step 3 fans out to three orchestrators that share the same atomic `draw_cell`.
+The user-facing pipeline is **eight steps**. Steps 1, 2, and 4–8 each map to a single function in `domains/boards/pipeline_jobs.py`; step 3 fans out to three orchestrators that share the same atomic `draw_cell`.
 
 
 | #   | Step                 | Adapter                                    | Pipeline entry point                                                  | Tools                                                                                                                        |

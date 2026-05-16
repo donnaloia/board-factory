@@ -39,7 +39,7 @@ from domains.spaces.geometry import resolve_position
 from infrastructure import board_store as bs
 from infrastructure.db import session_scope
 from infrastructure.files import workspace as fs_ws
-from assets.models import AssetVersionRecord
+from domains.spaces.assets.models import AssetVersionRecord
 from domains.boards.models import BoardGameRecord, OwnedBoardRecord
 from domains.spaces.models import CellRecord
 
@@ -368,11 +368,6 @@ def load_catalog(board_id: str) -> dict[str, Any]:
     return data
 
 
-def save_catalog(board_id: str, data: dict[str, Any]) -> None:
-    """Validate and persist the catalog to relational tables only."""
-    persist_catalog_dict(board_id, data)
-
-
 # ────────────────────────── generation block ──────────────────────────
 
 
@@ -438,10 +433,23 @@ def read_generation_block(board_id: str) -> dict:
     return read_generation(load_catalog(board_id))
 
 
+def _cols_to_generation_dict(cols: dict) -> dict:
+    """Shape raw repository columns into the nested generation block ``read_generation`` expects."""
+    return {
+        "palette_size": cols["palette_size"],
+        "provider": cols["provider"],
+        "openai": {"model": cols["openai_model"], "quality": cols["openai_quality"]},
+        "pixellab": {"model": cols["pixellab_model"]},
+        "configured": cols["configured"],
+    }
+
+
 def write_generation(board_id: str, body: dict) -> dict:
     """Validate ``body`` and persist as the new ``generation`` block."""
-    catalog = load_catalog(board_id)
-    current = read_generation(catalog)
+    cols = boards_repo.get_generation_columns(board_id)
+    if cols is None:
+        raise CatalogNotFound(board_id)
+    current = read_generation({"generation": _cols_to_generation_dict(cols)})
     from boardfactory.providers.pixel.pixellab import PIXELLAB_PRESETS
 
     palette_size = body.get("palette_size", current["palette_size"])
@@ -478,9 +486,33 @@ def write_generation(board_id: str, body: dict) -> dict:
         "pixellab": {"model": pl_model},
         "configured": True,
     }
-    catalog["generation"] = new_block
-    save_catalog(board_id, catalog)
+    boards_repo.set_generation_columns(
+        board_id,
+        palette_size=palette_size,
+        provider=provider,
+        openai_model=oa_model,
+        openai_quality=oa_quality,
+        pixellab_model=pl_model,
+        configured=True,
+    )
     return new_block
+
+
+# ────────────────────────── frame flag helpers ──────────────────────────
+
+
+def set_frame_flags(
+    board_id: str,
+    *,
+    enabled: bool,
+    apply_to_panels: bool | None = None,
+) -> None:
+    """Patch ``frame_enabled`` (and optionally ``frame_apply_to_panels``) directly.
+
+    Routes call this instead of the full catalog round-trip when the only
+    change is toggling the frame on or off.
+    """
+    boards_repo.set_frame_flags(board_id, enabled=enabled, apply_to_panels=apply_to_panels)
 
 
 # ────────────────────────── space design reassign (per layout ref) ────
@@ -1082,9 +1114,7 @@ def rename_board(user_id: str, board_id: str, project_name: str) -> BoardSummary
     new_name = (project_name or "").strip()
     if not new_name:
         raise ValueError("Project name cannot be empty")
-    data = load_catalog(board_id)
-    data["project"] = new_name
-    save_catalog(board_id, data)
+    boards_repo.set_project(board_id, new_name)
     info = bf_boards.get_board(board_id)
     if info is None:
         raise BoardNotFound(board_id)

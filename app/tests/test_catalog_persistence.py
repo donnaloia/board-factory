@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import select
 
 from infrastructure.db import session_scope
-from assets.models import AssetVersionRecord
+from domains.spaces.assets.models import AssetVersionRecord
 from domains.boards.models import BoardGameRecord
 
 
@@ -29,12 +29,12 @@ def test_catalog_persists_to_board_games(isolated_repo, seeded_board, board_id):
         assert kinds == {"perimeter", "functional", "centerpiece"}
 
 
-def test_save_catalog_updates_db(isolated_repo, seeded_board, board_id):
+def test_persist_catalog_dict_updates_db(isolated_repo, seeded_board, board_id):
     from domains.boards import services as svc_catalog
 
     cat = svc_catalog.load_catalog(board_id)
     cat["project"] = "Saved Via DB"
-    svc_catalog.save_catalog(board_id, cat)
+    svc_catalog.persist_catalog_dict(board_id, cat)
     with session_scope() as session:
         bg = session.get(BoardGameRecord, board_id)
         assert bg is not None
@@ -45,7 +45,7 @@ def test_asset_index_counts_history_push(isolated_repo, seeded_board, board_id):
     from boardfactory import assets as bf_assets
     from boardfactory import config as bf_config
 
-    from assets import repository as asset_index
+    from domains.spaces.assets import repository as asset_index
 
     bf_assets.register_asset_db_listener(asset_index.on_asset_event)
     try:
@@ -68,7 +68,7 @@ def test_promote_copies_history_to_live(isolated_repo, seeded_board, board_id):
     from boardfactory import assets as bf_assets
     from boardfactory import config as bf_config
 
-    from assets import repository as asset_index
+    from domains.spaces.assets import repository as asset_index
     from infrastructure.files import workspace as fs_ws
 
     bf_assets.register_asset_db_listener(asset_index.on_asset_event)
@@ -93,7 +93,7 @@ def test_promote_copies_history_to_live(isolated_repo, seeded_board, board_id):
 
 
 def test_asset_backfill_inserts_rows(isolated_repo, seeded_board, board_id):
-    from assets import repository as asset_index
+    from domains.spaces.assets import repository as asset_index
     from infrastructure import board_store as bs
     from infrastructure.files import workspace as fs_ws
 

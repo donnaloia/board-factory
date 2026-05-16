@@ -51,7 +51,7 @@
 
   {# ───── Board command strip ─────
      Sits between the hero and the board itself. Five actions of equal visual
-     weight; the last two are inert placeholders for features in progress.
+     weight; the last is a direct download of the portable project bundle.
   #}
   <nav class="board-actions" aria-label="Board actions">
     {% if not has_palette %}
@@ -126,12 +126,11 @@
       <span class="board-action-est">free &middot; instant</span>
     </a>
 
-    {# Ghosted / inert: planned but not implemented. #}
-    <span class="board-action is-ghosted" aria-disabled="true">
+    <a href="{{ bb }}/export/project-bundle.zip" class="board-action board-action-link">
       <span class="board-action-eyebrow">Hand off</span>
-      <span class="board-action-label">Generate Godot code</span>
-      <span class="board-action-est">soon</span>
-    </span>
+      <span class="board-action-label">Export Project</span>
+      <span class="board-action-est">ZIP &middot; project.json + assets</span>
+    </a>
   </nav>
 
   {# Hidden state holder for the generation modal — opened on first visit if

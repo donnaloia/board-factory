@@ -57,6 +57,9 @@ class Job:
     ended_at: float | None = None
     error: str | None = None
     log: deque[str] = field(default_factory=lambda: deque(maxlen=500))
+    events: deque[dict[str, Any]] = field(
+        default_factory=lambda: deque(maxlen=500),
+    )
 
     def elapsed(self) -> float:
         if self.started_at is None:
@@ -80,6 +83,7 @@ class Job:
             "ended_at": self.ended_at,
             "error": self.error,
             "log_tail": list(self.log)[-12:],
+            "events": list(self.events),
         }
 
 
@@ -228,6 +232,23 @@ class JobRunner:
             self._publish(job)
         return True
 
+    def dismiss(self, job_id: str) -> bool:
+        """Drop a terminal job from the tray and delete its ``job_runs`` row."""
+        job = self._jobs.get(job_id)
+        if job is not None and job.status in ("queued", "running"):
+            return False
+        self._jobs.pop(job_id, None)
+        maxlen = self._history.maxlen
+        self._history = deque((i for i in self._history if i != job_id), maxlen=maxlen)
+        db_ok = False
+        try:
+            from jobs import repository as jobs_repo  # noqa: PLC0415
+
+            db_ok = jobs_repo.delete_job_run(job_id)
+        except Exception:
+            pass
+        return job is not None or db_ok
+
     # ─── inspection ───
 
     def get(self, job_id: str) -> Job | None:
@@ -277,17 +298,18 @@ def check_cancel(cancel: threading.Event) -> None:
 class JobProgressSink:
     """Adapter that maps `ProgressSink` events onto a `Job`.
 
-    The pipeline ops call `start/step/log` on whatever sink they're given;
-    here we translate those into:
+    Two surface shapes exist in pipelines:
 
-      - `job.progress` (0.0 -> 1.0) so the front-end can draw a real bar
-      - `job.log`      (a deque of strings) so the job tray shows live notes
-      - re-publish on every event so SSE subscribers see updates immediately
+    - **boardfactory-style** — ``start`` / ``step`` / ``log``
+    - **emit-style** (cardfactory, tokenfactory) — ``emit(step, detail, *, pct=...)``
 
-    `start` resets the progress numerator/denominator. Nested orchestrators
-    (a "generate all panels" loop calling `draw_cell` per panel) wrap their
-    inner calls in `_InnerSink` from boardfactory.ops.orchestrate so the
-    inner `start()` doesn't reset the outer bar.
+    Both map onto ``job.progress``, ``job.log``, and runner pub/sub when a
+    runner is supplied.
+
+    ``start`` resets the progress numerator/denominator. Nested orchestrators
+    (a "generate all panels" loop calling ``draw_cell`` per panel) wrap their
+    inner calls in ``_InnerSink`` from boardfactory.ops.orchestrate so the
+    inner ``start()`` doesn't reset the outer bar.
     """
 
     def __init__(self, job: Job, runner: "JobRunner | None" = None):
@@ -295,6 +317,26 @@ class JobProgressSink:
         self._runner = runner
         self._total = 0
         self._done = 0
+
+    def emit(self, step: str, detail: Any = "", *, pct: float | None = None) -> None:
+        """Pipelines using the isolated ``ProgressSink.emit`` protocol (cardfactory, etc.)."""
+        if detail == "" or detail is None:
+            line = step
+        elif isinstance(detail, str):
+            line = f"{step}: {detail}"
+        else:
+            line = f"{step}: {detail!s}"
+        self._job.log.append(line)
+        ev: dict[str, Any] = {"step": step}
+        if detail != "" and detail is not None:
+            ev["detail"] = detail
+        self._job.events.append(ev)
+        if pct is not None:
+            try:
+                self._job.progress = max(0.0, min(1.0, float(pct) / 100.0))
+            except (TypeError, ValueError):
+                pass
+        self._publish()
 
     def start(self, label: str, total: int) -> None:
         self._total = max(int(total), 0)

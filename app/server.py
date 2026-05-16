@@ -22,14 +22,17 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from auth.middleware import AuthMiddleware
-from assets.routes_api import router as routes_assets
+from domains.spaces.assets.routes_api import router as routes_assets
 from domains.spaces.routes_api import router as routes_spaces
+from domains.spaces.animations.routes_api import router as routes_space_animations
 from auth.routes_html import router as auth_html_router
 from auth.routes_api import router as auth_api_router
 from domains.boards.routes_html import router as boards_html_router
 from domains.boards.routes_api import router as boards_api_router
-from home.routes_html import router as home_html_router
-from home.routes_api import router as home_api_router
+from domains.cards.routes_html import router as cards_html_router
+from domains.cards.routes_api import router as cards_api_router
+from domains.tokens.routes_html import router as tokens_html_router
+from domains.tokens.routes_api import router as tokens_api_router
 from jobs.routes_api import router as jobs_api_router
 
 app = FastAPI(title="Board Factory")
@@ -108,10 +111,13 @@ def startup() -> None:
 
 app.include_router(auth_html_router)
 app.include_router(auth_api_router)
-app.include_router(home_html_router)
-app.include_router(home_api_router)
 app.include_router(routes_assets)
 app.include_router(boards_html_router)
 app.include_router(boards_api_router)
+app.include_router(cards_html_router)
+app.include_router(cards_api_router)
 app.include_router(routes_spaces)
+app.include_router(routes_space_animations)
+app.include_router(tokens_html_router)
+app.include_router(tokens_api_router)
 app.include_router(jobs_api_router)

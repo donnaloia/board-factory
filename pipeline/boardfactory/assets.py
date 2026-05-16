@@ -161,7 +161,7 @@ def read_meta(category: str, asset_id: str, history_filename: str) -> dict:
     bid = config.active_board()
     if bid:
         try:
-            from assets.repository import read_meta as read_meta_from_db
+            from domains.spaces.assets.repository import read_meta as read_meta_from_db
 
             db_meta = read_meta_from_db(bid, category, asset_id, history_filename)
         except Exception:

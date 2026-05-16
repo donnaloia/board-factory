@@ -1,0 +1,35 @@
+{
+  "slug": "ice-cream-man",
+  "display_name": "ice cream man",
+  "locomotion_profile": "walk",
+  "facing_policy": "flip_x",
+  "canvas_w": 96,
+  "canvas_h": 128,
+  "pivot_x": 48,
+  "pivot_y": 120,
+  "frame_fps": 12,
+  "clips": [
+    "idle_breath",
+    "walk_horizontal"
+  ],
+  "token_palette": {
+    "body_neutral": [
+      "#dcc3a5",
+      "#b99b73",
+      "#8c6e4b",
+      "#5a4128"
+    ],
+    "accent_primary": [
+      "#64a0c8",
+      "#508cb9",
+      "#3c73a5",
+      "#2d5a8c",
+      "#1e416e"
+    ],
+    "highlight_neutral": [
+      "#f5f0e8",
+      "#e6e0d7"
+    ]
+  },
+  "style_sentence": "ice cream man with mustache."
+}

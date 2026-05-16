@@ -1,0 +1,206 @@
+{% extends "_base.html" %}
+{% block title %}{{ deck.project_name }} · Card Factory{% endblock %}
+
+{% block breadcrumb %}
+<nav class="section-path" aria-label="breadcrumb">
+  <a href="/card-factory/" class="crumb">Decks</a>
+  <span class="crumb-sep" aria-hidden="true">/</span>
+  <span class="crumb" id="cf-deck-breadcrumb-title">{{ deck.project_name }}</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="cf-layout" data-deck-id="{{ deck.deck_id }}" data-deck-prefix="{{ deck_prefix }}">
+
+  {# ─── pipeline status banner ─── #}
+  <div class="cf-status-bar">
+    <span class="cf-status-pill cf-status-{{ deck.status }}" id="cf-status-pill">
+      {{ deck.status | replace('_', ' ') }}
+    </span>
+    <span class="cf-status-label">
+      {% if deck.status == 'draft' %}Link a board to start.
+      {% elif deck.status == 'frame_pending' %}Generate and commit a frame to unlock card generation.
+      {% elif deck.status == 'card_pending' %}Frame locked — ready to generate cards.
+      {% else %}Complete — {{ deck.slot_count }} cards generated.{% endif %}
+    </span>
+  </div>
+
+  <section class="cf-deck-title-section" aria-label="Deck title">
+    <div class="cf-field">
+      <label class="cf-field-label" for="cf-deck-title-input">Deck title</label>
+      <div class="cf-deck-title-row">
+        <input type="text" id="cf-deck-title-input" class="cf-input"
+               value="{{ deck.project_name }}" maxlength="512" autocomplete="off"
+               aria-describedby="cf-deck-title-hint">
+        <button type="button" class="action-btn action-btn-secondary" id="cf-save-deck-title-btn">
+          Save title
+        </button>
+        <span class="cf-action-status" id="cf-deck-title-status"></span>
+      </div>
+      <p class="cf-section-hint" id="cf-deck-title-hint">Shown in the deck list and header; URL slug does not change.</p>
+    </div>
+  </section>
+
+  {# ─── Section 1: Board link ─── #}
+  <section class="cf-section" id="cf-section-board">
+    <h2 class="cf-section-title">
+      <span class="cf-step-num">1</span> Source Board
+      {% if deck.linked_board_id %}<span class="cf-step-check">✓</span>{% endif %}
+    </h2>
+
+    {% if deck.linked_board_id %}
+    <div class="cf-board-linked">
+      <p class="cf-board-id">Linked: <code>{{ deck.linked_board_id }}</code></p>
+      {% if deck.style_prompt %}
+      <p class="cf-style-prompt">{{ deck.style_prompt[:120] }}{% if deck.style_prompt|length > 120 %}…{% endif %}</p>
+      {% endif %}
+      <p class="cf-palette-indicator">
+        Palette: {% if deck.has_palette %}loaded{% else %}not available{% endif %}
+      </p>
+    </div>
+    {% else %}
+    <p class="cf-section-hint">Select a board game to inherit its art style and color palette.</p>
+    <div class="cf-board-picker">
+      <select id="cf-board-select" class="cf-select">
+        <option value="">— choose a board —</option>
+        {% for b in boards %}
+        <option value="{{ b.id }}">{{ b.project }} ({{ b.id }})</option>
+        {% endfor %}
+      </select>
+      <button type="button" class="action-btn" id="cf-link-board-btn">Link Board</button>
+      <span class="cf-action-status" id="cf-link-board-status"></span>
+    </div>
+    {% endif %}
+  </section>
+
+  {# ─── Section 2: Frame gate ─── #}
+  <section class="cf-section {% if not deck.linked_board_id %}is-locked{% endif %}" id="cf-section-frames">
+    <h2 class="cf-section-title">
+      <span class="cf-step-num">2</span> Card Frame
+      {% if deck.committed_frame_id %}<span class="cf-step-check">✓</span>{% endif %}
+    </h2>
+
+    {% if deck.committed_frame_id %}
+    <div class="cf-frame-committed">
+      <img class="cf-frame-preview" src="{{ deck_prefix }}/api/card-frame-candidates/{{ deck.committed_frame_id }}/image" alt="Committed frame">
+      <p class="cf-frame-note">Frame locked. <button type="button" class="cf-text-btn" id="cf-reframe-btn">Change frame</button></p>
+    </div>
+    {% endif %}
+
+    <div class="cf-frame-candidates" id="cf-frame-candidates"
+         {% if deck.committed_frame_id %}style="display:none"{% endif %}>
+      {% if deck.frame_candidates %}
+      <div class="cf-candidate-grid" id="cf-candidate-grid">
+        {% for c in deck.frame_candidates %}
+        <label class="cf-candidate-card {% if c.id == deck.committed_frame_id %}is-selected{% endif %}">
+          <input type="radio" name="cf-candidate" value="{{ c.id }}"
+                 {% if c.id == deck.committed_frame_id %}checked{% endif %}>
+          <img class="cf-candidate-img" src="{{ deck_prefix }}/api/card-frame-candidates/{{ c.id }}/image"
+               alt="Frame candidate {{ c.candidate_index }}">
+          <span class="cf-candidate-label">Option {{ c.candidate_index + 1 }}</span>
+        </label>
+        {% endfor %}
+      </div>
+      <div class="cf-frame-actions">
+        <button type="button" class="action-btn" id="cf-commit-frame-btn">Commit Selected Frame</button>
+        <button type="button" class="action-btn action-btn-secondary" id="cf-regen-frames-btn">Regenerate Frames</button>
+        <span class="cf-action-status" id="cf-commit-frame-status"></span>
+      </div>
+      {% else %}
+      <p class="cf-section-hint">No frame candidates yet.</p>
+      {% endif %}
+
+      <div class="cf-frame-gen">
+        <div class="cf-cost-note">
+          Est. cost: ${{ "%.3f"|format(deck.estimates.frames_usd) }}
+          (3 chrome candidates · {{ deck.estimates.frames_usd|round(3) }})
+        </div>
+        <button type="button" class="action-btn" id="cf-gen-frames-btn">Generate Frames</button>
+        <span class="cf-action-status" id="cf-gen-frames-status"></span>
+      </div>
+    </div>
+  </section>
+
+  {# ─── Section 3: Card prompts (auto-derived, editable) ─── #}
+  <section class="cf-section {% if not deck.committed_frame_id %}is-locked{% endif %}" id="cf-section-prompts">
+    <h2 class="cf-section-title">
+      <span class="cf-step-num">3</span> Card Prompts
+    </h2>
+    <p class="cf-section-hint">
+      Prompts are auto-derived from the linked board.
+      <button type="button" class="cf-text-btn" id="cf-derive-prompts-btn">Re-derive from board</button>
+      <span class="cf-action-status" id="cf-derive-prompts-status"></span>
+    </p>
+
+    <div class="cf-slot-prompts" id="cf-slot-prompts">
+      {% for s in deck.slots %}
+      <details class="cf-slot-editor" data-slot="{{ s.slot_index }}">
+        <summary class="cf-slot-summary">
+          <span class="cf-slot-num">{{ s.slot_index + 1 }}</span>
+          <span class="cf-slot-title" id="cf-title-display-{{ s.slot_index }}">{{ s.title or ('Card ' ~ (s.slot_index + 1)) }}</span>
+          <span class="cf-slot-source {% if s.prompt_source == 'user' %}is-user{% endif %}">{{ s.prompt_source }}</span>
+        </summary>
+        <div class="cf-slot-fields">
+          <label class="cf-field">
+            <span class="cf-field-label">Title</span>
+            <input class="cf-input" id="cf-title-{{ s.slot_index }}" value="{{ s.title }}" maxlength="80">
+          </label>
+          <label class="cf-field">
+            <span class="cf-field-label">Illustration prompt</span>
+            <textarea class="cf-textarea" id="cf-prompt-{{ s.slot_index }}" rows="3">{{ s.illustration_prompt }}</textarea>
+          </label>
+          <label class="cf-field">
+            <span class="cf-field-label">Stat lines (one per line)</span>
+            <textarea class="cf-textarea" id="cf-stats-{{ s.slot_index }}" rows="3">{{ s.stat_lines | join('\n') }}</textarea>
+          </label>
+          <div class="cf-slot-actions">
+            <button type="button" class="action-btn action-btn-small" data-save-slot="{{ s.slot_index }}">Save</button>
+            <span class="cf-action-status" id="cf-slot-save-status-{{ s.slot_index }}"></span>
+          </div>
+        </div>
+      </details>
+      {% endfor %}
+    </div>
+  </section>
+
+  {# ─── Section 4: Card grid ─── #}
+  <section class="cf-section {% if not deck.committed_frame_id %}is-locked{% endif %}" id="cf-section-cards">
+    <h2 class="cf-section-title">
+      <span class="cf-step-num">4</span> Cards
+      <span class="cf-slot-count">({{ deck.slot_count }})</span>
+    </h2>
+
+    <div class="cf-card-gen-bar">
+      <div class="cf-cost-note">
+        Est. cost: ${{ "%.3f"|format(deck.estimates.cards_usd) }}
+        ({{ deck.slot_count }} cards × ${{ "%.3f"|format(deck.estimates.cards_usd / deck.slot_count) }})
+      </div>
+      <button type="button" class="action-btn" id="cf-gen-all-btn">Generate All Cards</button>
+      <span class="cf-action-status" id="cf-gen-all-status"></span>
+    </div>
+
+    <div class="cf-card-grid" id="cf-card-grid">
+      {% for s in deck.slots %}
+      <div class="cf-card-tile" data-slot="{{ s.slot_index }}" id="cf-tile-{{ s.slot_index }}">
+        <div class="cf-card-img-wrap">
+          {% if s.live_url %}
+          <img class="cf-card-img" src="{{ s.live_url }}" alt="{{ s.title or 'Card ' ~ (s.slot_index + 1) }}">
+          {% else %}
+          <div class="cf-card-placeholder">
+            <span class="cf-card-slot-num">{{ s.slot_index + 1 }}</span>
+          </div>
+          {% endif %}
+        </div>
+        <div class="cf-card-tile-meta">
+          <p class="cf-card-tile-title">{{ s.title or 'Card ' ~ (s.slot_index + 1) }}</p>
+          <button type="button" class="cf-regen-btn action-btn-small" data-regen-slot="{{ s.slot_index }}">↺</button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+</div>
+
+<script src="/static/card-factory.js?v={{ asset_v('card-factory.js') }}"></script>
+{% endblock %}

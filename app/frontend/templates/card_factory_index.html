@@ -1,0 +1,95 @@
+{% extends "_base.html" %}
+{% block title %}Decks{% endblock %}
+
+{% block breadcrumb %}
+<nav class="section-path" aria-label="breadcrumb">
+  <a href="/card-factory/" class="crumb">Decks</a>
+</nav>
+{% endblock %}
+
+{% block content %}
+<section class="boards-stage">
+  <header class="boards-head">
+    <span class="eyebrow">Issue Selection</span>
+    <h1 class="display-xl">Decks</h1>
+    <p class="body-lead">
+      Each card set links to a board game for style continuity &mdash;
+      frame first, then generate up to {{ decks[0].slot_count if decks else 6 }} full cards.
+    </p>
+  </header>
+
+  <ul class="boards-grid" role="list">
+    {% for d in decks %}
+    <li class="board-card">
+      <a class="board-card-link" href="/users/{{ user.username }}/card-factory/{{ d.path_slug }}/">
+        <div class="board-card-thumb cf-deck-thumb">
+          {% if d.hero_url %}
+          <div class="cf-deck-thumb-stack" aria-hidden="true">
+            <div class="cf-deck-thumb-scatter">
+              {% for url in d.scatter_urls %}
+              <img src="{{ url }}" alt="" class="cf-deck-thumb-scatter-img" loading="lazy"
+                   width="120" height="168">
+              {% endfor %}
+            </div>
+            <img src="{{ d.hero_url }}" alt="" class="cf-deck-thumb-hero" loading="lazy"
+                 width="140" height="196">
+          </div>
+          {% else %}
+          <span class="thumb-empty cf-deck-thumb-empty">No cards yet</span>
+          {% endif %}
+          <span class="cf-status-badge cf-status-{{ d.status }}">{{ d.status | replace('_', ' ') }}</span>
+        </div>
+        <div class="board-card-meta">
+          <h2 class="board-card-title">{{ d.project_name }}</h2>
+          <p class="board-card-id">{{ d.slot_count }} cards · {{ d.status | replace('_', ' ') }}</p>
+        </div>
+      </a>
+    </li>
+    {% endfor %}
+
+    <li class="board-card board-card-new" id="new-deck-card">
+      <button type="button" class="board-card-link board-card-new-trigger" id="new-deck-trigger">
+        <div class="board-card-thumb board-card-new-thumb">
+          <span class="thumb-plus" aria-hidden="true">+</span>
+        </div>
+        <div class="board-card-meta">
+          <h2 class="board-card-title">New Card Set</h2>
+          <p class="board-card-id" id="new-deck-status">6 cards</p>
+        </div>
+      </button>
+    </li>
+  </ul>
+</section>
+
+<script>
+window.addEventListener("pageshow", function (ev) {
+  if (ev.persisted) location.reload();
+});
+(function () {
+  const trigger = document.getElementById('new-deck-trigger');
+  const status = document.getElementById('new-deck-status');
+
+  trigger.addEventListener('click', async () => {
+    if (trigger.disabled) return;
+    trigger.disabled = true;
+    status.textContent = 'Creating…';
+
+    const slug = 'card-set-' + Date.now().toString(36);
+    const res = await fetch('/api/card-factory/decks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path_slug: slug, project_name: 'Untitled Card Set' }),
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      trigger.disabled = false;
+      status.textContent = '6 cards';
+      alert('Could not create card set: ' + t);
+      return;
+    }
+    const data = await res.json();
+    window.location.href = data.url;
+  });
+})();
+</script>
+{% endblock %}

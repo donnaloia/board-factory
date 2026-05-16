@@ -10,33 +10,24 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
-import markdown as md
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import func, or_, select
 
 from auth.middleware import require_user
-from jobs import cost_ledger, pipeline_adapters
+from jobs import cost_ledger
+from domains.boards import pipeline_jobs as board_pipeline_jobs
 from boardfactory import boards as bf_boards
 from boardfactory import config as bf_config
-from boardfactory import frames as bf_frames
 from jobs.runner import get_runner
 from auth.models import UserRecord
 from domains.boards.models import OwnedBoardRecord
 from infrastructure.db import session_scope
 from infrastructure.files import workspace as fs_ws
 
-from assets import repository as assets_repo
-from assets import services as asset_urls
 from domains.boards import services as bd
-from domains.spaces import repository as spaces_repo
-from domains.spaces.models import CellRecord
-from assets.models import AssetVersionRecord
-
-from infrastructure import board_store as bs
 
 REPO_ROOT = Path(os.environ.get("BOARDFACTORY_REPO", "/repo"))
-SPEC_PROSE_PATH = REPO_ROOT / "docs" / "spec_prose.md"
 
 
 def safe_next(next_path: str | None) -> str:
@@ -168,9 +159,9 @@ def editorial_template_context(board_id: str | None, request: Request | None = N
 
 def pipeline_cost_estimates() -> dict:
     return {
-        "spaces": pipeline_adapters.estimate_generate("spaces"),
-        "panels": pipeline_adapters.estimate_generate("panels"),
-        "centerpiece": pipeline_adapters.estimate_generate("centerpiece"),
+        "spaces": board_pipeline_jobs.estimate_generate("spaces"),
+        "panels": board_pipeline_jobs.estimate_generate("panels"),
+        "centerpiece": board_pipeline_jobs.estimate_generate("centerpiece"),
     }
 
 
@@ -225,277 +216,17 @@ def user_provider_api_keys(request: Request) -> dict[str, str]:
 
 
 def load_spec_prose_sections() -> dict[str, str]:
-    if not SPEC_PROSE_PATH.exists():
-        return {}
-    raw = SPEC_PROSE_PATH.read_text()
-    sections: dict[str, list[str]] = {}
-    current: str | None = None
-    for line in raw.splitlines():
-        if line.startswith("# "):
-            continue
-        if line.startswith("## "):
-            current = line[3:].strip()
-            sections[current] = []
-            continue
-        if current is None:
-            continue
-        sections[current].append(line)
-    return {
-        slug: md.markdown("\n".join(body), extensions=["tables"])
-        for slug, body in sections.items()
-    }
+    from tech_spec.loader import load_spec_prose_sections as _load
+
+    return _load()
 
 
 def candidates_per_regen_count(category: str) -> int:
     return bf_config.regen_candidate_count(category)
 
 
-def build_cell_side_panel_payload(board_id: str, category: str, asset_id: str) -> dict:
-    """JSON state for one cell: spec + live url + history list (with prompts)."""
-    catalog = load_board_catalog(board_id)
-    bpath = board_http_prefix(board_id)
-
-    spec: dict = {}
-    if category == "spaces":
-        designs = catalog.get("board_spaces", {}).get("designs", [])
-        d = next((x for x in designs if x["id"] == asset_id), None)
-        if d is None:
-            raise HTTPException(404, f"Unknown space design: {asset_id}")
-        from domains.spaces.geometry import resolve_position
-
-        layout = catalog["board_spaces"]["layout"]
-        sample_pos = d["positions"][0] if d.get("positions") else None
-        size = None
-        if sample_pos:
-            _x, _y, w, h = resolve_position(layout, sample_pos)
-            size = [w, h]
-        spec = {
-            "id": d["id"],
-            "title": d["id"].replace("_", " "),
-            "prompt": d.get("prompt", ""),
-            "uses": len(d.get("positions", [])),
-            "size": size,
-            "kind": "perimeter",
-            "space_kind": d.get("space_kind") or "standard",
-        }
-    elif category == "panels":
-        panels = catalog.get("feature_panels", {}).get("panels", [])
-        p = next((x for x in panels if x["id"] == asset_id), None)
-        if p is None:
-            raise HTTPException(404, f"Unknown panel: {asset_id}")
-        spec = {
-            "id": p["id"],
-            "title": p["id"].replace("_", " "),
-            "prompt": p.get("prompt", ""),
-            "uses": 1,
-            "size": list(p["target_size"]),
-            "kind": "functional",
-        }
-    elif category == "centerpiece":
-        cp = catalog["centerpiece"]
-        spec = {
-            "id": "centerpiece",
-            "title": "Centerpiece",
-            "prompt": cp.get("prompt", ""),
-            "uses": 1,
-            "size": list(cp["target_size"]),
-            "kind": "centerpiece",
-        }
-    else:
-        raise HTTPException(400, f"Unknown category {category}")
-
-    # Read-only history listing — set the thread-local active board without
-    # taking the per-board write lock. Otherwise this fetch would block on
-    # any in-flight pipeline job for the same board, freezing the side panel
-    # while a single space generates.
-    with bf_config.set_active_board(board_id):
-        from boardfactory import assets as bf_assets
-
-        entries = bf_assets.list_history(category, asset_id)
-
-    history = [
-        {
-            "filename": e.filename,
-            "ts_ms": e.timestamp_ms,
-            "seq": e.seq,
-            "is_live": e.is_live,
-            "operation": e.operation,
-            "prompt": e.prompt,
-            "url": f"{bpath}/asset/history/{category}/{asset_id}/{e.filename}",
-        }
-        for e in entries
-    ]
-
-    live_rel = fs_ws.live_rel(category, asset_id)
-    store = bs.get_store()
-    live_url = None
-    if store.exists(board_id, live_rel):
-        live_url = asset_urls.board_asset_url(
-            http_prefix=bpath,
-            asset_relpath=live_rel.removeprefix("workspace/"),
-            mtime_ms=store.stat(board_id, live_rel).mtime_ms,
-        )
-
-    catalog_prompt = spec.get("prompt", "") or ""
-
-    live_asset_version_id: int | None = None
-    live_history_filename: str | None = None
-    active_prompt: str | None = None
-    cell_row: CellRecord | None = None
-
-    cell_kind = spaces_repo.category_to_kind(category)
-    if cell_kind is not None:
-        with session_scope() as session:
-            cell_row = session.scalar(
-                select(CellRecord).where(
-                    CellRecord.board_uuid == board_id,
-                    CellRecord.kind == cell_kind,
-                    CellRecord.slug == asset_id,
-                )
-            )
-            if cell_row is not None and cell_row.live_asset_version_id is not None:
-                live_asset_version_id = cell_row.live_asset_version_id
-                av = session.get(AssetVersionRecord, cell_row.live_asset_version_id)
-                if av is not None:
-                    live_history_filename = av.basename
-                    active_prompt = assets_repo.merged_prompt_for_live_asset_row(
-                        board_id, category, asset_id, av
-                    )
-
-    if (active_prompt is None or not str(active_prompt).strip()) and cell_row is not None:
-        cell_p = (cell_row.prompt or "").strip()
-        if cell_p:
-            active_prompt = cell_p
-
-    functional_targets: list[dict] = []
-    triggers_functional: dict | None = None
-    triggers_functional_cell_id: str | None = None
-    if category == "spaces":
-        functional_targets = [
-            {
-                "cell_id": c.id,
-                "id": c.slug,
-                "title": c.slug.replace("_", " "),
-            }
-            for c in spaces_repo.list_panel_cells_for_board(board_id)
-        ]
-        if cell_row is not None:
-            triggers_functional_cell_id = cell_row.triggers_functional_cell_id
-            if cell_row.space_kind:
-                spec["space_kind"] = cell_row.space_kind
-            if cell_row.triggers_functional_cell_id:
-                with session_scope() as session:
-                    tgt = session.get(CellRecord, cell_row.triggers_functional_cell_id)
-                    if (
-                        tgt is not None
-                        and tgt.board_uuid == board_id
-                        and tgt.kind == "functional"
-                    ):
-                        triggers_functional = {
-                            "cell_id": tgt.id,
-                            "id": tgt.slug,
-                            "title": tgt.slug.replace("_", " "),
-                        }
-
-    if active_prompt is None or not str(active_prompt).strip():
-        active_prompt = catalog_prompt
-    frame_block = catalog.get("frame", {}) or {}
-    frame_enabled_for_cell = (
-        category == "panels"
-        and bool(frame_block.get("enabled"))
-        and bool(frame_block.get("apply_to_panels", True))
-    )
-    # Read-only frame metadata — same reasoning as the history block above.
-    with bf_config.set_active_board(board_id):
-        frame_present = bf_frames.has_house_frame()
-        frame_meta = bf_frames.read_house_meta() if frame_present else None
-    frame_locked = frame_enabled_for_cell and frame_present and store.exists(board_id, live_rel)
-
-    frame_payload: dict | None = None
-    if category == "panels":
-        all_panels = catalog.get("feature_panels", {}).get("panels", [])
-        panel_sources: list[dict] = []
-        for p in all_panels:
-            prel = fs_ws.live_rel("panels", p["id"])
-            if not store.exists(board_id, prel):
-                continue
-            panel_sources.append(
-                {
-                    "id": p["id"],
-                    "label": p["id"].replace("_", " "),
-                    "size": list(p["target_size"]),
-                    "url": asset_urls.board_asset_url(
-                        http_prefix=bpath,
-                        asset_relpath=prel.removeprefix("workspace/"),
-                        mtime_ms=store.stat(board_id, prel).mtime_ms,
-                    ),
-                    "is_self": p["id"] == asset_id,
-                }
-            )
-
-        mockup_source: dict | None = None
-        ref_rel = (catalog.get("style") or {}).get("reference_image", "mockup/board.png")
-        mockup_path = fs_ws.board_root(board_id) / ref_rel
-        if mockup_path.exists():
-            mockup_source = {
-                "id": asset_id,
-                "label": f"{asset_id.replace('_', ' ')} (from mockup)",
-                "size": spec["size"],
-                "url": (
-                    f"{bpath}/api/frame/preview.png"
-                    f"?source_kind=mockup&source_id={asset_id}"
-                    f"&ring_px=8&w={spec['size'][0]}&h={spec['size'][1]}"
-                ),
-            }
-
-        default_ring = max(4, min(spec["size"][0], spec["size"][1]) // 16)
-        max_ring = max(default_ring, min(spec["size"][0], spec["size"][1]) // 3)
-
-        frame_payload = {
-            "supported": True,
-            "enabled": bool(frame_block.get("enabled")),
-            "adopted": frame_present,
-            "adopted_meta": frame_meta.to_dict() if frame_meta else None,
-            "applied_to_this_cell": frame_locked,
-            "panel_sources": panel_sources,
-            "mockup_source": mockup_source,
-            "default_ring_px": default_ring,
-            "min_ring_px": 2,
-            "max_ring_px": max_ring,
-            "preview_endpoint": f"{bpath}/api/frame/preview.png",
-            "adopt_endpoint": f"{bpath}/api/frame/adopt",
-            "disable_endpoint": f"{bpath}/api/frame/disable",
-        }
-
-    space_design_ids: list[str] = (
-        sorted({d["id"] for d in catalog.get("board_spaces", {}).get("designs", [])})
-        if category == "spaces"
-        else []
-    )
-
-    return {
-        "board_id": board_id,
-        "category": category,
-        "asset_id": asset_id,
-        "spec": spec,
-        "space_design_ids": space_design_ids,
-        "functional_targets": functional_targets,
-        "triggers_functional_cell_id": triggers_functional_cell_id,
-        "triggers_functional": triggers_functional,
-        "live_url": live_url,
-        "has_live": store.exists(board_id, live_rel),
-        "history": history,
-        "catalog_prompt": catalog_prompt,
-        "active_prompt": active_prompt,
-        "live_asset_version_id": live_asset_version_id,
-        "live_history_filename": live_history_filename,
-        "regen_estimate_usd": pipeline_adapters.estimate_regen_one(category, asset_id),
-        "candidates_per_regen": candidates_per_regen_count(category),
-        "frame_locked": frame_locked,
-        "frame_url": (
-            f"{bpath}/frame.png?w={spec['size'][0]}&h={spec['size'][1]}"
-            if frame_locked and spec.get("size")
-            else None
-        ),
-        "frame": frame_payload,
-    }
+# NOTE: ``build_cell_side_panel_payload`` lives in
+# ``domains.spaces.services`` — the cell side panel is a spaces-domain
+# concern, not shared infrastructure. Routes that used to import it from
+# this module should now do ``from domains.spaces import services as
+# spaces_services`` and call ``spaces_services.build_cell_side_panel_payload``.

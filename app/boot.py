@@ -37,7 +37,7 @@ def register_pipeline_hooks() -> None:
     """Wire optional listeners into ``boardfactory.assets`` (DB-backed asset index)."""
     try:
         from boardfactory import assets as bf_assets  # noqa: PLC0415
-        from assets import repository as assets_repo  # noqa: PLC0415
+        from domains.spaces.assets import repository as assets_repo  # noqa: PLC0415
 
         bf_assets.register_asset_db_listener(assets_repo.on_asset_event)
     except Exception as exc:

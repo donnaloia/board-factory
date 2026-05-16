@@ -5,11 +5,12 @@ terminal state (``done`` / ``failed`` / ``killed``) its snapshot is
 persisted here so the job-tray survives process restarts. Hydration on
 boot reads the newest N rows and replays them back into the runner.
 
-This module is intentionally narrow — two functions:
+This module is intentionally narrow — three functions:
 
 * :func:`persist_terminal` — write/update one ``job_runs`` row.
 * :func:`load_recent_jobs` — pull the newest N back as in-memory ``Job``
   objects.
+* :func:`delete_job_run` — remove one row when the user dismisses from the tray.
 
 Anything else (cost aggregation, cost recording) lives in
 :mod:`jobs.cost_ledger`.
@@ -28,6 +29,16 @@ from jobs.models import JobRunRecord
 
 if TYPE_CHECKING:
     from jobs.runner import Job
+
+
+def delete_job_run(job_id: str) -> bool:
+    """Remove one persisted job snapshot (user dismissed from tray)."""
+    with session_scope() as session:
+        row = session.get(JobRunRecord, job_id)
+        if row is None:
+            return False
+        session.delete(row)
+        return True
 
 
 def persist_terminal(job: Job) -> None:

@@ -1,4 +1,4 @@
-"""HTTP tests for ``GET …/export/project-bundle.zip`` (``app/exporter``)."""
+"""HTTP tests for ``GET …/export/project-bundle.zip`` (``domains.boards.exporter``)."""
 
 from __future__ import annotations
 

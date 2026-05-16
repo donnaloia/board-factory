@@ -5,8 +5,8 @@ from __future__ import annotations
 from boardfactory import assets as bf_assets
 from boardfactory import config as bf_config
 
-from infrastructure import deps
-from assets import repository as asset_index
+from domains.spaces import services as spaces_services
+from domains.spaces.assets import repository as asset_index
 
 
 def test_active_prompt_matches_promoted_history_row(isolated_repo, seeded_board, board_id):
@@ -30,7 +30,9 @@ def test_active_prompt_matches_promoted_history_row(isolated_repo, seeded_board,
             )
             bf_assets.promote("spaces", "corner_tl", out_old.name)
 
-        payload = deps.build_cell_side_panel_payload(board_id, "spaces", "corner_tl")
+        payload = spaces_services.build_cell_side_panel_payload(
+            board_id, "spaces", "corner_tl"
+        )
         assert payload["active_prompt"] == "from older generation"
         assert payload["live_history_filename"] == out_old.name
         assert payload["live_asset_version_id"] is not None

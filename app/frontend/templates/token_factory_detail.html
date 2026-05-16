@@ -1,0 +1,400 @@
+{% extends "_base.html" %}
+{% block title %}{{ token_item.token.display_name or token_item.token.slug }} · Token Factory{% endblock %}
+
+{% block breadcrumb %}
+<nav class="section-path" aria-label="breadcrumb">
+  <a href="/token-factory/" class="crumb">Tokens</a>
+  <span class="crumb-sep" aria-hidden="true">/</span>
+  <span class="crumb">{{ token_item.token.display_name or token_item.token.slug }}</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+{% set item = token_item %}
+{% set t = item.token %}
+
+<div class="ts-layout">
+
+  {# ─── header ─── #}
+  <div class="ts-header">
+    <h1 class="ts-title">{{ t.display_name or t.slug }}</h1>
+    <p class="ts-subtitle">
+      {{ t.locomotion_profile | capitalize }} token
+      {% if t.design_locked %} &mdash; <span class="ts-badge ts-badge-locked">design locked</span>{% endif %}
+    </p>
+  </div>
+
+  {# ─── single token article ─── #}
+  <article class="ts-token-card {% if t.design_locked %}is-locked{% endif %}"
+           id="ts-token-{{ t.id }}"
+           data-token-id="{{ t.id }}"
+           data-slug="{{ t.slug }}"
+           data-token-base="{{ item.token_base }}"
+           {% if not t.design_locked %}data-ts-flow="pick-then-detail"{% endif %}>
+
+    {% if t.design_locked %}
+    {# ── Locked: stacked header — name/sentence on top, portrait+palette below ── #}
+    <div class="ts-token-header-locked">
+
+      {# row 1: name + badges #}
+      <div class="ts-locked-title-row">
+        <span class="ts-token-name">{{ t.display_name or t.slug }}</span>
+        {% if item.design_lock %}
+        <span class="ts-token-locomotion ts-badge">{{ t.locomotion_profile }}</span>
+        {% endif %}
+        <span class="ts-badge ts-badge-locked">locked</span>
+      </div>
+
+      {# row 2: style sentence #}
+      {% if item.design_lock %}
+      <p class="ts-style-sentence">{{ item.design_lock.style_sentence }}</p>
+      {% endif %}
+
+      {# row 3: portrait left · palette right #}
+      <div class="ts-locked-visual-row">
+        <div class="ts-token-portrait">
+          {% if item.canonical_url %}
+          <img src="{{ item.canonical_url }}" alt="{{ t.display_name or t.slug }}"
+               class="ts-portrait-img">
+          {% else %}
+          <div class="ts-portrait-empty"></div>
+          {% endif %}
+        </div>
+        {% if item.design_lock and item.design_lock.token_palette %}
+        <div class="ts-palette-preview" id="ts-palette-{{ t.id }}">
+          {% if item.design_lock.token_palette.body_neutral %}
+          <div class="ts-palette-group">
+            <span class="ts-palette-label">body</span>
+            <div class="ts-swatch-row">
+              {% for h in item.design_lock.token_palette.body_neutral %}
+              <span class="ts-swatch" style="background: {{ h }}" title="{{ h }}"></span>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+          {% if item.design_lock.token_palette.accent_primary %}
+          <div class="ts-palette-group">
+            <span class="ts-palette-label">accent</span>
+            <div class="ts-swatch-row">
+              {% for h in item.design_lock.token_palette.accent_primary %}
+              <span class="ts-swatch ts-swatch-accent" style="background: {{ h }}" title="{{ h }}"></span>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+          {% if item.design_lock.token_palette.highlight_neutral %}
+          <div class="ts-palette-group">
+            <span class="ts-palette-label">highlight</span>
+            <div class="ts-swatch-row">
+              {% for h in item.design_lock.token_palette.highlight_neutral %}
+              <span class="ts-swatch ts-swatch-hl" style="background: {{ h }}" title="{{ h }}"></span>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+
+    </div>
+
+    <div class="ts-token-body">
+
+      <div class="ts-section-sub" id="ts-clips-{{ t.id }}">
+        <div class="ts-sub-header">
+          <span class="ts-sub-title">Animation clips</span>
+        </div>
+        {% if item.design_lock and item.design_lock.clips %}
+        <div class="ts-clip-list">
+          {% for clip_name in item.design_lock.clips %}
+          {% set frames = item.clip_frames.get(clip_name, []) %}
+          <div class="ts-clip-card {% if frames %}has-frames{% endif %}"
+               id="ts-clip-{{ t.id }}-{{ clip_name }}">
+            <div class="ts-clip-preview-col">
+              <div class="ts-filmstrip ts-clip-loop-root"
+                   id="ts-filmstrip-{{ t.id }}-{{ clip_name }}"
+                   {% if frames %}data-ts-clip-loop{% endif %}
+                   data-frame-fps="{{ t.frame_fps }}"
+                   data-clip-label="{{ clip_name }}">
+                <div class="ts-clip-preview-stack">
+                  <div class="ts-clip-loading-overlay is-hidden" aria-hidden="true"></div>
+                  {% if frames %}
+                  <div class="ts-clip-loop-stage"
+                       style="--ts-ar-w: {{ t.canvas_w }}; --ts-ar-h: {{ t.canvas_h }};">
+                    <img class="ts-clip-loop-img" alt="" decoding="async">
+                  </div>
+                  {% else %}
+                  <div class="ts-clip-empty-stage"
+                       style="--ts-ar-w: {{ t.canvas_w }}; --ts-ar-h: {{ t.canvas_h }};"></div>
+                  {% endif %}
+                </div>
+                {% if frames %}
+                <div class="ts-clip-loop-sources" hidden>
+                  {% for f in frames %}
+                  <img src="{{ f.url }}" alt="" class="ts-clip-loop-src"
+                       decoding="async" loading="eager">
+                  {% endfor %}
+                </div>
+                {% endif %}
+              </div>
+            </div>
+            <div class="ts-clip-info-col">
+              <span class="ts-clip-name">{{ clip_name }}</span>
+              {% if frames %}
+              <span class="ts-clip-frame-count">{{ frames | length }} frame{{ 's' if frames | length != 1 else '' }}</span>
+              {% endif %}
+              <div class="ts-clip-actions">
+                <button type="button" class="ts-action-sm ts-generate-clip-btn"
+                        data-token-id="{{ t.id }}" data-clip="{{ clip_name }}">
+                  {{ 'Regenerate' if frames else 'Generate' }}
+                </button>
+                <span class="ts-action-status" id="ts-clip-status-{{ t.id }}-{{ clip_name }}"></span>
+              </div>
+            </div>
+            {% if frames %}
+            <div class="ts-clip-speed-col">
+              <span class="ts-speed-readout" id="ts-speed-val-{{ t.id }}-{{ clip_name }}">{{ t.frame_fps }} fps</span>
+              <input type="range" class="ts-speed-slider"
+                     id="ts-speed-{{ t.id }}-{{ clip_name }}"
+                     min="1" max="24" step="1"
+                     value="{{ t.frame_fps }}"
+                     data-filmstrip="ts-filmstrip-{{ t.id }}-{{ clip_name }}">
+            </div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="ts-empty-hint">Lock the design first to see clips.</p>
+        {% endif %}
+      </div>
+
+      <div class="ts-section-sub" id="ts-publish-{{ t.id }}">
+        <div class="ts-sub-header">
+          <span class="ts-sub-title">Sprite sheet</span>
+          <button type="button" class="ts-delete-btn ts-delete-btn-explicit"
+                  data-token-id="{{ t.id }}" title="Delete this token and all generated data">
+            <svg class="ts-delete-icon" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <path d="M1.75 3.5h10.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/>
+              <path d="M4.5 3.5V2.333C4.5 1.873 4.873 1.5 5.333 1.5h3.334C9.127 1.5 9.5 1.873 9.5 2.333V3.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/>
+              <path d="M2.917 3.5l.583 8.167C3.5 12.127 3.873 12.5 4.333 12.5h5.334c.46 0 .833-.373.833-.833L11.083 3.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M5.5 6.5v3.5M7 6.5v3.5M8.5 6.5v3.5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>
+            </svg>
+            Delete
+          </button>
+          <button type="button" class="ts-action-sm ts-publish-btn"
+                  data-token-id="{{ t.id }}">
+            Pack &amp; publish
+          </button>
+        </div>
+        <div class="ts-publish-status-row">
+          <span class="ts-action-status" id="ts-publish-status-{{ t.id }}"></span>
+        </div>
+        {% if item.live_atlas_url %}
+        <div class="ts-atlas-preview" id="ts-atlas-{{ t.id }}">
+          <img src="{{ item.live_atlas_url }}" alt="Live atlas" class="ts-atlas-img"
+               style="image-rendering: pixelated">
+          <p class="ts-atlas-hint">Run ID: {{ t.live_run_id }}</p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    {% else %}
+    {# ── Unlocked ── #}
+    <div class="ts-token-header">
+      <div class="ts-token-identity">
+        <span class="ts-token-name">{{ t.display_name or t.slug }}</span>
+        <span class="ts-token-slug">{{ t.slug }}</span>
+      </div>
+      <span class="ts-token-locomotion ts-badge">{{ t.locomotion_profile }}</span>
+      <button type="button" class="ts-delete-btn" aria-label="Delete token"
+              data-token-id="{{ t.id }}" title="Delete token">
+        <svg viewBox="0 0 14 14" fill="none" width="13" height="13" aria-hidden="true">
+          <path d="M1.75 3.5h10.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/>
+          <path d="M4.5 3.5V2.333C4.5 1.873 4.873 1.5 5.333 1.5h3.334C9.127 1.5 9.5 1.873 9.5 2.333V3.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/>
+          <path d="M2.917 3.5l.583 8.167C3.5 12.127 3.873 12.5 4.333 12.5h5.334c.46 0 .833-.373.833-.833L11.083 3.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+
+    {% if not item.candidates %}
+    {# ── No candidates yet: compact draft state ── #}
+    <div class="ts-token-draft" id="ts-cands-slot-{{ t.id }}"
+         data-ts-flow="pick-then-detail" data-token-id="{{ t.id }}" data-slug="{{ t.slug }}"
+         data-canvas-w="{{ t.canvas_w }}" data-canvas-h="{{ t.canvas_h }}">
+      <div class="ts-draft-idle" aria-live="polite">
+        <span class="ts-draft-hint">No design yet — generate candidates to get started.</span>
+        <button type="button" class="ts-action-sm ts-explore-regenerate-btn"
+                id="ts-explore-btn-{{ t.id }}" data-token-id="{{ t.id }}">
+          Generate candidates
+        </button>
+        <span class="ts-action-status ts-explore-status-inline" id="ts-explore-status-{{ t.id }}"></span>
+      </div>
+      <div class="ts-draft-loading is-hidden" aria-hidden="true">
+        <div class="ts-draft-gen-grid" id="ts-explore-slots-{{ t.id }}" role="list"
+             aria-label="Candidate generation progress"
+             style="--ts-ar-w: {{ t.canvas_w }}; --ts-ar-h: {{ t.canvas_h }};">
+          {% for i in range(3) %}
+          <div class="ts-draft-gen-slot" role="listitem" data-slot-index="{{ i }}">
+            <div class="ts-draft-slot-stage">
+              <div class="ts-draft-slot-spinner-host" aria-hidden="true"></div>
+              <img class="ts-draft-slot-img is-hidden" alt=""
+                   decoding="async" width="{{ t.canvas_w }}" height="{{ t.canvas_h }}">
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        <span class="ts-draft-loading-caption">Generating candidates…</span>
+      </div>
+    </div>
+
+    {% else %}
+    {# ── Has candidates: screen 1 (gallery) → screen 2 (lock & animate) ── #}
+    <div class="ts-token-body ts-token-body-unlocked">
+      <div class="ts-screen ts-screen-pick" data-ts-panel="pick">
+        <div class="ts-sub-header">
+          <span class="ts-sub-title">Pick a design</span>
+          <button type="button" class="ts-action-sm ts-explore-regenerate-btn"
+                  id="ts-explore-btn-{{ t.id }}" data-token-id="{{ t.id }}">
+            Regenerate candidates
+          </button>
+        </div>
+        <div class="ts-candidate-grid ts-candidate-gallery" id="ts-cands-{{ t.id }}">
+          {% for c in item.candidates %}
+          <label class="ts-candidate">
+            <input type="radio" name="ts-cand-{{ t.id }}" value="{{ c.index }}"
+                   {% if loop.first %}checked{% endif %}>
+            <img src="{{ c.url }}" alt="Candidate {{ c.index }}"
+                 class="ts-candidate-img">
+            <span class="ts-candidate-label">{{ c.index }}</span>
+          </label>
+          {% endfor %}
+        </div>
+        <span class="ts-action-status ts-explore-status-inline" id="ts-explore-status-{{ t.id }}"></span>
+        <div class="ts-pick-footer">
+          <button type="button" class="action-btn ts-continue-detail-btn"
+                  data-token-id="{{ t.id }}">
+            Continue to lock &amp; animate
+          </button>
+        </div>
+      </div>
+
+      <div class="ts-screen ts-screen-detail is-hidden" data-ts-panel="detail">
+        <button type="button" class="ts-action-sm ts-back-pick-btn" data-token-id="{{ t.id }}">
+          ← Back to candidates
+        </button>
+        <div class="ts-selected-preview-wrap">
+          <img id="ts-selected-thumb-{{ t.id }}" class="ts-selected-thumb is-empty"
+               alt="" width="96" height="128">
+        </div>
+
+        <div class="ts-section-sub">
+          <div class="ts-sub-header">
+            <span class="ts-sub-title">Lock reference</span>
+          </div>
+          <label class="ts-field ts-field-full">
+            <span class="ts-label">Character description</span>
+            <input type="text" class="ts-input ts-input-full"
+                   id="ts-style-{{ t.id }}"
+                   placeholder="Pixel art chibi knight, golden armour, black outline">
+          </label>
+          <div class="ts-design-actions">
+            <button type="button" class="action-btn ts-commit-btn"
+                    data-token-id="{{ t.id }}"
+                    id="ts-commit-btn-{{ t.id }}">
+              Lock design
+            </button>
+            <span class="ts-action-status" id="ts-commit-status-{{ t.id }}"></span>
+          </div>
+        </div>
+
+        <div class="ts-section-sub is-gated" id="ts-clips-{{ t.id }}">
+          <div class="ts-sub-header">
+            <span class="ts-sub-title">Animation clips</span>
+          </div>
+          {% if item.planned_clips %}
+          <div class="ts-clip-list">
+            {% for clip_name in item.planned_clips %}
+            {% set frames = item.clip_frames.get(clip_name, []) %}
+            <div class="ts-clip-card {% if frames %}has-frames{% endif %}"
+                 id="ts-clip-{{ t.id }}-{{ clip_name }}">
+              <div class="ts-clip-preview-col">
+                <div class="ts-filmstrip ts-clip-loop-root"
+                     id="ts-filmstrip-{{ t.id }}-{{ clip_name }}"
+                     {% if frames %}data-ts-clip-loop{% endif %}
+                     data-frame-fps="{{ t.frame_fps }}"
+                     data-clip-label="{{ clip_name }}">
+                  <div class="ts-clip-preview-stack">
+                    <div class="ts-clip-loading-overlay is-hidden" aria-hidden="true"></div>
+                    {% if frames %}
+                    <div class="ts-clip-loop-stage"
+                         style="--ts-ar-w: {{ t.canvas_w }}; --ts-ar-h: {{ t.canvas_h }};">
+                      <img class="ts-clip-loop-img" alt="" decoding="async">
+                    </div>
+                    {% else %}
+                    <div class="ts-clip-empty-stage"
+                         style="--ts-ar-w: {{ t.canvas_w }}; --ts-ar-h: {{ t.canvas_h }};"></div>
+                    {% endif %}
+                  </div>
+                  {% if frames %}
+                  <div class="ts-clip-loop-sources" hidden>
+                    {% for f in frames %}
+                    <img src="{{ f.url }}" alt="" class="ts-clip-loop-src"
+                         decoding="async" loading="eager">
+                    {% endfor %}
+                  </div>
+                  {% endif %}
+                </div>
+              </div>
+              <div class="ts-clip-info-col">
+                <span class="ts-clip-name">{{ clip_name }}</span>
+                {% if frames %}
+                <span class="ts-clip-frame-count">{{ frames | length }} frame{{ 's' if frames | length != 1 else '' }}</span>
+                {% endif %}
+                <div class="ts-clip-actions">
+                  <button type="button" class="ts-action-sm ts-generate-clip-btn"
+                          data-token-id="{{ t.id }}" data-clip="{{ clip_name }}"
+                          disabled>
+                    {{ 'Regenerate' if frames else 'Generate' }}
+                  </button>
+                  <span class="ts-action-status" id="ts-clip-status-{{ t.id }}-{{ clip_name }}"></span>
+                </div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p class="ts-empty-hint">No clips defined for this locomotion profile.</p>
+          {% endif %}
+        </div>
+
+        <div class="ts-section-sub is-gated" id="ts-publish-{{ t.id }}">
+          <div class="ts-sub-header">
+            <span class="ts-sub-title">Sprite sheet</span>
+            <button type="button" class="ts-action-sm ts-publish-btn"
+                    data-token-id="{{ t.id }}" disabled>
+              Pack &amp; publish
+            </button>
+            <span class="ts-action-status" id="ts-publish-status-{{ t.id }}"></span>
+          </div>
+          {% if item.live_atlas_url %}
+          <div class="ts-atlas-preview" id="ts-atlas-{{ t.id }}">
+            <img src="{{ item.live_atlas_url }}" alt="Live atlas" class="ts-atlas-img"
+                 style="image-rendering: pixelated">
+            <p class="ts-atlas-hint">Run ID: {{ t.live_run_id }}</p>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endif %}{# end has candidates #}
+    {% endif %}{# end design_locked #}
+
+  </article>
+
+</div>{# end ts-layout #}
+
+<script src="/static/token-clip-loop.js?v={{ asset_v('token-clip-loop.js') }}" defer></script>
+<script src="/static/token-studio.js?v={{ asset_v('token-studio.js') }}" defer></script>
+{% endblock %}

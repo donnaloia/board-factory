@@ -6,14 +6,6 @@ Files in this package
 ``runner``
     The runtime. Holds the in-process ``JobRunner`` singleton, the ``Job``
     dataclass, the ``JobProgressSink`` adapter, and cancellation helpers.
-    Conceptually this is the "service" layer for the jobs domain — kept
-    as ``runner.py`` rather than the canonical ``services.py`` because
-    that name describes the actual responsibility (running jobs).
-
-``pipeline_adapters``
-    Worker callables bound to the runner that drive ``boardfactory``
-    pipeline ops (analyze, style, generate, export, …). Specialized
-    services that bridge ``runner`` and ``boardfactory``.
 
 ``repository``
     Pure DB I/O for the ``job_runs`` table: persist terminal snapshots
@@ -26,8 +18,14 @@ Files in this package
 ``routes_api``
     HTTP for ``/jobs``, ``/events/jobs`` (SSE), ``/api/cost-summary``.
 
-Other domains import explicitly:
+Pipeline **workers** (``fn(job, cancel) -> cost``) live in each feature
+domain as ``domains/<name>/pipeline_jobs.py`` — e.g.
+``domains.boards.pipeline_jobs``, ``domains.cards.pipeline_jobs``.
+Those modules import ``jobs.runner`` and call into ``pipeline/*``.
+
+Other domains import explicitly::
 
     from jobs.runner import Job, get_runner, JobProgressSink
-    from jobs import cost_ledger, pipeline_adapters
+    from jobs import cost_ledger
+    from domains.boards import pipeline_jobs
 """

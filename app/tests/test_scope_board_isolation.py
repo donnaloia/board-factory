@@ -185,6 +185,7 @@ def test_build_cell_side_panel_payload_does_not_block_on_running_writer(
     """
     from boardfactory import config as bf_config
 
+    from domains.spaces import services as spaces_services
     from infrastructure import deps as route_deps
 
     # Pick a real space id from the seeded catalog so we exercise the full
@@ -209,7 +210,7 @@ def test_build_cell_side_panel_payload_does_not_block_on_running_writer(
         assert writer_acquired.wait(timeout=2.0)
 
         t0 = time.perf_counter()
-        payload = route_deps.build_cell_side_panel_payload(
+        payload = spaces_services.build_cell_side_panel_payload(
             board_id, "spaces", target_id,
         )
         elapsed = time.perf_counter() - t0

@@ -15,6 +15,9 @@
 
   if (!tray) return;
 
+  const trayHead = tray.querySelector(".job-tray-head");
+  const trayTitle = document.getElementById("job-tray-title");
+
   // jobs keyed by id, ordered insertion -> first-in-tray is first-rendered
   const jobs = new Map();
   const expanded = new Set();
@@ -52,6 +55,12 @@
     const visible = Array.from(jobs.values()).filter(shouldStillShow);
     visible.sort((a, b) => (b.started_at || 0) - (a.started_at || 0));
 
+    const anyActive = visible.some(isActive);
+    if (trayHead) trayHead.classList.toggle("has-active-jobs", anyActive);
+    if (trayTitle) {
+      trayTitle.textContent = anyActive ? "In flight" : "Recent jobs";
+    }
+
     trayCount.textContent = visible.length;
     if (visible.length === 0) {
       tray.classList.add("is-empty");
@@ -70,6 +79,21 @@
         e.stopPropagation();
         const id = btn.getAttribute("data-kill");
         fetch(`/jobs/${id}/kill`, { method: "POST" });
+      });
+    });
+    trayBody.querySelectorAll("[data-dismiss]").forEach(btn => {
+      btn.addEventListener("click", e => {
+        e.stopPropagation();
+        const id = btn.getAttribute("data-dismiss");
+        fetch(`/jobs/${id}/dismiss`, { method: "POST" })
+          .then(r => {
+            if (r.ok) {
+              jobs.delete(id);
+              expanded.delete(id);
+              renderNow();
+            }
+          })
+          .catch(() => {});
       });
     });
     trayBody.querySelectorAll("[data-job-id]").forEach(row => {
@@ -99,7 +123,11 @@
     const log = (j.log_tail || []).join("\n");
 
     const killBtn = isActive(j)
-      ? `<button class="kill" data-kill="${j.id}" title="Cancel">×</button>`
+      ? `<button type="button" class="kill" data-kill="${j.id}" title="Cancel">×</button>`
+      : "";
+
+    const dismissBtn = !isActive(j)
+      ? `<button type="button" class="dismiss" data-dismiss="${j.id}" title="Dismiss">✓</button>`
       : "";
 
     const status = j.error ? `failed · ${escape(j.error)}` : escape(j.status);
@@ -108,6 +136,7 @@
       <div class="job-row ${sc} ${isExpanded ? "is-expanded" : ""}" data-job-id="${j.id}">
         <div class="job-line-1">
           <span class="job-label">${escape(j.label)}</span>
+          ${dismissBtn}
           ${killBtn}
         </div>
         <div class="job-line-2">

@@ -3,7 +3,7 @@
 A catalog declares the entire structure of one board: where the board spaces are,
 what the feature panels look like, and how the centerpiece is positioned. The
 web app persists this shape to Postgres; the pipeline consumes ``Catalog``
-models built from that data (see ``app.pipeline_adapters``).
+models built from that data (see ``domains.boards.pipeline_jobs``).
 """
 
 from __future__ import annotations

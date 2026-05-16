@@ -103,7 +103,7 @@ erDiagram
 | `owned_boards` | Many-to-one mapping from board slug → owning user. | Boards on disk without an `owned_boards` row are not visible. `backfill_owned_boards_if_empty` attaches every disk board to the oldest user when the table is empty. |
 | `board_games` | One row per board. Column-typed header fields and `body_json` (perimeter layout, frame, etc.); per-cell data lives in `cells`. | The catalog is an aggregate; `body_json` is validated with Pydantic. Palette columns are written by the style-lock / workspace flow. |
 | `asset_versions` | Index of every PNG in `workspace/history/`, with `cell_id` linking to `cells`. | Inserts are idempotent on `(board_uuid, rel_path)`; the app sets `cells.live_asset_version_id` to the row that was promoted to `live/`. |
-| `job_runs` | Persisted terminal snapshots of every job. | `JobRunner` keeps active jobs in memory; on completion, `services.job_runs.persist_terminal` writes the row so the tray survives process restarts. Queued or in-flight jobs at restart time are lost — there's no broker. |
+| `job_runs` | Persisted terminal snapshots of every job. | `JobRunner` keeps active jobs in memory; on completion, `jobs.repository.persist_terminal` writes the row so the tray survives process restarts. Queued or in-flight jobs at restart time are lost — there's no broker. |
 | `cost_entries` | One row per provider call that spent money. | `cost_ledger.summary()` aggregates these into the lifetime + session-since-startup costs the UI shows. Pure local-compute steps (style_lock, cleanup, states, compositor, export) do not write rows. |
 
 ## What is **not** in the database
@@ -134,5 +134,5 @@ letting the row count (rather than the byte count) drive every query.
 
 Schema is applied with a **single** Alembic revision, `0001_full_schema`, which
 creates all application tables from the SQLAlchemy ORM. There is no long
-revision chain in the repo. See `app/migrations/README` and `db/snapshots/README.md`
+revision chain in the repo. See `app/migrations/README` and `postgres-snapshots/README.md`
 for empty-DB vs snapshot-restore workflows.

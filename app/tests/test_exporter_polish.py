@@ -6,8 +6,8 @@ import json
 
 from boardfactory.boards import default_catalog_dict
 
-from exporter import run_board_export
-from exporter.state import BoardExportOptions
+from domains.boards.exporter import run_board_export
+from domains.boards.exporter.state import BoardExportOptions
 
 
 def test_polish_adds_handoff_manifest_and_hints():

@@ -18,4 +18,6 @@ A *cell* is one painted region of a board (DB table ``cells``). Three subtypes s
   * ``services.py``   — Read-side use cases: per-cell status, batched
                         ``BoardCellStats`` aggregate.
   * ``routes_api.py`` — JSON under ``/api/cell/...`` (GET / PATCH / promote).
+  * ``assets/`` — ``asset_versions`` index, ``/asset/…`` file routes, pipeline
+                ``history_push`` listener (board cell PNG history + live).
 """

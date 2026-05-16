@@ -10,8 +10,8 @@ from PIL import Image
 
 from boardfactory.boards import default_catalog_dict
 
-from exporter.orchestrate import EXPORT_STAGES, run_board_export
-from exporter.state import BoardExportOptions
+from domains.boards.exporter.orchestrate import EXPORT_STAGES, run_board_export
+from domains.boards.exporter.state import BoardExportOptions
 
 
 _MIN_PNG = (
@@ -26,8 +26,9 @@ def test_asset_wiring_skipped_without_store():
     assert res.ok, res.errors
     assert EXPORT_STAGES[1].__name__ == "stage_interaction_graph"
     assert EXPORT_STAGES[2].__name__ == "stage_asset_wiring"
-    assert EXPORT_STAGES[3].__name__ == "stage_polish"
-    assert EXPORT_STAGES[4].__name__ == "stage_write_project_json"
+    assert EXPORT_STAGES[3].__name__ == "stage_animation_wiring"
+    assert EXPORT_STAGES[4].__name__ == "stage_polish"
+    assert EXPORT_STAGES[5].__name__ == "stage_write_project_json"
     first = next(s for s in res.project["spaces"] if s["id"] == "space__corner_tl__top_row_0")
     assert first["assets"]["still"] == "assets/spaces/corner_tl/live.png"
 

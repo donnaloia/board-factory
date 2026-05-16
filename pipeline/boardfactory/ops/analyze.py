@@ -9,8 +9,8 @@ JSON object with:
   - panels        : {panel_id:  prompt, ...}  (→ feature_panels.panels[].prompt)
   - centerpiece   : prompt string             (→ catalog.centerpiece.prompt)
 
-The caller (pipeline_adapters.analyze_adapter) is responsible for writing
-the results back into the catalog (relational store via the web app).
+The caller (``domains.boards.pipeline_jobs.analyze``) is responsible for
+writing the results back into the catalog (relational store via the web app).
 """
 
 from __future__ import annotations

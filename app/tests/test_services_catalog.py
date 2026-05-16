@@ -103,7 +103,7 @@ def test_space_kind_persists_on_space_design(seeded_board):
     corner = next(d for d in data["board_spaces"]["designs"] if d["id"] == "corner_tl")
     assert corner.get("space_kind", "standard") == "standard"
     corner["space_kind"] = "event"
-    svc_catalog.save_catalog(seeded_board.id, data)
+    svc_catalog.persist_catalog_dict(seeded_board.id, data)
     again = svc_catalog.load_catalog(seeded_board.id)
     corner2 = next(d for d in again["board_spaces"]["designs"] if d["id"] == "corner_tl")
     assert corner2["space_kind"] == "event"

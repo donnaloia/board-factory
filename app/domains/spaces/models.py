@@ -1,4 +1,11 @@
-"""Spaces domain — ORM tables: ``cells``, ``frame_instances``."""
+"""Spaces domain — ORM tables: ``cells``, ``frame_instances``.
+
+The space-animations slice (``cells.live_animation_id`` -> ``space_animations``)
+lives in :mod:`domains.spaces.animations.models`. We import it at the bottom
+of this module so any caller that loads ``CellRecord`` automatically pulls
+``SpaceAnimationRecord`` into ``Base.metadata`` — required so the FK target
+exists when ``Base.metadata.create_all`` runs on a fresh DB.
+"""
 
 from __future__ import annotations
 
@@ -72,6 +79,16 @@ class CellRecord(Base):
         nullable=True,
     )
 
+    #: Which ``space_animations`` row is currently the live looping clip for
+    #: this cell, if any. Mirrors ``live_asset_version_id`` for static art.
+    #: Only ``kind = 'functional'`` cells can hold a live animation in the
+    #: MVP (see ``app/domains/spaces/animations/services.assert_can_animate``).
+    live_animation_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("space_animations.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     #: Perimeter-design row only: optional ``cells.id`` of a ``kind=functional`` cell to
     #: associate for land → UI / animation (see ``docs/project-export-spec.md`` §10).
     triggers_functional_cell_id: Mapped[str | None] = mapped_column(
@@ -84,6 +101,7 @@ class CellRecord(Base):
         sa.UniqueConstraint("board_uuid", "kind", "slug", name="uq_cells_board_kind_slug"),
         Index("ix_cells_board_kind", "board_uuid", "kind"),
         Index("ix_cells_live_asset_version_id", "live_asset_version_id"),
+        Index("ix_cells_live_animation_id", "live_animation_id"),
         Index("ix_cells_triggers_functional_cell_id", "triggers_functional_cell_id"),
         sa.CheckConstraint(
             "kind IN ('perimeter','functional','centerpiece')",
@@ -190,3 +208,13 @@ class FrameInstanceRecord(Base):
             name="ck_frame_instances_geometry",
         ),
     )
+
+
+# Register the space-animations sibling table in ``Base.metadata`` whenever
+# ``CellRecord`` is loaded. ``CellRecord.live_animation_id`` is a FK to
+# ``space_animations.id``; without this import the FK target table would be
+# absent from metadata and ``create_all`` would fail to define the
+# constraint. Placed at the bottom to avoid any chance of a circular import
+# (the animations model only references string FK names, never CellRecord).
+import domains.spaces.animations.models  # noqa: E402, F401
+import domains.spaces.assets.models  # noqa: E402, F401

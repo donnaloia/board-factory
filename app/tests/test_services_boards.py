@@ -167,7 +167,7 @@ def test_mockup_present_reports_default_path(seeded_board):
 def test_clone_board_copies_disk_cells_and_asset_rows(seeded_board, test_user):
     from sqlalchemy import func, select
 
-    from assets.models import AssetVersionRecord
+    from domains.spaces.assets.models import AssetVersionRecord
     from domains.boards import services as svc_boards
     from domains.spaces.models import CellRecord
     from infrastructure.db import session_scope

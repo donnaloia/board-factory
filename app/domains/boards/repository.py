@@ -149,3 +149,82 @@ def link_board_to_user(
 def board_exists(board_id: str) -> bool:
     with session_scope() as session:
         return session.get(BoardGameRecord, board_id) is not None
+
+
+# ────────────────────────── narrow board_games setters ──────────────────────────
+
+
+def set_frame_flags(
+    board_id: str,
+    *,
+    enabled: bool | None = None,
+    apply_to_panels: bool | None = None,
+) -> None:
+    """Patch one or both frame flags without touching any other column."""
+    if enabled is None and apply_to_panels is None:
+        return
+    with session_scope() as session:
+        row = session.get(BoardGameRecord, board_id)
+        if row is None:
+            return
+        if enabled is not None:
+            row.frame_enabled = enabled
+        if apply_to_panels is not None:
+            row.frame_apply_to_panels = apply_to_panels
+
+
+def set_project(board_id: str, name: str) -> None:
+    """UPDATE board_games SET project=? WHERE id=?"""
+    with session_scope() as session:
+        row = session.get(BoardGameRecord, board_id)
+        if row is None:
+            return
+        row.project = name
+
+
+def set_style_prompt(board_id: str, prompt: str) -> None:
+    """UPDATE board_games SET style_prompt=? WHERE id=?"""
+    with session_scope() as session:
+        row = session.get(BoardGameRecord, board_id)
+        if row is None:
+            return
+        row.style_prompt = prompt
+
+
+def set_generation_columns(
+    board_id: str,
+    *,
+    palette_size: int,
+    provider: str,
+    openai_model: str,
+    openai_quality: str,
+    pixellab_model: str,
+    configured: bool,
+) -> None:
+    """UPDATE all 6 generation columns in one write."""
+    with session_scope() as session:
+        row = session.get(BoardGameRecord, board_id)
+        if row is None:
+            return
+        row.palette_size = palette_size
+        row.provider = provider
+        row.openai_model = openai_model
+        row.openai_quality = openai_quality
+        row.pixellab_model = pixellab_model
+        row.generation_configured = configured
+
+
+def get_generation_columns(board_id: str) -> dict | None:
+    """Return the 6 generation columns as a plain dict, or None if not found."""
+    with session_scope() as session:
+        row = session.get(BoardGameRecord, board_id)
+        if row is None:
+            return None
+        return {
+            "palette_size": int(row.palette_size),
+            "provider": row.provider,
+            "openai_model": row.openai_model,
+            "openai_quality": row.openai_quality,
+            "pixellab_model": row.pixellab_model,
+            "configured": bool(row.generation_configured),
+        }

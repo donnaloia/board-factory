@@ -1,0 +1,205 @@
+{% extends "_base.html" %}
+{% block title %}Tokens · Token Factory{% endblock %}
+
+{% block content %}
+<section class="boards-stage" data-username="{{ user.username }}">
+  <header class="boards-head">
+    <span class="eyebrow">Issue Selection</span>
+    <h1 class="display-xl">Tokens</h1>
+    <p class="body-lead">
+      Animated character tokens for your boards &mdash;
+      pick a locomotion style, generate candidates, lock the design, then animate.
+    </p>
+  </header>
+
+  <ul class="boards-grid" role="list" id="tf-token-grid">
+    {% for t in tokens %}
+    <li class="board-card">
+      <a class="board-card-link" href="/users/{{ user.username }}/token-factory/{{ t.path_slug }}/">
+        <div class="board-card-thumb tf-token-thumb{% if t.preview_clip %} tf-token-thumb--animated{% endif %}"
+             {% if t.canonical_url and not t.preview_clip %}style="background-image: url('{{ t.canonical_url }}')"{% endif %}>
+          {% if t.preview_clip %}
+          <div class="ts-filmstrip tf-token-list-loop"
+               id="tf-list-loop-{{ t.id }}"
+               data-ts-clip-loop
+               data-frame-fps="{{ t.frame_fps }}"
+               data-clip-label="{{ t.preview_clip.clip_name }}">
+            <div class="ts-clip-loop-stage"
+                 style="--ts-ar-w: {{ t.canvas_w }}; --ts-ar-h: {{ t.canvas_h }};">
+              <img class="ts-clip-loop-img" alt="" decoding="async">
+            </div>
+            <div class="ts-clip-loop-sources" hidden>
+              {% for f in t.preview_clip.frames %}
+              <img src="{{ f.url }}" alt="" class="ts-clip-loop-src"
+                   decoding="async" loading="eager">
+              {% endfor %}
+            </div>
+          </div>
+          {% elif not t.canonical_url %}
+          <span class="thumb-empty">no design</span>
+          {% endif %}
+        </div>
+        <div class="board-card-meta">
+          <h2 class="board-card-title">{{ t.display_name }}</h2>
+          <p class="board-card-id">
+            {{ t.locomotion_profile }}
+            {% if t.design_locked %} · locked{% endif %}
+          </p>
+        </div>
+      </a>
+    </li>
+    {% endfor %}
+
+    {# ─── New Token card ─── #}
+    <li class="board-card board-card-new tf-new-card" id="tf-new-card">
+      <div class="board-card-link board-card-new-trigger" id="tf-new-trigger" role="button" tabindex="0"
+           aria-expanded="false" aria-controls="tf-new-form-wrap">
+        <div class="board-card-thumb board-card-new-thumb" id="tf-new-thumb">
+          <span class="thumb-plus" aria-hidden="true">+</span>
+        </div>
+        <div class="board-card-meta" id="tf-new-meta-default">
+          <h2 class="board-card-title">New Token</h2>
+          <p class="board-card-id" id="tf-new-status">click to create</p>
+        </div>
+      </div>
+
+      <div id="tf-new-form-wrap" class="tf-new-form-wrap is-hidden" aria-hidden="true">
+        <form id="tf-new-form" class="tf-new-form" autocomplete="off" novalidate>
+          <label class="tf-field">
+            <span class="tf-label">Display name <span class="tf-required">*</span></span>
+            <input type="text" id="tf-new-name" class="tf-input" placeholder="Sugar Plum Fairy" required>
+          </label>
+          <label class="tf-field">
+            <span class="tf-label">Locomotion</span>
+            <select id="tf-new-locomotion" class="tf-select">
+              <option value="walk">Walk</option>
+              <option value="float">Float</option>
+              <option value="fly">Fly</option>
+            </select>
+          </label>
+          <label class="tf-field">
+            <span class="tf-label">Source board <span class="tf-hint">(optional)</span></span>
+            <select id="tf-new-board" class="tf-select">
+              <option value="">None — neutral palette</option>
+              {% for b in user_boards %}
+              <option value="{{ b.id }}">{{ b.project or b.path_slug }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <div class="tf-new-actions">
+            <button type="submit" class="action-btn" id="tf-new-submit">Create token</button>
+            <button type="button" class="action-btn action-btn-secondary" id="tf-new-cancel">Cancel</button>
+            <span class="tf-status" id="tf-new-form-status"></span>
+          </div>
+        </form>
+      </div>
+    </li>
+  </ul>
+</section>
+
+<script>
+window.addEventListener("pageshow", function (ev) {
+  if (ev.persisted) location.reload();
+});
+
+(function () {
+  const STORAGE_AUTO_EXPLORE = 'bf-ts-explore-token-id';
+  const CREATE_API = '/api/token-factory/tokens';
+
+  const stage = document.querySelector('[data-username]');
+  const username = stage ? stage.dataset.username : '';
+
+  const card     = document.getElementById('tf-new-card');
+  const trigger  = document.getElementById('tf-new-trigger');
+  const formWrap = document.getElementById('tf-new-form-wrap');
+  const form     = document.getElementById('tf-new-form');
+  const cancelBtn = document.getElementById('tf-new-cancel');
+  const statusEl = document.getElementById('tf-new-form-status');
+  const defaultMeta = document.getElementById('tf-new-meta-default');
+  const thumb = document.getElementById('tf-new-thumb');
+
+  function openForm() {
+    formWrap.classList.remove('is-hidden');
+    formWrap.removeAttribute('aria-hidden');
+    trigger.setAttribute('aria-expanded', 'true');
+    card.classList.add('is-form-open');
+    if (defaultMeta) defaultMeta.classList.add('is-hidden');
+    if (thumb) thumb.classList.add('is-hidden');
+    document.getElementById('tf-new-name').focus();
+  }
+
+  function closeForm() {
+    formWrap.classList.add('is-hidden');
+    formWrap.setAttribute('aria-hidden', 'true');
+    trigger.setAttribute('aria-expanded', 'false');
+    card.classList.remove('is-form-open');
+    if (defaultMeta) defaultMeta.classList.remove('is-hidden');
+    if (thumb) thumb.classList.remove('is-hidden');
+    statusEl.textContent = '';
+  }
+
+  trigger.addEventListener('click', () => {
+    if (!card.classList.contains('is-form-open')) openForm();
+  });
+  trigger.addEventListener('keydown', (e) => {
+    if ((e.key === 'Enter' || e.key === ' ') && !card.classList.contains('is-form-open')) {
+      e.preventDefault();
+      openForm();
+    }
+  });
+
+  cancelBtn.addEventListener('click', closeForm);
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = document.getElementById('tf-new-name').value.trim();
+    const locomotion = document.getElementById('tf-new-locomotion').value;
+    const boardId = document.getElementById('tf-new-board').value || null;
+    if (!name) {
+      statusEl.textContent = 'Display name required.';
+      statusEl.classList.add('is-error');
+      return;
+    }
+    statusEl.textContent = 'Creating…';
+    statusEl.classList.remove('is-error');
+    const submitBtn = document.getElementById('tf-new-submit');
+    submitBtn.disabled = true;
+
+    try {
+      const r = await fetch(CREATE_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          display_name: name,
+          locomotion_profile: locomotion,
+          linked_board_id: boardId,
+        }),
+      });
+      if (!r.ok) {
+        let msg = 'Could not create token.';
+        try { const d = await r.json(); msg = d.detail || msg; } catch (_) {}
+        statusEl.textContent = msg;
+        statusEl.classList.add('is-error');
+        submitBtn.disabled = false;
+        return;
+      }
+      const data = await r.json();
+      const token = data.token;
+      if (!token || !token.id || !token.path_slug) {
+        statusEl.textContent = 'Created but missing token data.';
+        statusEl.classList.add('is-error');
+        submitBtn.disabled = false;
+        return;
+      }
+      sessionStorage.setItem(STORAGE_AUTO_EXPLORE, token.id);
+      window.location.href = `/users/${username}/token-factory/${token.path_slug}/`;
+    } catch (err) {
+      statusEl.textContent = String(err);
+      statusEl.classList.add('is-error');
+      submitBtn.disabled = false;
+    }
+  });
+})();
+</script>
+<script src="/static/token-clip-loop.js?v={{ asset_v('token-clip-loop.js') }}" defer></script>
+{% endblock %}

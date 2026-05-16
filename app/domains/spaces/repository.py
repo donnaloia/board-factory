@@ -7,16 +7,23 @@ reassembly path.
 
 If you find yourself querying ``cells`` directly from a route or another
 domain, route the call through ``cells.services`` instead.
+
+Disk-aware operations (``prune_cell_files``) live here because keeping
+DB rows and on-disk files in lock-step is part of the cells repository's
+contract — the audit invariant is that every byte under ``data/`` must
+be reachable from a row, and vice versa.
 """
 
 from __future__ import annotations
 
 from typing import Iterable
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
+from infrastructure import board_store as bs
 from infrastructure.db import session_scope
-from assets.models import AssetVersionRecord
+from domains.spaces.assets.models import AssetVersionRecord
+from domains.spaces.animations.models import SpaceAnimationRecord
 from domains.spaces.models import CellRecord
 
 
@@ -97,6 +104,30 @@ def update_prompt(board_id: str, category: str, slug: str, prompt: str) -> bool:
             return False
         row.prompt = prompt
         return True
+
+
+def bulk_update_prompts(
+    board_id: str,
+    updates: Iterable[tuple[str, str, str]],
+) -> None:
+    """Patch multiple cells' prompts in a single session.
+
+    ``updates`` is an iterable of ``(kind, slug, prompt)`` triples where
+    ``kind`` is the raw ``cells.kind`` value (``"perimeter"``,
+    ``"functional"``, or ``"centerpiece"``). Silently skips unknowns.
+    Opened in one ``session_scope`` so the caller pays one round-trip
+    regardless of how many cells are updated.
+    """
+    rows_by_key: dict[tuple[str, str], CellRecord]
+    with session_scope() as session:
+        all_rows = session.scalars(
+            select(CellRecord).where(CellRecord.board_uuid == board_id)
+        ).all()
+        rows_by_key = {(r.kind, r.slug): r for r in all_rows}
+        for kind, slug, prompt in updates:
+            row = rows_by_key.get((kind, slug))
+            if row is not None:
+                row.prompt = prompt
 
 
 def update_space_kind(board_id: str, slug: str, space_kind: str) -> bool:
@@ -218,7 +249,7 @@ def backfill_live_asset_version_ids() -> dict[str, int]:
 
     Idempotent. Use after restoring history rows or when ``live_promote`` did not run.
     """
-    import assets.models  # noqa: F401
+    import domains.spaces.assets.models  # noqa: F401
     import domains.boards.models  # noqa: F401
 
     with session_scope() as session:
@@ -261,3 +292,97 @@ def backfill_live_asset_version_ids() -> dict[str, int]:
         "filled_from_asset_versions": filled,
         "still_null": still_null,
     }
+
+
+# ────────────────────────── disk + DB cleanup ──────────────────────────
+
+
+def prune_cell_files(board_id: str, category: str, slug: str) -> dict[str, int]:
+    """Remove on-disk and DB state for one cell, top-down.
+
+    Use cases:
+
+      * future cell-delete / cell-rename routes: callers invoke this
+        before the conflicting cell is recreated under a new slug.
+      * one-off cleanup of orphaned slugs surfaced by the storage audit
+        (cells whose row was deleted long ago but whose history files
+        remain).
+
+    Steps (idempotent: each step skips silently if there's nothing to do):
+
+      1. ``space_animations`` rows for this cell — delete via
+         ``delete_committed_animation`` so each row's on-disk clip is
+         unlinked alongside the DB row.
+      2. ``workspace/animations/<cell_id>/`` — rmtree the per-cell
+         animations dir (proposals, history, any stragglers).
+      3. ``asset_versions`` rows for (board, category, slug) — bulk
+         DELETE (the FK from ``cells.live_asset_version_id`` is
+         ``ON DELETE SET NULL``).
+      4. ``workspace/live/<cat>/<slug>.png`` — drop the live PNG.
+      5. ``workspace/history/<cat>/<slug>/`` — rmtree the history dir.
+
+    Returns a dict reporting how much was removed for the audit log.
+    The cells row itself is **not** deleted — that's the caller's
+    responsibility (rename keeps the row, delete tombstones it).
+    """
+    kind = category_to_kind(category)
+    if kind is None:
+        raise ValueError(f"unknown category: {category!r}")
+
+    store = bs.get_store()
+    stats = {
+        "animations_rows": 0,
+        "animation_files": 0,
+        "asset_version_rows": 0,
+        "live_files": 0,
+        "history_files": 0,
+    }
+
+    cell_id = find_id(board_id, category, slug)
+
+    if cell_id is not None:
+        from domains.spaces.animations import repository as anim_repo  # noqa: PLC0415
+
+        with session_scope() as session:
+            anim_ids = list(
+                session.scalars(
+                    select(SpaceAnimationRecord.id).where(
+                        SpaceAnimationRecord.cell_id == cell_id
+                    )
+                )
+            )
+        for aid in anim_ids:
+            anim_repo.delete_committed_animation(aid)
+            stats["animations_rows"] += 1
+
+        anim_dir = f"workspace/animations/{cell_id}"
+        anim_existing = store.list(board_id, anim_dir)
+        if anim_existing:
+            stats["animation_files"] += len(anim_existing)
+            store.delete(board_id, anim_dir)
+
+    with session_scope() as session:
+        result = session.execute(
+            delete(AssetVersionRecord).where(
+                AssetVersionRecord.board_uuid == board_id,
+                AssetVersionRecord.category == category,
+                AssetVersionRecord.asset_id == slug,
+            )
+        )
+        stats["asset_version_rows"] = int(result.rowcount or 0)
+
+    if category == "centerpiece":
+        live_rel = "workspace/live/centerpiece/centerpiece.png"
+    else:
+        live_rel = f"workspace/live/{category}/{slug}.png"
+    if store.exists(board_id, live_rel):
+        store.delete(board_id, live_rel)
+        stats["live_files"] += 1
+
+    history_rel = f"workspace/history/{category}/{slug}"
+    history_files = store.list(board_id, history_rel)
+    if history_files:
+        stats["history_files"] += len(history_files)
+        store.delete(board_id, history_rel)
+
+    return stats

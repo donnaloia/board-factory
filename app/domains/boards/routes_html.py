@@ -1,4 +1,6 @@
-"""Board HTML pages — Jinja templates under ``/users/.../board-games/...``."""
+"""Board HTML pages — Jinja templates under ``/users/.../board-games/...``
+and the board picker at ``/``.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +9,8 @@ import os
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from jobs import cost_ledger, pipeline_adapters
+from jobs import cost_ledger
+from domains.boards import pipeline_jobs
 from frontend.views import spec_data
 from frontend.views.board_svg import render_board_svg, render_spec_svg
 from boardfactory import config as bf_config
@@ -17,7 +20,7 @@ from domains.boards.routes_common import NestedBoardId, board_prefix
 from infrastructure import deps
 from domains.boards import services as svc_boards
 from domains.spaces import services as svc_spaces
-from assets import services as asset_urls
+from domains.spaces.assets import services as asset_urls
 from infrastructure import board_store as bs
 from infrastructure.files import workspace as fs_ws
 
@@ -52,7 +55,7 @@ def board_view(request: Request, board_id: NestedBoardId):
     )
     generated_positions = total_positions - missing_positions
 
-    all_generate_estimate = pipeline_adapters.estimate_generate_all(
+    all_generate_estimate = pipeline_jobs.estimate_generate_all(
         n_missing_designs, n_missing_panels
     )
     n_missing_all = n_missing_designs + n_missing_panels
@@ -81,7 +84,7 @@ def board_view(request: Request, board_id: NestedBoardId):
         "board_size": catalog["board_size"],
         "svg_markup": svg_markup,
         "has_openai_key": has_openai_key,
-        "analyze_cost": pipeline_adapters.ANALYZE_COST_USD,
+        "analyze_cost": pipeline_jobs.ANALYZE_COST_USD,
         "stats": {
             "designs_total": n_designs,
             "designs_done": designs_done,
@@ -123,7 +126,9 @@ def setup_view(request: Request, board_id: NestedBoardId):
 def spec_view(request: Request, board_id: NestedBoardId):
     """Live tech spec from the board's catalog + the shared prose markdown."""
     catalog = deps.load_board_catalog(board_id)
-    prose = deps.load_spec_prose_sections()
+    from tech_spec.loader import load_board_layout_prose_sections
+
+    prose = load_board_layout_prose_sections()
     user = getattr(request.state, "user", None)
     ctx = deps.editorial_template_context(board_id, request)
     ctx.update({
@@ -202,11 +207,11 @@ def frame_view(request: Request, board_id: NestedBoardId):
     default_ring = max(4, min(typical_size) // 16)
     max_ring = max(default_ring, min(typical_size) // 3)
 
-    per_panel_usd = pipeline_adapters.estimate_generate_one("panels")
+    per_panel_usd = pipeline_jobs.estimate_generate_one("panels")
     reapply_batch_usd = per_panel_usd * n_panels
-    reapply_batch_sec = pipeline_adapters.estimate_frame_reapply_wall_seconds(n_panels)
+    reapply_batch_sec = pipeline_jobs.estimate_frame_reapply_wall_seconds(n_panels)
     reapply_single_usd = per_panel_usd
-    reapply_single_sec = pipeline_adapters.estimate_frame_reapply_wall_seconds(1)
+    reapply_single_sec = pipeline_jobs.estimate_frame_reapply_wall_seconds(1)
 
     ctx = deps.editorial_template_context(board_id, request)
     ctx.update({
@@ -288,3 +293,35 @@ def device_preview_view(request: Request, board_id: NestedBoardId):
         "board_h": bh,
     })
     return request.app.state.templates.TemplateResponse(request, "device_preview.html", ctx)
+
+
+# ────────────────────────── board picker (root /) ──────────────────────────
+
+
+def _boards_list_response(request: Request, ctx: dict) -> HTMLResponse:
+    """HTML for the picker; mark non-cacheable so lists stay fresh after renames, etc."""
+    resp = request.app.state.templates.TemplateResponse(
+        request, "boards_index.html", ctx
+    )
+    resp.headers["Cache-Control"] = "private, no-store, must-revalidate"
+    return resp
+
+
+@router.get("/", response_class=HTMLResponse)
+def root(request: Request):
+    from auth.middleware import require_user
+
+    user = require_user(request)
+    boards = svc_boards.list_boards(user.id)
+    if not boards:
+        ctx = deps.editorial_template_context(None, request)
+        ctx.update({"boards": [], "has_any_board": False})
+        return _boards_list_response(request, ctx)
+
+    if len(boards) == 1:
+        base = deps.canonical_board_base_path(boards[0].id)
+        return RedirectResponse(f"{base}/", status_code=303)
+
+    ctx = deps.editorial_template_context(None, request)
+    ctx.update({"boards": boards, "has_any_board": True})
+    return _boards_list_response(request, ctx)

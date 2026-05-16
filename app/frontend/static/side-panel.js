@@ -77,6 +77,136 @@
   let current = null;            // { category, asset_id, position_ref? }
   let watchedJobId = null;       // job id we're waiting on for a refresh
 
+  // Cached payload from the most recent /api/cell fetch, used by the
+  // animation section's incremental re-renders so phase flips don't
+  // trigger another HTTP round-trip.
+  let _lastPanelData = null;
+
+  // Per-cell animation UI state, keyed by `${category}:${asset_id}`. Each entry:
+  //   {
+  //     phase: "idle" | "running" | "review" | "error",
+  //     jobId: string | null,
+  //     proposals: { candidates: [...], provider, model_id } | null,
+  //     selectedIndex: number,        // which candidate is selected in the gallery
+  //     errorMessage: string | null,
+  //   }
+  // Volatile (in-memory only): refreshing the page while a job is in flight
+  // re-resolves through /jobs/{id} polling, but the candidate gallery is
+  // lost — acceptable trade-off for the MVP.
+  const animStateByCell = {};
+
+  function animState(category, assetId) {
+    const k = cellKey(category, assetId);
+    if (!animStateByCell[k]) {
+      animStateByCell[k] = {
+        phase: "idle",
+        jobId: null,
+        proposals: null,
+        selectedIndex: 0,
+        errorMessage: null,
+      };
+    }
+    return animStateByCell[k];
+  }
+
+  let _animPromptModal = null;
+
+  function animPromptStorageKey(category, assetId) {
+    return `bf-anim-prompt:${BOARD_ID}:${cellKey(category, assetId)}`;
+  }
+
+  function ensureAnimPromptModal() {
+    if (_animPromptModal) return _animPromptModal;
+    const root = document.createElement("div");
+    root.className = "bf-anim-prompt-modal is-hidden";
+    root.id = "bf-anim-prompt-modal";
+    root.setAttribute("aria-hidden", "true");
+    root.innerHTML = `
+      <div class="bf-anim-prompt-backdrop" data-anim-prompt-backdrop></div>
+      <div class="bf-anim-prompt-dialog" role="dialog" aria-modal="true" aria-labelledby="bf-anim-prompt-title">
+        <h3 class="bf-anim-prompt-title" id="bf-anim-prompt-title">Animation direction</h3>
+        <p class="bf-anim-prompt-lead">Describe the motion you want (subtle works best). We generate three looping previews to compare.</p>
+        <p class="bf-anim-prompt-where">After the job finishes, stay in this sidebar: results appear in the <strong>Animation</strong> section (just under <strong>Action</strong>). Hover a preview, then tap <strong>Use</strong> to save that loop to the cell. <em>Sora renders are async and can take several minutes per job.</em></p>
+        <textarea class="bf-anim-prompt-textarea" data-anim-prompt-textarea maxlength="2000" rows="5" placeholder="e.g. Soft pulse on the crystal, ember flicker in the torch, gentle shimmer on metal…"></textarea>
+        <p class="bf-anim-prompt-err" data-anim-prompt-err></p>
+        <div class="bf-anim-prompt-actions">
+          <button type="button" class="panel-action is-quiet" data-anim-prompt-cancel>Cancel</button>
+          <button type="button" class="panel-action" data-anim-prompt-confirm><span class="arrow">↻</span><span>Generate 3 loops</span></button>
+        </div>
+      </div>
+    `;
+    wrap.appendChild(root);
+    _animPromptModal = root;
+    return root;
+  }
+
+  /**
+   * @param {string} prefill
+   * @param {(prompt: string) => void | Promise<void>} onConfirm
+   * @param {() => void} onCancel
+   */
+  function openAnimPromptModal(prefill, onConfirm, onCancel) {
+    const root = ensureAnimPromptModal();
+    const ta = root.querySelector("[data-anim-prompt-textarea]");
+    const errEl = root.querySelector("[data-anim-prompt-err]");
+    const btnCancel = root.querySelector("[data-anim-prompt-cancel]");
+    const btnOk = root.querySelector("[data-anim-prompt-confirm]");
+    const backdrop = root.querySelector("[data-anim-prompt-backdrop]");
+    if (!ta || !errEl || !btnCancel || !btnOk || !backdrop) return;
+
+    ta.value = prefill || "";
+    ta.classList.remove("is-invalid");
+    errEl.textContent = "";
+
+    root.classList.remove("is-hidden");
+    root.setAttribute("aria-hidden", "false");
+    ta.focus();
+
+    function cleanup() {
+      root.classList.add("is-hidden");
+      root.setAttribute("aria-hidden", "true");
+      btnCancel.removeEventListener("click", onCancelClick);
+      btnOk.removeEventListener("click", onOkClick);
+      backdrop.removeEventListener("click", onBackdropClick);
+      document.removeEventListener("keydown", onKey);
+    }
+
+    function onCancelClick() {
+      cleanup();
+      onCancel();
+    }
+
+    function onBackdropClick(e) {
+      if (e.target === backdrop) onCancelClick();
+    }
+
+    function onOkClick() {
+      const text = ta.value.trim();
+      if (!text) {
+        ta.classList.add("is-invalid");
+        errEl.textContent = "Describe the animation before generating.";
+        ta.focus();
+        return;
+      }
+      ta.classList.remove("is-invalid");
+      errEl.textContent = "";
+      cleanup();
+      onConfirm(text);
+    }
+
+    function onKey(e) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onCancelClick();
+      }
+    }
+
+    btnCancel.addEventListener("click", onCancelClick);
+    btnOk.addEventListener("click", onOkClick);
+    backdrop.addEventListener("click", onBackdropClick);
+    document.addEventListener("keydown", onKey);
+  }
+
   // Supersede in-flight /api/cell fetches when switching cells (bulk board
   // refresh competes for connections and can complete out of order).
   let _panelFetchSeq = 0;
@@ -213,6 +343,7 @@
       }
       selectionByCell[ck] = sel;
       const displayPrompt = promptForHistorySelection(data, sel);
+      _lastPanelData = data;
       panel.innerHTML = renderPanel(data, displayPrompt, sel);
       resetCellPanelScroll();
       wireActions(data);
@@ -238,6 +369,22 @@
     // browser treats this as a new resource regardless of prior caching.
     const base = liveUrl.split("?")[0];
     const bustUrl = `${base}?_=${Date.now()}`;
+    const imgs = svg.querySelectorAll(
+      `[data-category="${CSS.escape(category)}"][data-asset-id="${CSS.escape(assetId)}"] image`
+    );
+    imgs.forEach(img => img.setAttribute("href", bustUrl));
+    return imgs.length > 0;
+  }
+
+  // Swap the SVG <image> href(s) for one cell to a GIF (animation) URL —
+  // identical mechanics to ``updateCellImageOnBoard`` but the URL is
+  // cache-busted on EVERY call so the GIF restarts at frame 0 each time
+  // the user re-enters the hover region.
+  function previewAnimationOnBoard(category, assetId, animUrl) {
+    if (!animUrl) return false;
+    const svg = plate.querySelector("svg");
+    if (!svg) return false;
+    const bustUrl = `${animUrl.split("?")[0]}?_=${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const imgs = svg.querySelectorAll(
       `[data-category="${CSS.escape(category)}"][data-asset-id="${CSS.escape(assetId)}"] image`
     );
@@ -295,11 +442,33 @@
         && (selEntry ? selEntry.is_live : data.has_live),
     );
 
+    // If the selected history row is not flagged is_live but the filename
+    // matches `live_history_filename` from the server, we are still
+    // looking at the board's current static art.
+    const viewingLiveStatic = !selEntry
+      || Boolean(selEntry.is_live)
+      || Boolean(
+        data.live_history_filename
+          && selectedFilename
+          && selectedFilename === data.live_history_filename,
+      );
+    const animLiveUrl = viewingLiveStatic && data.animation?.live?.url
+      ? data.animation.live.url
+      : null;
+    const animClass = animLiveUrl ? " has-anim-hover" : "";
+
     const liveBlock = cellImgSrc
-      ? `<div class="cell-live ${showFrameOverlay ? "with-frame" : ""}">
-           <img src="${cellImgSrc}" alt="">
+      ? `<div class="cell-live${showFrameOverlay ? " with-frame" : ""}${animClass}"
+              data-cell-live
+              data-static-url="${escapeAttr(cellImgSrc.split("?")[0])}"
+              ${animLiveUrl ? `data-anim-url="${escapeAttr(animLiveUrl.split("?")[0])}"` : ""}
+              ${animLiveUrl ? `aria-label="Hover to preview live animation"` : ""}>
+           <img src="${cellImgSrc}" alt="" data-cell-live-img>
            ${showFrameOverlay
               ? `<img class="frame-overlay" src="${data.frame_url}" alt="" aria-hidden="true">`
+              : ""}
+           ${animLiveUrl
+              ? `<span class="cell-live-anim-badge" aria-hidden="true">▶ hover to play</span>`
               : ""}
          </div>`
       : `<div class="cell-live empty">no asset yet</div>`;
@@ -397,6 +566,7 @@
           <span>Cleanup image</span>
           <span class="est">free · ~1s</span>
         </button>
+        ${renderAnimateAction(data)}
         <button class="panel-action is-placeholder" type="button" data-download
                 aria-disabled="true" title="Coming soon">
           <span class="arrow">→</span>
@@ -404,6 +574,8 @@
           <span class="est">soon</span>
         </button>
       </div>
+
+      ${renderAnimationSection(data)}
 
       <div class="cell-panel-section">
         <h4>History · ${data.history.length}</h4>
@@ -471,6 +643,171 @@
     `;
   }
 
+  // ─── Animation: action row + section renderer ────────────────────────
+  // Cells that aren't animatable (kind != functional or no live static)
+  // simply get no Animate button — keeps the action stack clean instead
+  // of disabling a row the user can never enable from this panel.
+
+  function renderAnimateAction(data) {
+    const a = data.animation;
+    if (!a || !a.supported) return "";
+
+    const state = current ? animState(current.category, current.asset_id) : null;
+    const inFlight = state && state.phase === "running";
+
+    const blockers = [];
+    if (!a.has_live_static) {
+      blockers.push("needs a generated image first");
+    } else if (!a.provider_ready) {
+      blockers.push("connect OpenAI key in Account");
+    }
+    const disabled = inFlight || blockers.length > 0;
+    const est = a.estimate_usd > 0
+      ? `~$${a.estimate_usd.toFixed(3)} · ${a.candidates} loops`
+      : `free · ${a.candidates} loops`;
+    const label = a.live ? "Re-animate" : "Animate";
+    const subtitle = inFlight
+      ? "generating…"
+      : (blockers[0] || est);
+
+    return `
+      <button class="panel-action" type="button" data-animate
+              ${disabled ? "disabled" : ""}
+              ${blockers[0] ? `title="${escapeAttr(blockers[0])}"` : ""}>
+        <span class="arrow">↻</span>
+        <span>${label}</span>
+        <span class="est">${escapeHtml(subtitle)}</span>
+      </button>
+    `;
+  }
+
+  function renderAnimationSection(data) {
+    const a = data.animation;
+    if (!a || !a.supported) return "";
+
+    const state = current ? animState(current.category, current.asset_id) : null;
+
+    // Decide the section body based on phase. The header is always shown
+    // for supported cells so the user can find the affordance even
+    // before running anything.
+    let body;
+    if (state && state.phase === "running") {
+      body = renderAnimRunning(a);
+    } else if (state && state.phase === "review" && state.proposals) {
+      body = renderAnimReview(a, state);
+    } else if (state && state.phase === "error") {
+      body = renderAnimError(state);
+    } else if (a.live) {
+      body = renderAnimLive(a);
+    } else {
+      body = renderAnimEmpty(a);
+    }
+
+    return `
+      <div class="cell-panel-section cell-anim-section" data-anim-section>
+        <h4>
+          <span>Animation</span>
+          <span class="frame-summary-inline">${escapeHtml(a.provider)} · ${a.fps}fps</span>
+        </h4>
+        <p class="cell-anim-section-lead muted">Previews and the saved loop for this cell. Under <strong>Action</strong> → <strong>Animate</strong> / <strong>Re-animate</strong>.</p>
+        ${body}
+      </div>
+    `;
+  }
+
+  function renderAnimLive(a) {
+    const url = `${a.live.url.split("?")[0]}?_=${Date.now()}`;
+    const dur = (a.live.duration_ms / 1000).toFixed(1);
+    return `
+      <div class="cell-anim-live">
+        <span class="live-tag">live loop</span>
+        <img src="${url}" alt="">
+      </div>
+      <dl class="cell-anim-meta">
+        <dt>Duration</dt><dd>${dur}s · ${a.live.frame_count} frames</dd>
+        <dt>Provider</dt><dd>${escapeHtml(a.live.provider)} / ${escapeHtml(a.live.model_id)}</dd>
+        <dt>Loop</dt><dd>${escapeHtml(a.live.loop_strategy)}</dd>
+      </dl>
+      <p class="cell-anim-hint">The preview at the top of this panel is still the static art; the saved loop plays here. Use <strong>Re-animate</strong> in <strong>Action</strong> to generate ${a.candidates} new candidates.</p>
+    `;
+  }
+
+  function renderAnimRunning(a) {
+    const dur = (a.duration_ms / 1000).toFixed(1);
+    const providerLower = (a.provider || "").toLowerCase();
+    const isSora = providerLower.startsWith("sora");
+    const wait = isSora
+      ? "may take several minutes (Sora renders are async)"
+      : "may take 30\u201360s";
+    return `
+      <div class="cell-anim-status">
+        <span class="status-dot"></span>
+        <span class="status-text">generating ${a.candidates} loops · ${dur}s @ ${a.fps}fps</span>
+        <span class="status-est">${a.estimate_usd > 0 ? `~$${a.estimate_usd.toFixed(3)}` : "free"}</span>
+      </div>
+      <p class="cell-anim-hint">${escapeHtml(a.provider)} ${wait}. When it finishes, this panel scrolls to <strong>Animation</strong> below with ${a.candidates} previews \u2014 pick one and tap <strong>Use</strong>.</p>
+    `;
+  }
+
+  function renderAnimReview(a, state) {
+    const items = state.proposals.candidates.map((c, i) => {
+      const isActive = i === state.selectedIndex;
+      const dur = (c.duration_ms / 1000).toFixed(1);
+      const note = (c.notes || `candidate ${i + 1}`).split(" (")[0];
+      return `
+        <li class="${isActive ? "is-active" : ""}" data-anim-cand="${i}">
+          <div class="cand-thumb"><img src="${c.url}" alt=""></div>
+          <div class="cand-meta">
+            <span class="cand-title">${escapeHtml(note)}</span>
+            <span class="cand-sub">${dur}s · ${c.frame_count} frames · ${escapeHtml(c.loop_strategy)}</span>
+          </div>
+          <button type="button" class="cand-pick" data-anim-pick="${i}">Use</button>
+        </li>
+      `;
+    }).join("");
+
+    return `
+      <p class="cell-anim-ready">${state.proposals.candidates.length} loops ready — compare below, then tap <strong>Use</strong> on the one you want. (Nothing is published until you choose.)</p>
+      <ul class="cell-anim-candidates">
+        ${items}
+      </ul>
+    `;
+  }
+
+  function renderAnimError(state) {
+    return `
+      <div class="cell-anim-error">
+        <p class="err-title">animation failed</p>
+        <p class="err-msg">${escapeHtml(state.errorMessage || "unknown error")}</p>
+      </div>
+      <p class="cell-anim-hint">Tap “Animate” to try again.</p>
+    `;
+  }
+
+  function renderAnimEmpty(a) {
+    if (!a.has_live_static) {
+      return `
+        <p class="cell-anim-empty">no static art yet — generate first, then animate.</p>
+      `;
+    }
+    if (!a.provider_ready) {
+      return `
+        <p class="cell-anim-hint">
+          Add your OpenAI / ChatGPT key in
+          <a href="#" data-open-account>Account → Connections</a>
+          to enable animation.
+        </p>
+      `;
+    }
+    const dur = (a.duration_ms / 1000).toFixed(1);
+    const cost = a.estimate_usd > 0
+      ? `~$${a.estimate_usd.toFixed(3)}`
+      : "free";
+    return `
+      <p class="cell-anim-empty">No loop saved yet · ${a.candidates} candidate previews · ${dur}s @ ${a.fps}fps · ${cost}. After you run <strong>Animate</strong> (under Action), results show here.</p>
+    `;
+  }
+
   function renderHistoryRow(h, selectedFilename) {
     const date = new Date(h.ts_ms);
     const ts = date.toLocaleString(undefined, {
@@ -504,8 +841,51 @@
     `;
   }
 
+  // Hover-to-play wiring for the sidebar's static thumbnail.
+  // When the cell has a saved live animation, hovering the preview at
+  // the top of the sidebar swaps both the thumb <img> AND the matching
+  // cell on the board SVG to the GIF, then restores the static on
+  // mouseleave. Restart-on-each-hover is achieved by cache-busting the
+  // GIF URL — browsers always start GIFs at frame 0 on a fresh load.
+  function wireCellLiveHoverPreview(data) {
+    if (!current) return;
+    const wrap = panel.querySelector("[data-cell-live]");
+    if (!wrap || !wrap.classList.contains("has-anim-hover")) return;
+
+    const img = wrap.querySelector("[data-cell-live-img]");
+    if (!img) return;
+
+    const animUrl = wrap.getAttribute("data-anim-url");
+    const staticUrl = wrap.getAttribute("data-static-url");
+    if (!animUrl || !staticUrl) return;
+
+    const cat = current.category;
+    const aid = current.asset_id;
+    let hovered = false;
+
+    const onEnter = () => {
+      hovered = true;
+      const bust = `${animUrl}?_=${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      img.setAttribute("src", bust);
+      wrap.classList.add("is-anim-playing");
+      previewAnimationOnBoard(cat, aid, animUrl);
+    };
+    const onLeave = () => {
+      if (!hovered) return;
+      hovered = false;
+      const bust = `${staticUrl}?_=${Date.now()}`;
+      img.setAttribute("src", bust);
+      wrap.classList.remove("is-anim-playing");
+      updateCellImageOnBoard(cat, aid, staticUrl);
+    };
+
+    wrap.addEventListener("mouseenter", onEnter);
+    wrap.addEventListener("mouseleave", onLeave);
+  }
+
   function wireActions(data) {
     panel.querySelector(".cell-panel-close")?.addEventListener("click", closePanel);
+    wireCellLiveHoverPreview(data);
 
     // ─── Prompt editor: dirty-state toolbar + revert ───
     const editor = panel.querySelector("[data-prompt-editor]");
@@ -790,6 +1170,9 @@
       }
     });
 
+    // ─── Animation section: animate / pick candidate / commit ───
+    wireAnimation(data);
+
     // ─── Frame section: expand/collapse + live preview + adopt/disable ───
     wireFrame(data);
 
@@ -827,6 +1210,235 @@
   // side panel keeps a tiny status section so the user can see whether
   // the frame is locked on this cell, link out to the Atelier, or hit
   // the same "Disable on board" affordance that lived in the old block.
+
+  // ─── Animation wiring (action button + candidate gallery) ────────────
+
+  function wireAnimation(data) {
+    const a = data.animation;
+    if (!a || !a.supported || !current) return;
+
+    panel.querySelector("[data-animate]")?.addEventListener("click", () => {
+      const btn = panel.querySelector("[data-animate]");
+      if (!btn || btn.hasAttribute("disabled")) return;
+
+      const sk = animPromptStorageKey(current.category, current.asset_id);
+      const prefill = sessionStorage.getItem(sk) || "";
+
+      openAnimPromptModal(
+        prefill,
+        async promptText => {
+          sessionStorage.setItem(sk, promptText);
+          btn.setAttribute("disabled", "true");
+          const cellAnim = animState(current.category, current.asset_id);
+          cellAnim.phase = "running";
+          cellAnim.errorMessage = null;
+          cellAnim.proposals = null;
+          cellAnim.jobId = null;
+          reRenderAnimationSection();
+          try {
+            const r = await fetch(a.animate_endpoint, {
+              method: "POST",
+              headers: {
+                Accept: "application/json",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ animation_prompt: promptText }),
+            });
+            const rawText = await r.text();
+            if (!r.ok) {
+              let msg = rawText.slice(0, 240);
+              try {
+                const j = JSON.parse(rawText);
+                if (typeof j.detail === "string") msg = j.detail;
+              } catch (_) { /* keep slice */ }
+              cellAnim.phase = "error";
+              cellAnim.errorMessage = msg || r.statusText || "Request failed";
+              reRenderAnimationSection();
+              return;
+            }
+            const json = JSON.parse(rawText);
+            cellAnim.jobId = json.job_id;
+            watchAnimationJob(current.category, current.asset_id, json.job_id, a);
+          } catch (err) {
+            cellAnim.phase = "error";
+            cellAnim.errorMessage = String(err);
+            reRenderAnimationSection();
+          }
+        },
+        () => {},
+      );
+    });
+
+    // Click anywhere on a candidate row to select it (same UX as Frame
+    // Atelier). The "Use" button inside the row is what commits.
+    panel.querySelectorAll("[data-anim-cand]").forEach(row => {
+      row.addEventListener("click", (ev) => {
+        if (ev.target.closest("[data-anim-pick]")) return;
+        const i = Number(row.getAttribute("data-anim-cand"));
+        const cellAnim = animState(current.category, current.asset_id);
+        if (cellAnim.selectedIndex === i) return;
+        cellAnim.selectedIndex = i;
+        reRenderAnimationSection();
+      });
+    });
+
+    panel.querySelectorAll("[data-anim-pick]").forEach(btn => {
+      btn.addEventListener("click", async (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const i = Number(btn.getAttribute("data-anim-pick"));
+        const cellAnim = animState(current.category, current.asset_id);
+        if (!cellAnim.jobId) return;
+        btn.setAttribute("disabled", "true");
+        const commitUrl = a.commit_url_template.replace("{job_id}", cellAnim.jobId);
+        try {
+          const r = await fetch(commitUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Accept": "application/json",
+            },
+            body: JSON.stringify({ proposal_index: i }),
+          });
+          if (!r.ok) {
+            const txt = await r.text();
+            cellAnim.phase = "error";
+            cellAnim.errorMessage = (txt || r.statusText).slice(0, 240);
+            reRenderAnimationSection();
+            return;
+          }
+          // Commit succeeded — drop the review state so the panel shows
+          // the freshly-promoted live loop after refreshPanel.
+          cellAnim.phase = "idle";
+          cellAnim.proposals = null;
+          cellAnim.jobId = null;
+          await refreshPanel();
+        } catch (err) {
+          cellAnim.phase = "error";
+          cellAnim.errorMessage = String(err);
+          reRenderAnimationSection();
+        }
+      });
+    });
+
+    // Recover review state after a panel refresh that happened while a
+    // job was still in flight — keep watching the original job id.
+    const cellAnim = animState(current.category, current.asset_id);
+    if (cellAnim.phase === "running" && cellAnim.jobId) {
+      watchAnimationJob(current.category, current.asset_id, cellAnim.jobId, a);
+    }
+
+    panel.querySelector("[data-open-account]")?.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      window.dispatchEvent(new CustomEvent("bf:open-account"));
+    });
+  }
+
+  // Re-render only the animation pieces (action button + section body)
+  // from cached panel data so flipping phase (idle → running → review →
+  // error) doesn't trigger another /api/cell round-trip.
+  function reRenderAnimationSection() {
+    if (!current || !_lastPanelData) return;
+
+    const oldSection = panel.querySelector("[data-anim-section]");
+    if (oldSection) {
+      const tmp = document.createElement("div");
+      tmp.innerHTML = renderAnimationSection(_lastPanelData);
+      const newSection = tmp.firstElementChild;
+      if (newSection) oldSection.replaceWith(newSection);
+    }
+
+    // The Animate action lives in the Action group above the section;
+    // its label flips between "Animate" and "Re-animate" + disabled
+    // state so it has to be replaced too.
+    const oldAction = panel.querySelector("[data-animate]");
+    if (oldAction) {
+      const tmp = document.createElement("div");
+      tmp.innerHTML = renderAnimateAction(_lastPanelData);
+      const newAction = tmp.firstElementChild;
+      if (newAction) oldAction.replaceWith(newAction);
+    }
+
+    // Re-bind handlers on the freshly-built nodes. wireAnimation is
+    // idempotent w.r.t. these elements — every querySelector starts
+    // from the panel root so the new nodes get the listeners.
+    wireAnimation(_lastPanelData);
+  }
+
+  /** When candidate loops arrive, bring the Animation section into view (sidebar is long). */
+  function focusAnimationResultsInPanel() {
+    requestAnimationFrame(() => {
+      const sec = panel.querySelector("[data-anim-section]");
+      if (!sec) return;
+      sec.classList.remove("is-anim-pulse");
+      void sec.offsetWidth;
+      sec.classList.add("is-anim-pulse");
+      window.setTimeout(() => {
+        sec.classList.remove("is-anim-pulse");
+      }, 2800);
+      sec.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }
+
+  // Polling watcher specific to animation jobs. Mirrors watchJob() but
+  // doesn't touch the cell SVG (animations don't change the static art).
+  // Multiple cells can have animation jobs in flight at once, so each
+  // watcher is keyed by (category, asset_id, job_id).
+  const _animPollers = new Map();   // jobId -> intervalHandle
+  function watchAnimationJob(category, assetId, jobId, animMeta) {
+    if (_animPollers.has(jobId)) return;
+    const handle = setInterval(async () => {
+      try {
+        const r = await fetch(`/jobs/${jobId}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        if (j.status !== "done" && j.status !== "failed" && j.status !== "killed") {
+          return;
+        }
+        clearInterval(handle);
+        _animPollers.delete(jobId);
+
+        // The job is terminal; re-fetch what we need for the cell that
+        // owns it. The user may have switched cells in the meantime —
+        // stash the result in animStateByCell anyway, and only re-render
+        // if the corresponding cell is still open.
+        const k = cellKey(category, assetId);
+        const cellAnim = animStateByCell[k] || animState(category, assetId);
+        if (j.status !== "done") {
+          cellAnim.phase = "error";
+          cellAnim.errorMessage = (j.error || "job failed").slice(0, 240);
+        } else {
+          // Fetch the proposal manifest for the gallery.
+          const url = animMeta.proposals_url_template.replace("{job_id}", jobId);
+          try {
+            const rr = await fetch(url, { cache: "no-store" });
+            if (!rr.ok) {
+              cellAnim.phase = "error";
+              cellAnim.errorMessage = `proposals: ${rr.status}`;
+            } else {
+              const body = await rr.json();
+              cellAnim.proposals = body;
+              cellAnim.selectedIndex = 0;
+              cellAnim.phase = "review";
+            }
+          } catch (err) {
+            cellAnim.phase = "error";
+            cellAnim.errorMessage = String(err);
+          }
+        }
+
+        if (current
+            && current.category === category
+            && current.asset_id === assetId) {
+          reRenderAnimationSection();
+          if (cellAnim.phase === "review") {
+            focusAnimationResultsInPanel();
+          }
+        }
+      } catch (_) { /* swallow */ }
+    }, 2000);
+    _animPollers.set(jobId, handle);
+  }
 
   function wireFrame(data) {
     const f = data.frame;

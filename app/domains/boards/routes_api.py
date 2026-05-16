@@ -20,7 +20,8 @@ from PIL import Image, ImageChops
 from pydantic import BaseModel, field_validator
 
 from auth.middleware import current_user, require_user
-from jobs import pipeline_adapters
+from domains.boards import pipeline_jobs
+from boardfactory import boards as bf_boards
 from boardfactory import config as bf_config
 from boardfactory import frames as bf_frames
 from boardfactory import frames_inference as bf_frames_inference
@@ -31,10 +32,10 @@ from domains.boards.routes_common import NestedBoardId, board_prefix
 from infrastructure import deps
 from domains.boards import services as svc_boards
 from domains.spaces import services as svc_spaces
-from assets import services as asset_urls
+from domains.spaces.assets import services as asset_urls
 from domains.boards import mockup_prompt as mockup_prompt_svc
-from exporter import run_board_export
-from exporter.state import BoardExportOptions
+from domains.boards.exporter import run_board_export
+from domains.boards.exporter.state import BoardExportOptions
 from infrastructure import board_store as bs
 from infrastructure.files import workspace as fs_ws
 
@@ -528,11 +529,7 @@ async def _api_frame_adopt(
         view = frames_repo.replace_active(board_id, instance=instance)
 
     if enable_after:
-        data = deps.load_board_catalog(board_id)
-        data.setdefault("frame", {})
-        data["frame"]["enabled"] = True
-        data["frame"]["apply_to_panels"] = True
-        svc_boards.save_catalog(board_id, data)
+        svc_boards.set_frame_flags(board_id, enabled=True, apply_to_panels=True)
 
     return JSONResponse({
         "ok": True,
@@ -563,10 +560,7 @@ async def api_frame_adopt_legacy(
 
 
 async def _api_frame_disable(request: Request, board_id: str) -> JSONResponse:
-    data = deps.load_board_catalog(board_id)
-    data.setdefault("frame", {})
-    data["frame"]["enabled"] = False
-    svc_boards.save_catalog(board_id, data)
+    svc_boards.set_frame_flags(board_id, enabled=False)
 
     from domains.spaces import frames_repository as frames_repo
 
@@ -708,7 +702,7 @@ async def api_frame_propose(
         fn=deps.scoped_pipeline_callable(
             board_id,
             partial(
-                pipeline_adapters.frame_propose,
+                pipeline_jobs.frame_propose,
                 source_kind=source_kind,
                 source_id=source_id,
                 candidate_count=candidate_count,
@@ -1012,11 +1006,7 @@ async def api_frame_commit(
         view = frames_repo.replace_active(board_id, instance=instance)
 
     if body.enable_after:
-        data = deps.load_board_catalog(board_id)
-        data.setdefault("frame", {})
-        data["frame"]["enabled"] = True
-        data["frame"]["apply_to_panels"] = True
-        svc_boards.save_catalog(board_id, data)
+        svc_boards.set_frame_flags(board_id, enabled=True, apply_to_panels=True)
 
     regen_job_id: str | None = None
     keys = deps.user_provider_api_keys(request)
@@ -1033,7 +1023,7 @@ async def api_frame_commit(
                 400,
                 f"No live art for panel {pid!r} — generate it before reapply.",
             )
-        regen_cost = pipeline_adapters.estimate_generate_one("panels", pid)
+        regen_cost = pipeline_jobs.estimate_generate_one("panels", pid)
         regen_job_id = deps.enqueue_pipeline_job(
             label=f"Reapply frame to panel {pid}",
             operation="frame.reapply_one",
@@ -1041,7 +1031,7 @@ async def api_frame_commit(
             cost_estimate=regen_cost,
             fn=deps.scoped_pipeline_callable(
                 board_id,
-                partial(pipeline_adapters.frame_reapply_one, panel_id=pid, **keys),
+                partial(pipeline_jobs.frame_reapply_one, panel_id=pid, **keys),
             ),
         )
     elif body.regen_panels:
@@ -1050,7 +1040,7 @@ async def api_frame_commit(
         # estimate matches what generate_one shows in the side panel so
         # the Atelier and the side panel agree.
         n_panels = len(catalog.get("feature_panels", {}).get("panels", []))
-        regen_cost = pipeline_adapters.estimate_generate_one("panels") * n_panels
+        regen_cost = pipeline_jobs.estimate_generate_one("panels") * n_panels
 
         regen_job_id = deps.enqueue_pipeline_job(
             label=f"Reapply frame to {n_panels} panel{'s' if n_panels != 1 else ''}",
@@ -1059,7 +1049,7 @@ async def api_frame_commit(
             cost_estimate=regen_cost,
             fn=deps.scoped_pipeline_callable(
                 board_id,
-                partial(pipeline_adapters.frame_reapply, **keys),
+                partial(pipeline_jobs.frame_reapply, **keys),
             ),
         )
 
@@ -1130,9 +1120,9 @@ async def _action_analyze(request: Request, board_id: str) -> JSONResponse | Red
     job_id = deps.enqueue_pipeline_job(
         label="Analyze mockup with GPT-4o",
         operation="analyze", target=board_id,
-        cost_estimate=pipeline_adapters.ANALYZE_COST_USD,
+        cost_estimate=pipeline_jobs.ANALYZE_COST_USD,
         fn=deps.scoped_pipeline_callable(
-            board_id, partial(pipeline_adapters.analyze, openai_key=openai_key),
+            board_id, partial(pipeline_jobs.analyze, openai_key=openai_key),
         ),
     )
     return deps.job_or_redirect_response(request, job_id, redirect_to=_board_home_redirect(board_id))
@@ -1147,8 +1137,8 @@ async def _action_style(request: Request, board_id: str) -> JSONResponse | Redir
     job_id = deps.enqueue_pipeline_job(
         label="Extract style from mockup",
         operation="style", target=board_id,
-        cost_estimate=pipeline_adapters.estimate_style(),
-        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.style),
+        cost_estimate=pipeline_jobs.estimate_style(),
+        fn=deps.scoped_pipeline_callable(board_id, pipeline_jobs.style),
     )
     return deps.job_or_redirect_response(request, job_id, redirect_to=_board_home_redirect(board_id))
 
@@ -1169,11 +1159,11 @@ async def _action_generate_missing_all(
     job_id = deps.enqueue_pipeline_job(
         label=f"Generate {total} missing asset{'s' if total != 1 else ''}",
         operation="generate.all", target=board_id,
-        cost_estimate=pipeline_adapters.estimate_generate_all(
+        cost_estimate=pipeline_jobs.estimate_generate_all(
             len(missing_spaces), len(missing_panels)
         ),
         fn=deps.scoped_pipeline_callable(
-            board_id, partial(pipeline_adapters.generate_all, **keys),
+            board_id, partial(pipeline_jobs.generate_all, **keys),
         ),
     )
     return deps.job_or_redirect_response(request, job_id, redirect_to=_board_home_redirect(board_id))
@@ -1189,7 +1179,7 @@ async def _action_states(request: Request, board_id: str) -> JSONResponse | Redi
         label="Build active states",
         operation="states", target=board_id,
         cost_estimate=0.0,
-        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.states),
+        fn=deps.scoped_pipeline_callable(board_id, pipeline_jobs.states),
     )
     return deps.job_or_redirect_response(
         request, job_id, redirect_to=_board_preview_redirect(board_id),
@@ -1206,7 +1196,7 @@ async def _action_preview(request: Request, board_id: str) -> JSONResponse | Red
         label="Composite preview",
         operation="preview", target=board_id,
         cost_estimate=0.0,
-        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.preview),
+        fn=deps.scoped_pipeline_callable(board_id, pipeline_jobs.preview),
     )
     return deps.job_or_redirect_response(
         request, job_id, redirect_to=_board_preview_redirect(board_id),
@@ -1223,7 +1213,7 @@ async def _action_export(request: Request, board_id: str) -> JSONResponse | Redi
         label="Export approved assets",
         operation="export", target=board_id,
         cost_estimate=0.0,
-        fn=deps.scoped_pipeline_callable(board_id, pipeline_adapters.export),
+        fn=deps.scoped_pipeline_callable(board_id, pipeline_jobs.export),
     )
     return deps.job_or_redirect_response(
         request, job_id, redirect_to=_board_preview_redirect(board_id),
@@ -1237,7 +1227,7 @@ async def action_export_nested(request: Request, board_id: NestedBoardId):
 
 @router.get("/users/{username}/board-games/{path_slug}/export/project-bundle.zip")
 def download_project_bundle_zip(board_id: NestedBoardId):
-    """Portable ``project.json`` + ``assets/`` via ``app/exporter``.
+    """Portable ``project.json`` + ``assets/`` via ``domains.boards.exporter``.
 
     The bundle tree and intermediate zip exist only inside a process-local
     ``tempfile.TemporaryDirectory``; the handler returns bytes in memory after
@@ -1280,11 +1270,11 @@ async def _action_regen_one(
     job_id = deps.enqueue_pipeline_job(
         label=f"Regenerate {asset_id}",
         operation=f"regen.{category}", target=asset_id,
-        cost_estimate=pipeline_adapters.estimate_generate_one(category, asset_id),
+        cost_estimate=pipeline_jobs.estimate_generate_one(category, asset_id),
         fn=deps.scoped_pipeline_callable(
             board_id,
             partial(
-                pipeline_adapters.generate_one,
+                pipeline_jobs.generate_one,
                 category=category,
                 asset_id=asset_id,
                 prompt_override=p,
@@ -1314,7 +1304,7 @@ async def _action_clean_one(
         cost_estimate=0.0,
         fn=deps.scoped_pipeline_callable(
             board_id,
-            partial(pipeline_adapters.clean_one, category=category, asset_id=asset_id),
+            partial(pipeline_jobs.clean_one, category=category, asset_id=asset_id),
         ),
     )
     return deps.job_or_redirect_response(request, job_id, redirect_to=_board_home_redirect(board_id))
@@ -1389,3 +1379,70 @@ def api_space_reassign(
             "design_id": out["design_id"],
         }
     )
+
+
+# ────────────────────────── board CRUD (create / clone / delete) ──────────────────────────
+
+
+class CloneBoardBody(BaseModel):
+    path_slug: str | None = None
+    project_name: str | None = None
+
+
+@router.post("/api/boards")
+async def api_create_board(
+    request: Request,
+    board_id: str = Form(...),
+    project_name: str | None = Form(default=None),
+):
+    user = require_user(request)
+    bid = bf_boards.slugify(board_id)
+    try:
+        summary = svc_boards.create_board(
+            bid,
+            owner_user_id=user.id,
+            project_name=project_name or board_id,
+        )
+    except svc_boards.InvalidBoardId:
+        raise HTTPException(400, "Invalid board id")
+    except svc_boards.BoardExists:
+        raise HTTPException(409, f"Board {bid!r} already exists")
+    base = deps.canonical_board_base_path(summary.id)
+    return JSONResponse({"id": summary.id, "url": f"{base}/"})
+
+
+@router.post("/api/boards/{board_id}/clone")
+async def api_clone_board(
+    request: Request,
+    board_id: str,
+    body: CloneBoardBody | None = None,
+):
+    user = require_user(request)
+    payload = body or CloneBoardBody()
+    try:
+        summary = svc_boards.clone_board(
+            user.id,
+            board_id,
+            path_slug=payload.path_slug,
+            project_name=payload.project_name,
+        )
+    except svc_boards.InvalidBoardId:
+        raise HTTPException(400, "Invalid board id")
+    except svc_boards.BoardNotFound:
+        raise HTTPException(404, "Unknown board")
+    except svc_boards.BoardExists as e:
+        raise HTTPException(409, str(e))
+    base = deps.canonical_board_base_path(summary.id)
+    return JSONResponse({"id": summary.id, "url": f"{base}/"}, status_code=201)
+
+
+@router.delete("/api/boards/{board_id}")
+def api_delete_board(request: Request, board_id: str):
+    user = require_user(request)
+    try:
+        svc_boards.delete_board(user.id, board_id)
+    except svc_boards.InvalidBoardId:
+        raise HTTPException(400, "Invalid board id")
+    except svc_boards.BoardNotFound:
+        raise HTTPException(404, "Unknown board")
+    return JSONResponse({"deleted": board_id})

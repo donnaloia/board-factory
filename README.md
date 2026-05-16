@@ -245,7 +245,7 @@ The compose stack runs a `postgres` service and sets `BOARDFACTORY_DATABASE_URL`
 1. `git clone` and `cd` into the repo.
 2. Set provider/API keys in `.env` or `docker-compose.yml` if you use real generation.
 3. `make up` — wait for Postgres to become healthy; migrations run when the app starts.
-4. Open `http://localhost:8473`. A **new** empty database has schema only (no users). Create an account via **Register** or restore a **Postgres snapshot** from `db/snapshots/` that already includes a dev user and data (see `db/snapshots/README.md`). `board_ownership.backfill_owned_boards_if_empty()` can attach on-disk boards when the `owned_boards` table is empty. The `postgres_data` volume persists users and data across restarts.
+4. Open `http://localhost:8473`. A **new** empty database has schema only (no users). Create an account via **Register** or restore a **Postgres snapshot** from `postgres-snapshots/` that already includes a dev user and data (see `postgres-snapshots/README.md`). `board_ownership.backfill_owned_boards_if_empty()` can attach on-disk boards when the `owned_boards` table is empty. The `postgres_data` volume persists users and data across restarts.
 5. Add API keys under **Account → Connections** if you did not set compose-level keys.
 
 
@@ -272,26 +272,35 @@ pipeline/                 Python pipeline library (boardfactory), used by the we
 app/                      FastAPI app
   infrastructure/         ``db.py``, ``deps.py``, ``orm.py`` (``Base``); BoardStore; fs helpers
   frontend/               Jinja ``templates/``, ``static/`` (``/static``), ``views/`` (view-models + SVG)
-  home/                   Root ``/`` board picker + ``/api/boards`` CRUD JSON
+  tech_spec/              Loads ``tech-spec/board-layout/prose.md`` for the board Tech spec page
   domains/                Bounded contexts (import ``domains.<name>``)
-    boards/               Board catalog, ownership, HTTP ``routes_*``, palette
-    cells/                Per-board spaces / panels / centerpiece; ``routes_api``
-  auth/, assets/, …       Other vertical slices (same layer naming as ``domains/*``)
-  jobs/                   Job runner, pipeline adapters, cost ledger, ``routes_api`` (tray + SSE)
-data/                     Per-board mutable application data (BoardStore root)
-  boards/
-    <board-id>/
-      mockup/             Source mockup PNG (e.g. board.png)
-      workspace/          Pipeline artifacts (style, live, history, preview, …)
-      export/             Engine-ready export (tiles + board_manifest.json)
+    boards/               Board catalog, ownership, picker ``/``, ``/api/boards``, board-games pages
+    spaces/               Per-board cells (perimeter, panels, centerpiece); ``routes_api``
+      assets/             ``asset_versions`` index + ``/asset/…`` routes (cell PNG history)
+      animations/         Looping clips for a space (subpackage of ``spaces``, not ``boards``)
+    cards/                Card Factory — decks; top-level ``/card-factory/`` routes
+    tokens/               Token Factory — character tokens; top-level ``/token-factory/`` routes
+  auth/                   Users, sessions, login/register
+  jobs/                   Job runner, cost ledger, tray ``routes_api`` (workers in ``domains/*/pipeline_jobs.py``)
+data/                     Runtime artifacts (BoardStore and related roots)
+  boards/<user_id>/<board_id>/
+    mockup/               Source mockup PNG (e.g. board.png)
+    workspace/            Pipeline artifacts (style, live, history, animations, …)
+    export/               Engine-ready export (tiles + board_manifest.json)
+  decks/                  Card Factory deck workspaces
+  tokens/                 Token Factory per-token workspaces
+tech-spec/                Feature specs (draft + live prose for in-app Tech spec page)
+  board-layout/prose.md   Explanatory sections on each board's Tech spec page
+  card-factory/           Card Factory spec + layout JSON/SVG
+  space-animations/       Space animation spec (draft)
+  tokens/                 Token pipeline proposal
 docs/
   architecture.md         Design notes (start here for backend internals)
   diagrams/               Pipeline + data-model diagrams
-  spec_prose.md           Per-board catalog example walkthrough (damnation board)
   deployment-single-vm-cheap-plan.md   Operations: low-cost single-VM deployment
 ```
 
-For the backend internals, see [docs/architecture.md](docs/architecture.md) and the two diagrams under [docs/diagrams/](docs/diagrams/):
+For feature specs see [tech-spec/README.md](tech-spec/README.md). For backend internals, see [docs/architecture.md](docs/architecture.md) and the two diagrams under [docs/diagrams/](docs/diagrams/):
 
 - [diagrams/pipeline.md](docs/diagrams/pipeline.md) — backend pipeline (browser → route → JobRunner → adapters → pipeline ops → provider, with the asset-index DB hook)
 - [diagrams/data-model.md](docs/diagrams/data-model.md) — relational tables (users, ownership, catalog, asset history index, jobs, costs)

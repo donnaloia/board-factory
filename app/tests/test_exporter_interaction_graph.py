@@ -6,8 +6,8 @@ from boardfactory.boards import default_catalog_dict
 
 from domains.spaces import repository as spaces_repo
 
-from exporter.orchestrate import run_board_export
-from exporter.state import BoardExportOptions
+from domains.boards.exporter.orchestrate import run_board_export
+from domains.boards.exporter.state import BoardExportOptions
 
 
 def test_export_land_triggers_by_design_slug_db(isolated_repo, seeded_board, board_id):
@@ -37,12 +37,18 @@ def test_interaction_graph_explicit_map():
     g = res.project["interaction_graph"]
     assert len(g) == 1
     e = g[0]
+    assert e["id"] == "edge_land__top_battle__panel_right_mid"
     assert e["from_space_id"] == "space__top_battle__top_row_3"
+    assert e["from_space_ids"] == ["space__top_battle__top_row_3"]
+    assert e["trigger_space_design_id"] == "top_battle"
     assert e["to_space_id"] == "space_panel_panel_right_mid"
+    assert e["target_panel_id"] == "panel_right_mid"
     assert e["link_kind"] == "hidden_ui_route"
     assert e["trigger"]["event"] == "land"
-    assert e["trigger"]["actions"][0]["type"] == "play_space_animation"
-    assert e["trigger"]["actions"][0]["target_space_id"] == "space_panel_panel_right_mid"
+    act = e["trigger"]["actions"][0]
+    assert act["type"] == "play_space_animation"
+    assert act["target_space_id"] == "space_panel_panel_right_mid"
+    assert act["target_panel_id"] == "panel_right_mid"
 
 
 def test_interaction_graph_empty_override_skips_db():
@@ -84,6 +90,28 @@ def test_interaction_graph_errors_on_unknown_design():
     assert not res.ok
 
 
+def test_interaction_graph_lists_all_perimeter_tiles_for_design():
+    bid = "00000000-0000-4000-8000-0000000000cc"
+    cat = default_catalog_dict(bid, "G")
+    res = run_board_export(
+        bid,
+        cat,
+        options=BoardExportOptions(
+            land_triggers_design_to_panel={"top_space_c": "panel_left_top"},
+        ),
+    )
+    assert res.ok, res.errors
+    e = res.project["interaction_graph"][0]
+    assert e["trigger_space_design_id"] == "top_space_c"
+    assert e["target_panel_id"] == "panel_left_top"
+    assert set(e["from_space_ids"]) == {
+        "space__top_space_c__top_row_3",
+        "space__top_space_c__top_row_10",
+    }
+    assert e["from_space_id"] == e["from_space_ids"][0]
+    assert e["from_space_id"] == "space__top_space_c__top_row_10"
+
+
 def test_interaction_graph_from_db_after_patch(isolated_repo, seeded_board, board_id):
     from boardfactory import boards as bf_boards
 
@@ -100,5 +128,9 @@ def test_interaction_graph_from_db_after_patch(isolated_repo, seeded_board, boar
     assert res.ok, res.errors
     edges = res.project["interaction_graph"]
     assert len(edges) == 1
-    assert edges[0]["from_space_id"] == "space__corner_tl__top_row_0"
-    assert edges[0]["to_space_id"] == "space_panel_panel_left_top"
+    e = edges[0]
+    assert e["from_space_id"] == "space__corner_tl__top_row_0"
+    assert e["from_space_ids"] == ["space__corner_tl__top_row_0"]
+    assert e["trigger_space_design_id"] == "corner_tl"
+    assert e["to_space_id"] == "space_panel_panel_left_top"
+    assert e["target_panel_id"] == "panel_left_top"

@@ -39,9 +39,11 @@
         <span>Create account</span>
       </button>
     </form>
+    {% if not setup_required %}
     <div class="auth-foot">
       <a href="/login" class="auth-link">Already have an account? Sign in</a>
     </div>
+    {% endif %}
   </div>
 </main>
 </body>

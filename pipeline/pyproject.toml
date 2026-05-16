@@ -16,4 +16,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["boardfactory*"]
+# Ships the boardfactory pipeline + the sibling space_animations pipeline.
+# Each package is isolated (no cross-imports) per .cursorrules; this single
+# pyproject is just the install manifest so `pip install -e /repo/pipeline`
+# picks both up at once.
+include = ["boardfactory*", "space_animations*", "cardfactory*", "tokenfactory*"]

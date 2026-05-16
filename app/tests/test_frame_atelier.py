@@ -30,12 +30,24 @@ def _png_bytes(color=(80, 100, 60), size=(64, 64)) -> bytes:
     return buf.getvalue()
 
 
-def _seed_panel_live(board_id: str, panel_id: str, color=(80, 60, 40)) -> Path:
+def _seed_panel_live(
+    board_id: str,
+    panel_id: str,
+    color=(80, 60, 40),
+    *,
+    size=(260, 240),
+) -> Path:
+    """Write a live panel PNG at the catalog's ``target_size`` (default catalog uses 260×240).
+
+    ``spec_for_panel`` / mock inpaint require source and mask dimensions to match;
+    seeding a 64×64 file while the catalog asks for 260×240 makes ``draw_cell`` fail
+    silently (empty result) under Approach D.
+    """
     from infrastructure.files import workspace as fs_ws
 
     p = fs_ws.live_path(board_id, "panels", panel_id)
     p.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGBA", (64, 64), (*color, 255)).save(p)
+    Image.new("RGBA", size, (*color, 255)).save(p)
     return p
 
 
@@ -120,53 +132,54 @@ def _enable_frames_in_catalog(board_id: str) -> None:
     """Flip catalog.frame.enabled + apply_to_panels true for the test."""
     from domains.boards import services as svc_boards
 
-    data = svc_boards.load_catalog(board_id)
-    data.setdefault("frame", {})
-    data["frame"]["enabled"] = True
-    data["frame"]["apply_to_panels"] = True
-    svc_boards.save_catalog(board_id, data)
+    svc_boards.set_frame_flags(board_id, enabled=True, apply_to_panels=True)
 
 
 def test_reapply_to_panel_snapshots_pre_and_promotes_new(seeded_board):
-    from boardfactory import config as bf_config
     from boardfactory import assets as bf_assets
+    from boardfactory import config as bf_config
     from boardfactory.ops import (
         OP_FRAME_REWORK_PRE,
         reapply_to_panel,
     )
     from boardfactory.providers.pixel.mock import MockProvider
     from domains.boards import services as svc_boards
+    from domains.spaces.assets import repository as asset_index
 
     panel_id = "panel_left_top"
     _seed_panel_live(seeded_board.id, panel_id, color=(120, 60, 60))
     _seed_house_frame(seeded_board.id, ring_px=6)
     _enable_frames_in_catalog(seeded_board.id)
 
-    catalog = svc_boards.load_catalog_model(seeded_board.id)
-    provider = MockProvider()
+    bf_assets.register_asset_db_listener(asset_index.on_asset_event)
+    try:
+        catalog = svc_boards.load_catalog_model(seeded_board.id)
+        provider = MockProvider()
 
-    class _NoopSink:
-        def start(self, *_a, **_k): ...
-        def step(self, *_a, **_k): ...
-        def log(self, *_a, **_k): ...
+        class _NoopSink:
+            def start(self, *_a, **_k): ...
+            def step(self, *_a, **_k): ...
+            def log(self, *_a, **_k): ...
 
-    with bf_config.scope_board(seeded_board.id):
-        result = reapply_to_panel(catalog, panel_id, provider, _NoopSink())
+        with bf_config.scope_board(seeded_board.id):
+            result = reapply_to_panel(catalog, panel_id, provider, _NoopSink())
 
-        assert result.skipped is False
-        assert result.error is None
-        assert result.promoted_filename is not None
+            assert result.skipped is False
+            assert result.error is None
+            assert result.promoted_filename is not None
 
-        history = bf_assets.list_history("panels", panel_id)
-        # Newest entries first; we expect at least the snapshot + the new
-        # regen candidate(s).
-        ops = [h.operation for h in history]
-        assert OP_FRAME_REWORK_PRE in ops, (
-            "reapply_to_panel must snapshot the previous live with op "
-            "'frame_rework_pre' so the user can revert"
-        )
-        live_p = bf_assets.live_path("panels", panel_id)
-        assert live_p.exists()
+            history = bf_assets.list_history("panels", panel_id)
+            # Newest entries first; we expect at least the snapshot + the new
+            # regen candidate(s).
+            ops = [h.operation for h in history]
+            assert OP_FRAME_REWORK_PRE in ops, (
+                "reapply_to_panel must snapshot the previous live with op "
+                "'frame_rework_pre' so the user can revert"
+            )
+            live_p = bf_assets.live_path("panels", panel_id)
+            assert live_p.exists()
+    finally:
+        bf_assets._asset_db_listeners.clear()
 
 
 def test_reapply_to_panel_skipped_when_no_live(seeded_board):
@@ -195,14 +208,20 @@ def test_reapply_to_panel_skipped_when_no_live(seeded_board):
 # ────────────────────────── frame_reapply worker ──────────────────────────
 
 
-def test_frame_reapply_worker_processes_panels_with_cancel(seeded_board):
+def test_frame_reapply_worker_processes_panels_with_cancel(seeded_board, monkeypatch):
     """Smoke-test the job worker: stubs Job + cancel, runs end-to-end."""
     from collections import deque
 
     from boardfactory import config as bf_config
     from boardfactory.providers.pixel import mock as mock_provider
     from domains.boards import services as svc_boards
-    from jobs import pipeline_adapters
+    from domains.boards import pipeline_jobs
+
+    monkeypatch.setattr(
+        pipeline_jobs,
+        "_resolve_provider",
+        lambda *args, **kwargs: mock_provider.MockProvider(),
+    )
 
     _seed_panel_live(seeded_board.id, "panel_left_top", color=(120, 60, 60))
     _seed_house_frame(seeded_board.id, ring_px=6)
@@ -222,6 +241,26 @@ def test_frame_reapply_worker_processes_panels_with_cancel(seeded_board):
             self.error = None
             self.started_at = None
             self.ended_at = None
+            self.status = "running"
+
+        def to_dict(self):
+            """Shape expected by :meth:`jobs.runner.JobRunner._publish`."""
+            return {
+                "id": self.id,
+                "label": self.label,
+                "operation": self.operation,
+                "target": self.target,
+                "status": self.status,
+                "progress": round(self.progress, 3),
+                "eta_s": None,
+                "cost_estimate": round(self.cost_estimate, 4),
+                "cost_actual": round(self.cost_actual, 4),
+                "elapsed_s": 0.0,
+                "started_at": self.started_at,
+                "ended_at": self.ended_at,
+                "error": self.error,
+                "log_tail": list(self.log)[-12:],
+            }
 
     job = _FakeJob()
     cancel = threading.Event()
@@ -231,7 +270,7 @@ def test_frame_reapply_worker_processes_panels_with_cancel(seeded_board):
 
     # Run inside the per-board lock that the real route handler uses.
     with bf_config.scope_board(seeded_board.id):
-        spent = pipeline_adapters.frame_reapply(job, cancel)
+        spent = pipeline_jobs.frame_reapply(job, cancel)
 
     assert isinstance(spent, float)
     # The mock is free, so spent must be 0.

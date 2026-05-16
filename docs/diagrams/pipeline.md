@@ -18,7 +18,7 @@ flowchart TB
   subgraph Web["FastAPI process — app/"]
     Route["boards/routes_api.py<br/>POST …/actions/…"]:::http
     Deps["infrastructure/deps.enqueue_pipeline_job<br/>(wraps fn with config.scope_board)"]:::http
-    Adapter["pipeline_adapters.py<br/>analyze · style · generate_one ·<br/>generate_missing · generate_all ·<br/>clean_one · states · preview · export"]:::worker
+    Adapter["domains/boards/pipeline_jobs.py<br/>analyze · style · generate_one ·<br/>generate_missing · generate_all ·<br/>clean_one · states · preview · export"]:::worker
     Runner["jobs.JobRunner<br/>(asyncio + executor + SSE pub/sub)"]:::worker
     Sink["jobs.JobProgressSink<br/>(start · step · log)"]:::worker
   end
@@ -40,7 +40,7 @@ flowchart TB
   subgraph Storage["Persistence"]
     DB[("SQL database<br/>board_games · asset_versions ·<br/>job_runs · cost_entries · …")]:::store
     Disk[("BoardStore<br/>(local: data/boards/&lt;id&gt;/)<br/>workspace/style · live · history<br/>preview · export")]:::store
-    AssetIdx["services.asset_index<br/>on_asset_event listener"]:::worker
+    AssetIdx["spaces.assets.repository<br/>on_asset_event listener"]:::worker
   end
 
   Browser -- "POST" --> Route
@@ -74,25 +74,25 @@ flowchart TB
 |---|---|---|
 | **Browser** | Submits `POST /users/<u>/board-games/<slug>/actions/…`, then opens `/jobs/stream` (Server-Sent Events) for live progress. | `app/frontend/static/jobs.js`, `app/frontend/static/side-panel.js` |
 | **Route** | Auth check, request validation, builds the worker callable via `functools.partial`, calls `enqueue_pipeline_job`. Returns either a `303` redirect or `{job_id}` JSON depending on `Accept`. | `app/domains/boards/routes_api.py` |
-| **Job Runner** | One per process. Owns the in-memory job registry, dispatches each job to a worker thread (`run_in_executor`), supports cancel via `threading.Event`, and pubs status changes to all SSE subscribers. Persists terminal snapshots to `job_runs`. | `app/jobs.py`, `app/services/job_runs.py` |
-| **Adapter** | Plain functions matching the runner's `(job, cancel_event) → cost_usd` shape. Loads the catalog from the DB, validates the mockup, builds the provider, calls into the pipeline, records cost, surfaces logs into `job.log`. | `app/pipeline_adapters.py` |
+| **Job Runner** | One per process. Owns the in-memory job registry, dispatches each job to a worker thread (`run_in_executor`), supports cancel via `threading.Event`, and pubs status changes to all SSE subscribers. Persists terminal snapshots to `job_runs`. | `app/jobs/runner.py`, `app/jobs/repository.py` |
+| **Pipeline jobs** | Plain functions matching the runner's `(job, cancel_event) → cost_usd` shape. Load domain state, validate inputs, build the provider, call into `pipeline/*`, record cost, surface logs into `job.log`. Board workers live in `domains/boards/pipeline_jobs.py`; other factories use `domains/<feature>/pipeline_jobs.py`. | `app/domains/boards/pipeline_jobs.py` (board); `domains/cards/`, `domains/tokens/`, `domains/spaces/animations/` for siblings |
 | **Orchestrate** | "Generate everything missing" loops over `draw_cell` once per cell, advancing the outer progress bar between calls. | `pipeline/boardfactory/ops/orchestrate.py` |
 | **Draw cell** | The atomic generate operation: provider call (txt2img / img2img / inpaint per `DrawSpec.mode`) → palette quantize + grid snap → push every cleaned candidate into history → promote the winner as live. Same code path for spaces, panels, and the centerpiece. | `pipeline/boardfactory/ops/draw_cell.py` |
 | **Steps** | Step-shaped operations that aren't per-cell: `style_lock` (palette extraction), `states` (procedural active variants), `compositor` (board preview), `export` (engine manifest). | `pipeline/boardfactory/steps/` |
 | **Assets** | The on-disk asset model: write a PNG into `history/<cat>/<id>/`, copy to `live/<cat>/<id>.png`, restore from any history entry. Notifies registered DB listeners on every history push. | `pipeline/boardfactory/assets.py` |
 | **Provider** | Hosted img2img/txt2img/inpaint behind one Python interface. Selected per board via `catalog.generation.provider`. | `pipeline/boardfactory/providers/` |
-| **Asset index** | Listener that mirrors every history push as a row in `asset_versions` (with sha256, ts_ms, sidecar metadata). Wired in `boot.register_pipeline_hooks`. | `app/services/asset_index.py` |
+| **Asset index** | Listener that mirrors every history push as a row in `asset_versions` (with sha256, ts_ms, sidecar metadata). Wired in `boot.register_pipeline_hooks`. | `app/domains/spaces/assets/repository.py` (`on_asset_event`) |
 
 ## Per-job lifecycle
 
 1. The browser posts to a route under `/users/<username>/board-games/<path_slug>/actions/…`.
 2. The route ensures the requesting user owns the board, builds a `partial`
-   binding (e.g. `partial(pipeline_adapters.generate_one, category="spaces", asset_id=…)`),
+   binding (e.g. `partial(pipeline_jobs.generate_one, category="spaces", asset_id=…)`),
    and calls `deps.enqueue_pipeline_job`. The runner returns a job id immediately.
 3. `JobRunner._run` flips the job to `running`, schedules the worker thread,
    and publishes the new state to all SSE subscribers.
 4. Inside the worker thread, the adapter loads the catalog via
-   `services.board_definition.load_catalog_model(board_id)`, builds the
+   `domains.boards.services.load_catalog_model(board_id)`, builds the
    provider via `providers.factory.get_provider`, then calls the pipeline.
 5. As the pipeline runs, it calls `sink.start / step / log`. The sink mutates
    `job.progress` and `job.log` and re-publishes after every event, so the
@@ -119,7 +119,7 @@ flowchart TB
   time. This collapsed the old "every action exports two helpers (the
   closure factory + the callable)" pattern into one.
 - **Asset index as a listener, not a write path.** `assets.py` doesn't know
-  the database exists; `services.asset_index.on_asset_event` is registered
+  the database exists; `domains.spaces.assets.repository.on_asset_event` is registered
   at startup and is the only thing that turns a history push into a SQL
   row. Removing that listener leaves the pipeline fully functional from
   disk alone.

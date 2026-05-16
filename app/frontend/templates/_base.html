@@ -13,7 +13,27 @@
   <div id="global-progress" class="global-progress"></div>
 
   <header class="app-header">
-    <a href="/" class="brand-mark">Board Factory</a>
+    <div class="brand-switcher" data-brand-switcher>
+      <button type="button" class="brand-mark" id="brand-mark-trigger"
+              aria-haspopup="menu" aria-expanded="false">Board Factory</button>
+      <div class="brand-dropdown" role="menu" aria-hidden="true" id="brand-dropdown">
+        <a class="brand-dropdown-item" role="menuitem" data-domain="board" href="/">
+          <span class="brand-dropdown-dot" aria-hidden="true"></span>
+          <span class="brand-dropdown-label">Board Factory</span>
+          <span class="brand-dropdown-tag">boards</span>
+        </a>
+        <a class="brand-dropdown-item" role="menuitem" data-domain="token" href="/token-factory/">
+          <span class="brand-dropdown-dot" aria-hidden="true"></span>
+          <span class="brand-dropdown-label">Token Factory</span>
+          <span class="brand-dropdown-tag">sprites</span>
+        </a>
+        <a class="brand-dropdown-item" role="menuitem" data-domain="card" href="/card-factory/">
+          <span class="brand-dropdown-dot" aria-hidden="true"></span>
+          <span class="brand-dropdown-label">Card Factory</span>
+          <span class="brand-dropdown-tag">decks</span>
+        </a>
+      </div>
+    </div>
 
     {% block breadcrumb %}
     <nav class="section-path" aria-label="breadcrumb">
@@ -54,7 +74,6 @@
       </div>
 
       {% if board_base %}
-      <a class="header-link" href="{{ board_base }}/preview">Preview</a>
       <a class="header-link" href="{{ board_base }}/spec" target="_blank" rel="noopener">Tech spec</a>
       {% endif %}
 
@@ -80,7 +99,7 @@
   {# ───── Live job tray ───── #}
   <aside id="job-tray" class="job-tray is-empty" aria-live="polite">
     <div class="job-tray-head">
-      <span class="label">In flight</span>
+      <span class="label" id="job-tray-title">In flight</span>
       <span class="count"><span id="job-count">0</span></span>
     </div>
     <div class="job-tray-body" id="job-tray-body"></div>
@@ -255,6 +274,7 @@
 {% endif %}
 
 <script src="/static/jobs.js?v={{ asset_v('jobs.js') }}"></script>
+<script src="/static/brand-switcher.js?v={{ asset_v('brand-switcher.js') }}"></script>
 {% if user %}<script src="/static/account-modal.js?v={{ asset_v('account-modal.js') }}"></script>{% endif %}
 {% block scripts %}{% endblock %}
 </body>

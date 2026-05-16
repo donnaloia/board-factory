@@ -1,8 +1,8 @@
 """Canonical Card Factory canvas geometry (width × height, portrait).
 
-Layout templates under ``docs/card-factory/`` use *interior_normalized* rects; they do
+Layout templates under ``tech-spec/card-factory/`` use *interior_normalized* rects; they do
 not encode aspect ratio. The outer canvas aspect lives here and in
-``docs/card-factory/layout-schematic.svg`` — keep them in sync when changing ratio.
+``tech-spec/card-factory/layout-schematic.svg`` — keep them in sync when changing ratio.
 """
 
 from __future__ import annotations

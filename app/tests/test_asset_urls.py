@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from assets import services as asset_urls
+from domains.spaces.assets import services as asset_urls
 
 
 def test_board_asset_url_uses_millis_not_seconds():

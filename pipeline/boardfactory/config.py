@@ -22,7 +22,7 @@ they stay in sync.
 
 The board **catalog spec** lives entirely in the application database
 (``board_games`` columns + ``body_json``). The pipeline receives a
-validated ``Catalog`` model via ``app.pipeline_adapters``.
+validated ``Catalog`` model via ``domains.boards.pipeline_jobs`` (web app).
 
 The **active board id is stored per OS thread** (``threading.local()``).
 Paths resolved via ``config.WORKSPACE`` et al. always reflect that thread's

@@ -1,11 +1,11 @@
-"""Tests for ``app/exporter`` — geometry stage + orchestrator (no DB)."""
+"""Tests for ``domains.boards.exporter`` — geometry stage + orchestrator (no DB)."""
 
 from __future__ import annotations
 
 from boardfactory.boards import default_catalog_dict
 
-from exporter.orchestrate import EXPORT_STAGES, run_board_export
-from exporter.state import BoardExportOptions
+from domains.boards.exporter.orchestrate import EXPORT_STAGES, run_board_export
+from domains.boards.exporter.state import BoardExportOptions
 
 
 def test_export_default_catalog_top_battle_rect():
@@ -78,6 +78,7 @@ def test_export_stages_order():
         "stage_geometry",
         "stage_interaction_graph",
         "stage_asset_wiring",
+        "stage_animation_wiring",
         "stage_polish",
         "stage_write_project_json",
     ]

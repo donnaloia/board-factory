@@ -144,10 +144,20 @@ def isolated_repo(tmp_path, monkeypatch, _test_database_url):
     (repo / "data" / "boards").mkdir(parents=True)
     (repo / "workspace").mkdir(parents=True)
 
+    (repo / "data" / "decks").mkdir(parents=True, exist_ok=True)
+
     monkeypatch.setenv("BOARDFACTORY_REPO", str(repo))
     monkeypatch.setenv("BOARDFACTORY_PROVIDER", "mock")
+    # Pin space-animations and card-factory to offline mock providers —
+    # runtime default is "openai" but tests must never reach out to OpenAI.
+    monkeypatch.setenv("SPACE_ANIMATIONS_PROVIDER", "mock")
+    monkeypatch.setenv("CARD_FACTORY_PROVIDER", "mock")
+    monkeypatch.setenv("CARD_FACTORY_FINAL_UNIFY", "0")
+    monkeypatch.setenv("CARD_FACTORY_SINGLE_PASS_CARD", "0")
+    monkeypatch.setenv("TOKENFACTORY_PROVIDER", "mock")
     monkeypatch.setenv("BOARDFACTORY_DATABASE_URL", _test_database_url)
     monkeypatch.setenv("BOARDFACTORY_BOARDS_DIR", str(repo / "data" / "boards"))
+    monkeypatch.setenv("CARDFACTORY_DECKS_DIR", str(repo / "data" / "decks"))
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("PIXELLAB_API_KEY", raising=False)
 

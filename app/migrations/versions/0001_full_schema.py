@@ -1,15 +1,17 @@
-"""Single baseline schema (full ORM metadata).
+"""Single baseline schema — full current ORM.
 
 Revision ID: 0001_full_schema
 Revises:
-Create Date: 2026-05-02
+Create Date: 2026-05-16
 
-This replaces the prior multi-step migration chain. **New databases**: run
-``alembic upgrade head`` from ``app/`` against an empty Postgres instance.
+This is the single migration for the repository. It creates the complete
+current schema by reflecting all ORM models via ``Base.metadata.create_all``.
+There is no migration chain: new databases run ``alembic upgrade head`` once
+and they are at head.
 
-**Optional dev data:** restore a plain-SQL snapshot from ``db/snapshots/`` (see
-``db/snapshots/README.md``) — regenerate that dump after schema changes so its
-``alembic_version`` row matches ``0001_full_schema``.
+See ``postgres-snapshots/README.md`` for restoring an existing dev dataset.
+Add a new revision on top of this file when a schema change is needed going
+forward.
 
 Downgrade drops all application tables (destructive).
 """
@@ -30,26 +32,32 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.execute(sa.text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
-    from infrastructure.orm import Base
+    from infrastructure.orm import Base  # noqa: PLC0415
 
-    import auth.models  # noqa: F401
-    import jobs.models  # noqa: F401
-    import assets.models  # noqa: F401
-    import domains.boards.models  # noqa: F401
-    import domains.spaces.models  # noqa: F401
+    import auth.models  # noqa: F401, PLC0415
+    import jobs.models  # noqa: F401, PLC0415
+    import domains.spaces.assets.models  # noqa: F401, PLC0415
+    import domains.boards.models  # noqa: F401, PLC0415
+    import domains.spaces.models  # noqa: F401, PLC0415
+    import domains.spaces.animations.models  # noqa: F401, PLC0415
+    import domains.cards.models  # noqa: F401, PLC0415
+    import domains.tokens.models  # noqa: F401, PLC0415
 
     bind = op.get_bind()
     Base.metadata.create_all(bind)
 
 
 def downgrade() -> None:
-    from infrastructure.orm import Base
+    from infrastructure.orm import Base  # noqa: PLC0415
 
-    import auth.models  # noqa: F401
-    import jobs.models  # noqa: F401
-    import assets.models  # noqa: F401
-    import domains.boards.models  # noqa: F401
-    import domains.spaces.models  # noqa: F401
+    import auth.models  # noqa: F401, PLC0415
+    import jobs.models  # noqa: F401, PLC0415
+    import domains.spaces.assets.models  # noqa: F401, PLC0415
+    import domains.boards.models  # noqa: F401, PLC0415
+    import domains.spaces.models  # noqa: F401, PLC0415
+    import domains.spaces.animations.models  # noqa: F401, PLC0415
+    import domains.cards.models  # noqa: F401, PLC0415
+    import domains.tokens.models  # noqa: F401, PLC0415
 
     bind = op.get_bind()
     Base.metadata.drop_all(bind)
